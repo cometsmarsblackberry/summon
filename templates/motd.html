@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="{{ request.state.locale|default('en') }}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if reservation %}{{ site_name }} #{{ reservation.reservation_number }}{% else %}{{ site_name }}{% endif %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #f8fafc; color: #1e293b; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; }
+        .container { max-width: 420px; margin: 0 auto; padding: 24px 16px; }
+        .text-center { text-align: center; }
+        .brand { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .logo { max-width: 72px; max-height: 72px; width: auto; height: auto; object-fit: contain; border-radius: 16px; }
+        h1 { font-size: 18px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+        .subtitle { font-size: 13px; color: #64748b; }
+        .connection-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 20px; }
+        .connection-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .connection-heading { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .connection-picker { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+        .connection-select { min-width: 170px; max-width: 100%; background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+        .connection-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; background: #fff; color: #475569; border: 1px solid #cbd5e1; border-radius: 8px; cursor: pointer; }
+        .icon-button:hover { background: #f1f5f9; }
+        .icon-button svg { width: 16px; height: 16px; }
+        .icon-button.is-active { background: #e2e8f0; color: #0f172a; }
+        .copy-button.is-copied { background: #166534; border-color: #166534; color: #f8fafc; }
+        .icon-button span[hidden] { display: none; }
+        .connection-command { display: block; margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 12px; color: #334155; white-space: normal; word-break: break-word; }
+        .connection-command[hidden] { display: none; }
+        .info-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0; }
+        .info-row { display: table; width: 100%; padding: 4px 0; }
+        .info-label { display: table-cell; color: #64748b; }
+        .info-value { display: table-cell; text-align: right; font-weight: 500; }
+        .trivia { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin-top: 20px; }
+        .trivia-heading { font-size: 11px; font-weight: 600; color: #0369a1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .trivia-text { font-size: 13px; color: #0c4a6e; }
+        .not-found { padding: 64px 16px; text-align: center; color: #64748b; }
+        @media (max-width: 360px) {
+            .connection-picker { width: 100%; margin-left: 0; }
+            .connection-select { flex: 1; min-width: 0; }
+        }
+    </style>
+</head>
+
+<body>
+{% if reservation %}
+    <div class="container">
+        <div class="brand text-center">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" alt="{{ site_name }}" class="logo">
+            {% endif %}
+            <h1>{{ _('motd.welcome', site_name=site_name) }}</h1>
+            <p class="subtitle">{{ _('motd.reservation_label', number=reservation.reservation_number) }} &middot; {{ location_display }}</p>
+        </div>
+
+        {% if connection.sdr_ip or (connection.ip_address is defined and connection.ip_address) %}
+        {% if connection.sdr_ip %}
+        {% set sdr_command = 'connect ' ~ connection.sdr_ip ~ ':' ~ connection.sdr_port ~ '; password ' ~ connection.password %}
+        {% set sdr_stv_command = 'connect ' ~ connection.sdr_ip ~ ':' ~ (connection.sdr_port + 1) ~ '; password ' ~ connection.tv_password %}
+        {% endif %}
+        {% if connection.ip_address is defined and connection.ip_address %}
+        {% set direct_command = 'connect ' ~ connection.ip_address ~ ':27015; password ' ~ connection.password %}
+        {% set direct_stv_command = 'connect ' ~ connection.ip_address ~ ':27020; password ' ~ connection.tv_password %}
+        {% endif %}
+        {% set default_connection_type = 'connect' %}
+        {% set default_connection_command = sdr_command if connection.sdr_ip else '' %}
+        {% if connection.ip_address is defined and connection.ip_address %}
+        {% set default_connection_type = 'direct' %}
+        {% set default_connection_command = direct_command %}
+        {% endif %}
+        <div class="connection-panel">
+            <div class="connection-header">
+                <div class="connection-heading">{{ _('status.connection_details') }}</div>
+                <div class="connection-picker">
+                    <select class="connection-select" onchange="selectConnectionDetail(this)">
+                        {% if connection.sdr_ip %}
+                        <option value="connect" data-command="{{ sdr_command }}"{% if default_connection_type == 'connect' %} selected{% endif %}>{{ _('motd.copy_connect') }}</option>
+                        <option value="stv" data-command="{{ sdr_stv_command }}"{% if default_connection_type == 'stv' %} selected{% endif %}>{{ _('status.source_tv') }}</option>
+                        {% endif %}
+                        {% if connection.ip_address is defined and connection.ip_address %}
+                        <option value="direct" data-command="{{ direct_command }}"{% if default_connection_type == 'direct' %} selected{% endif %}>{{ _('motd.copy_direct_connect') }}</option>
+                        <option value="direct_stv" data-command="{{ direct_stv_command }}"{% if default_connection_type == 'direct_stv' %} selected{% endif %}>{{ _('status.direct_source_tv') }}</option>
+                        {% endif %}
+                    </select>
+                    <div class="connection-actions">
+                        <button
+                            type="button"
+                            class="icon-button"
+                            onclick="toggleConnectionCommand(this)"
+                            data-toggle-command="true"
+                            aria-expanded="false"
+                            aria-label="{{ _('motd.show_command') }}"
+                            title="{{ _('motd.show_command') }}"
+                            data-show-label="{{ _('motd.show_command') }}"
+                            data-hide-label="{{ _('motd.hide_command') }}">
+                            <span class="toggle-show">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M2.25 12s3.75-6.75 9.75-6.75S21.75 12 21.75 12 18 18.75 12 18.75 2.25 12 2.25 12Z"></path>
+                                    <circle cx="12" cy="12" r="3" stroke-width="1.8"></circle>
+                                </svg>
+                            </span>
+                            <span class="toggle-hide" hidden>
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 3l18 18"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.58 10.58A2 2 0 0 0 12 14a2 2 0 0 0 1.42-.58"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9.88 5.09A10.94 10.94 0 0 1 12 4.5c6 0 9.75 7.5 9.75 7.5a17.6 17.6 0 0 1-3.04 4.19"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6.61 6.61A17.75 17.75 0 0 0 2.25 12s3.75 7.5 9.75 7.5a10.9 10.9 0 0 0 4.21-.84"></path>
+                                </svg>
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            class="icon-button copy-button"
+                            data-command="{{ default_connection_command }}"
+                            data-copy-label="{{ _('status.copy') }}"
+                            data-copied-label="{{ _('motd.copied') }}"
+                            onclick="copyConnectionCommand(this)"
+                            aria-label="{{ _('status.copy') }}"
+                            title="{{ _('status.copy') }}">
+                            <span class="copy-default">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <rect x="9" y="9" width="11" height="11" rx="2" stroke-width="1.8"></rect>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                            </span>
+                            <span class="copy-success" hidden>
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 12 4 4L19 6"></path>
+                                </svg>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <code class="connection-command" data-connection-command hidden>{{ default_connection_command }}</code>
+        </div>
+        {% endif %}
+
+        <div class="info-card">
+            <div class="info-row">
+                <span class="info-label">{{ _('motd.map') }}</span>
+                <span class="info-value">{{ reservation.current_map or reservation.first_map }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">{{ _('motd.ends_at') }}</span>
+                <span class="info-value">{{ reservation.ends_at.strftime('%b %d, %Y %H:%M') }} UTC</span>
+            </div>
+        </div>
+
+        {% if trivia %}
+        <div class="trivia">
+            <p class="trivia-heading">{{ _('motd.did_you_know') }}</p>
+            <p class="trivia-text">{{ trivia }}</p>
+        </div>
+        {% endif %}
+    </div>
+{% else %}
+    <div class="not-found">
+        <p>{{ _('motd.not_available') }}</p>
+    </div>
+{% endif %}
+<script>
+function findParentWithClass(element, className) {
+    while (element && element !== document.body) {
+        if (element.classList && element.classList.contains(className)) {
+            return element;
+        }
+        element = element.parentNode;
+    }
+    return null;
+}
+
+function selectConnectionDetail(select) {
+    var panel = findParentWithClass(select, "connection-panel");
+    var option = select.options[select.selectedIndex];
+    var command = option ? option.getAttribute("data-command") : "";
+
+    if (!panel) {
+        return;
+    }
+
+    var commandElement = panel.querySelector("[data-connection-command]");
+    var copyButton = panel.querySelector(".copy-button");
+
+    if (commandElement) {
+        commandElement.textContent = command || "";
+    }
+
+    if (copyButton) {
+        copyButton.setAttribute("data-command", command || "");
+    }
+}
+
+function toggleConnectionCommand(button) {
+    var panel = findParentWithClass(button, "connection-panel");
+    if (!panel) {
+        return;
+    }
+
+    var command = panel.querySelector("[data-connection-command]");
+    var showIcon = button.querySelector(".toggle-show");
+    var hideIcon = button.querySelector(".toggle-hide");
+    var isOpening = command && command.hasAttribute("hidden");
+    var nextLabel = isOpening ? button.getAttribute("data-hide-label") : button.getAttribute("data-show-label");
+
+    if (!command) {
+        return;
+    }
+
+    if (isOpening) {
+        command.removeAttribute("hidden");
+    } else {
+        command.setAttribute("hidden", "");
+    }
+
+    if (showIcon && hideIcon) {
+        showIcon.hidden = isOpening;
+        hideIcon.hidden = !isOpening;
+    }
+
+    if (isOpening) {
+        button.classList.add("is-active");
+    } else {
+        button.classList.remove("is-active");
+    }
+    button.setAttribute("aria-expanded", isOpening ? "true" : "false");
+
+    if (nextLabel) {
+        button.setAttribute("aria-label", nextLabel);
+        button.setAttribute("title", nextLabel);
+    }
+}
+
+function copyConnectionCommand(button) {
+    var command = button.getAttribute("data-command");
+    if (!command) {
+        return;
+    }
+
+    function showCopiedState() {
+        var defaultLabel = button.querySelector(".copy-default");
+        var successLabel = button.querySelector(".copy-success");
+        var copyLabel = button.getAttribute("data-copy-label");
+        var copiedLabel = button.getAttribute("data-copied-label");
+
+        if (defaultLabel && successLabel) {
+            defaultLabel.hidden = true;
+            successLabel.hidden = false;
+        }
+
+        button.classList.add("is-copied");
+        if (copiedLabel) {
+            button.setAttribute("aria-label", copiedLabel);
+            button.setAttribute("title", copiedLabel);
+        }
+        window.clearTimeout(button._copyResetTimer);
+        button._copyResetTimer = window.setTimeout(function() {
+            if (defaultLabel && successLabel) {
+                defaultLabel.hidden = false;
+                successLabel.hidden = true;
+            }
+            button.classList.remove("is-copied");
+            if (copyLabel) {
+                button.setAttribute("aria-label", copyLabel);
+                button.setAttribute("title", copyLabel);
+            }
+        }, 2000);
+    }
+
+    function fallbackCopy(text) {
+        var textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.setAttribute("readonly", "");
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        textArea.style.pointerEvents = "none";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        try {
+            if (document.execCommand("copy")) {
+                showCopiedState();
+            }
+        } finally {
+            document.body.removeChild(textArea);
+        }
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(command).then(showCopiedState).catch(function() {
+            fallbackCopy(command);
+        });
+        return;
+    }
+
+    fallbackCopy(command);
+}
+</script>
+</body>
+
+</html>

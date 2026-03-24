@@ -1,0 +1,6 @@
+FROM caddy:2-alpine
+
+COPY caddy-entrypoint.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

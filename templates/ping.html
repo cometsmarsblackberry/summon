@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('ping.title') }}{% endblock %}
+{% block meta_description %}{{ _('ping.description') }}{% endblock %}
+{% block canonical %}{{ base_url }}/ping{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8" x-data="pingTest()" x-init="loadOrStart()">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold text-slate-900">{{ _('ping.heading') }}</h1>
+        <button
+            @click="start()"
+            :disabled="running"
+            class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+        >
+            <span x-show="!running">{{ _('ping.retest') }}</span>
+            <span x-show="running" x-cloak>{{ _('ping.testing') }}<span class="dots">...</span></span>
+        </button>
+    </div>
+    <p class="text-slate-500 text-sm mb-6">
+        {{ _('ping.intro') }}
+    </p>
+
+    <!-- Progress -->
+    <div x-show="running" x-cloak class="mb-4">
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+            <span x-text="currentLocation"></span>
+            <span x-text="tested + '/' + total"></span>
+        </div>
+        <div class="w-full bg-white rounded-full h-1.5">
+            <div class="bg-brand-500 h-1.5 rounded-full transition-all duration-300" :style="'width:' + (total ? (tested/total*100) : 0) + '%'"></div>
+        </div>
+    </div>
+
+    <!-- Results table -->
+    <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-slate-200 text-slate-500">
+                    <th class="text-left px-4 py-3 font-medium">{{ _('ping.col_rank') }}</th>
+                    <th class="text-left px-4 py-3 font-medium">{{ _('ping.col_location') }}</th>
+                    <th class="text-left px-4 py-3 font-medium hidden sm:table-cell">{{ _('ping.col_continent') }}</th>
+                    <th class="text-right px-4 py-3 font-medium">{{ _('ping.col_latency') }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="(loc, idx) in sorted" :key="loc.code">
+                    <tr class="border-b border-slate-200 hover:bg-slate-50">
+                        <td class="px-4 py-3 text-slate-400" x-text="idx + 1"></td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-slate-800" x-text="loc.name"></span>
+                                <span
+                                    x-show="loc.best"
+                                    x-cloak
+                                    class="px-1.5 py-0.5 text-xs font-medium rounded bg-green-100 text-green-800 border border-green-800"
+                                >{{ _('ping.best') }}</span>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-slate-500 hidden sm:table-cell" x-text="loc.continent"></td>
+                        <td class="px-4 py-3 text-right">
+                            <span x-show="loc.status === 'pending'" class="text-slate-300">&mdash;</span>
+                            <span x-show="loc.status === 'testing'" x-cloak class="text-slate-400">
+                                <svg class="inline-block w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                                </svg>
+                            </span>
+                            <span x-show="loc.status === 'done'" x-cloak :class="latencyColor(loc.ms)" class="font-medium tabular-nums">
+                                <span x-text="loc.ms + ' ms'"></span>
+                            </span>
+                            <span x-show="loc.status === 'error'" x-cloak class="text-red-600">{{ _('ping.error') }}</span>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Share results card -->
+    <div x-show="!running && tested > 0" x-cloak class="mt-4 bg-white rounded-lg border border-slate-200 p-4">
+        <template x-if="shareState === null">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                    <p class="text-sm font-medium text-slate-800">{{ _('ping.share_heading') }}</p>
+                    <p class="text-xs text-slate-500">{{ _('ping.share_description') }}</p>
+                </div>
+                <button
+                    @click="shareResults()"
+                    class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+                >{{ _('ping.share_button') }}</button>
+            </div>
+        </template>
+        <template x-if="shareState === 'submitting'">
+            <div class="flex items-center gap-2 text-sm text-slate-500">
+                <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                {{ _('ping.submitting') }}
+            </div>
+        </template>
+        <template x-if="shareState === 'success'">
+            <div class="text-sm text-green-800">
+                <p>{{ _('ping.share_thanks') }}</p>
+                <p class="mt-1">
+                    <a href="/stats?tab=ping" class="text-brand-700 hover:underline">{{ _('ping.view_results') }}</a>
+                </p>
+            </div>
+        </template>
+        <template x-if="shareState === 'error'">
+            <div class="flex items-center justify-between">
+                <p class="text-sm text-red-600" x-text="shareError"></p>
+                <button @click="shareState = null" class="text-xs text-slate-500 hover:text-slate-700 underline">{{ _('ping.try_again') }}</button>
+            </div>
+        </template>
+    </div>
+
+    <p class="text-slate-400 text-xs mt-4">
+        {{ _('ping.results_note') }}
+    </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function pingTest() {
+    const locations = {{ locations | tojson }};
+    const ROUNDS = 3;
+    const CACHE_KEY = 'ping_cache';
+    const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+    return {
+        results: {},
+        running: false,
+        tested: 0,
+        total: locations.length,
+        currentLocation: '',
+        shareState: null,
+        shareError: '',
+
+        init() {
+            for (const loc of locations) {
+                this.results[loc.code] = {
+                    ...loc,
+                    ms: null,
+                    status: 'pending',
+                    best: false,
+                };
+            }
+        },
+
+        get sorted() {
+            const arr = Object.values(this.results);
+            arr.sort((a, b) => {
+                if (a.status === 'done' && b.status === 'done') return a.ms - b.ms;
+                if (a.status === 'done') return -1;
+                if (b.status === 'done') return 1;
+                if (a.status === 'testing') return -1;
+                if (b.status === 'testing') return 1;
+                return 0;
+            });
+            // Mark best
+            let bestCode = null;
+            let bestMs = Infinity;
+            for (const r of arr) {
+                r.best = false;
+                if (r.status === 'done' && r.ms < bestMs) {
+                    bestMs = r.ms;
+                    bestCode = r.code;
+                }
+            }
+            for (const r of arr) {
+                if (r.code === bestCode) r.best = true;
+            }
+            return arr;
+        },
+
+        latencyColor(ms) {
+            if (ms < 50) return 'text-green-800';
+            if (ms < 100) return 'text-yellow-800';
+            if (ms < 200) return 'text-orange-600';
+            return 'text-red-600';
+        },
+
+        pingOnce(url) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const t0 = performance.now();
+                const done = () => { clearTimeout(timer); resolve(performance.now() - t0); };
+                const timer = setTimeout(() => { img.src = ''; resolve(Infinity); }, 5000);
+                img.onload = img.onerror = done;
+                img.src = `${url}?${Date.now()}`;
+            });
+        },
+
+        async pingLocation(loc) {
+            this.results[loc.code].status = 'testing';
+
+            // Warmup: establish DNS + TCP + TLS connection (discard timing)
+            await this.pingOnce(loc.ping_url);
+
+            let best = Infinity;
+            let ok = false;
+
+            for (let i = 0; i < ROUNDS; i++) {
+                try {
+                    const ms = await this.pingOnce(loc.ping_url);
+                    if (ms < best) { best = ms; ok = true; }
+                } catch {
+                    // round failed
+                }
+            }
+
+            if (ok) {
+                this.results[loc.code].ms = Math.round(best);
+                this.results[loc.code].status = 'done';
+            } else {
+                this.results[loc.code].status = 'error';
+            }
+            this.tested++;
+            this.saveCache(false);
+        },
+
+        saveCache(complete) {
+            try {
+                const data = {};
+                for (const [code, r] of Object.entries(this.results)) {
+                    if (r.status === 'done') data[code] = r.ms;
+                }
+                localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data, complete }));
+            } catch {}
+        },
+
+        loadOrStart() {
+            try {
+                const cached = JSON.parse(localStorage.getItem(CACHE_KEY));
+                if (cached && Date.now() - cached.ts < CACHE_TTL && cached.data) {
+                    let count = 0;
+                    for (const [code, ms] of Object.entries(cached.data)) {
+                        if (this.results[code]) {
+                            this.results[code].ms = ms;
+                            this.results[code].status = 'done';
+                            count++;
+                        }
+                    }
+                    this.tested = count;
+                    if (cached.complete !== false) return;
+                    this.resume(new Set(Object.keys(cached.data)));
+                    return;
+                }
+            } catch {}
+            this.start();
+        },
+
+        async resume(testedCodes) {
+            this.running = true;
+            this.shareState = null;
+            this.shareError = '';
+
+            const remaining = locations.filter(l => !testedCodes.has(l.code));
+            if (!remaining.length) {
+                this.running = false;
+                this.saveCache(true);
+                return;
+            }
+
+            // Prioritize best continent from existing results
+            let bestContinent = null, bestMs = Infinity;
+            for (const r of Object.values(this.results)) {
+                if (r.status === 'done' && r.ms < bestMs) {
+                    bestMs = r.ms;
+                    bestContinent = r.continent || 'Other';
+                }
+            }
+
+            const priority = remaining.filter(l => (l.continent || 'Other') === bestContinent);
+            const rest = remaining.filter(l => (l.continent || 'Other') !== bestContinent);
+            const ordered = [...priority, ...rest];
+
+            const BATCH = 5;
+            for (let i = 0; i < ordered.length; i += BATCH) {
+                const batch = ordered.slice(i, i + BATCH);
+                this.currentLocation = 'Testing ' + batch.map(l => l.name).join(', ');
+                await Promise.all(batch.map(loc => this.pingLocation(loc)));
+            }
+
+            this.running = false;
+            this.currentLocation = '';
+            this.saveCache(true);
+        },
+
+        async start() {
+            if (this.running) return;
+            this.running = true;
+            this.tested = 0;
+            this.shareState = null;
+            this.shareError = '';
+
+            // Reset all
+            for (const loc of locations) {
+                this.results[loc.code] = {
+                    ...loc,
+                    ms: null,
+                    status: 'pending',
+                    best: false,
+                };
+            }
+
+            // Group locations by continent
+            const byContinent = {};
+            for (const loc of locations) {
+                const c = loc.continent || 'Other';
+                (byContinent[c] ??= []).push(loc);
+            }
+
+            // Phase 1: pick first location from each continent, test in parallel
+            const scouts = Object.values(byContinent).map(locs => locs[0]);
+            this.currentLocation = 'Scouting continents...';
+            await Promise.all(scouts.map(loc => this.pingLocation(loc)));
+
+            // Find best continent
+            let bestContinent = null, bestMs = Infinity;
+            for (const loc of scouts) {
+                const r = this.results[loc.code];
+                if (r.status === 'done' && r.ms < bestMs) {
+                    bestMs = r.ms;
+                    bestContinent = loc.continent || 'Other';
+                }
+            }
+
+            // Phase 2: remaining from best continent first, then the rest
+            const testedCodes = new Set(scouts.map(l => l.code));
+            const remaining = locations.filter(l => !testedCodes.has(l.code));
+            const priority = remaining.filter(l => (l.continent || 'Other') === bestContinent);
+            const rest = remaining.filter(l => (l.continent || 'Other') !== bestContinent);
+            const ordered = [...priority, ...rest];
+
+            // Test in batches of 5
+            const BATCH = 5;
+            for (let i = 0; i < ordered.length; i += BATCH) {
+                const batch = ordered.slice(i, i + BATCH);
+                this.currentLocation = 'Testing ' + batch.map(l => l.name).join(', ');
+                await Promise.all(batch.map(loc => this.pingLocation(loc)));
+            }
+
+            this.running = false;
+            this.currentLocation = '';
+            this.saveCache(true);
+        },
+
+        async shareResults() {
+            this.shareState = 'submitting';
+            const payload = {};
+            for (const [code, r] of Object.entries(this.results)) {
+                if (r.status === 'done') payload[code] = r.ms;
+            }
+            try {
+                const resp = await fetch('/api/ping-results', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({results: payload}),
+                });
+                if (resp.ok) {
+                    this.shareState = 'success';
+                } else {
+                    const data = await resp.json().catch(() => ({}));
+                    this.shareError = data.error || 'Submission failed.';
+                    this.shareState = 'error';
+                }
+            } catch {
+                this.shareError = 'Network error.';
+                this.shareState = 'error';
+            }
+        },
+    };
+}
+</script>
+{% endblock %}

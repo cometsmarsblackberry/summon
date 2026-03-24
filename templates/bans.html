@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('bans.title') }}{% endblock %}
+{% block meta_description %}{{ _('bans.description') }}{% endblock %}
+{% block canonical %}{{ base_url }}/bans{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-6 text-slate-900">{{ _('bans.heading') }}</h1>
+
+    {% if bans %}
+    <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="text-xs text-slate-500 uppercase border-b border-slate-200 bg-slate-50">
+                <tr>
+                    <th class="text-left py-3 px-4">{{ _('bans.col_player') }}</th>
+                    <th class="text-left py-3 px-4">{{ _('bans.col_reason') }}</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200">
+                {% for ban in bans %}
+                <tr class="hover:bg-slate-50">
+                    <td class="py-3 px-4">
+                        <a href="https://steamcommunity.com/profiles/{{ ban.steam_id }}" target="_blank"
+                            class="text-brand-600 hover:underline">{{ ban.display_name }}</a>
+                    </td>
+                    <td class="py-3 px-4 text-slate-500">{{ ban.reason or _('bans.no_reason') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-white rounded-lg border border-slate-200 p-8 text-center text-slate-400">
+        {{ _('bans.no_bans') }}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

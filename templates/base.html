@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="{{ request.state.locale|default('en') }}">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ site_name }}{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}On-demand TF2 server reservations for competitive Team Fortress 2. Pre-loaded RGL and ETF2L configs, multiple global locations.{% endblock %}">
+    <link rel="canonical" href="{% block canonical %}{{ base_url }}/{% endblock %}">
+    {% if favicon_url %}<link rel="icon" href="{{ favicon_url }}">{% endif %}
+
+    <!-- Open Graph -->
+    <meta property="og:site_name" content="{{ site_name }}">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="{{ self.title() }}">
+    <meta property="og:description" content="{{ self.meta_description() }}">
+    <meta property="og:url" content="{{ self.canonical() }}">
+    {% if og_image_url %}<meta property="og:image" content="{{ og_image_url }}">{% endif %}
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ self.title() }}">
+    <meta name="twitter:description" content="{{ self.meta_description() }}">
+    {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
+
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="/static/css/tailwind.css">
+
+    <!-- Inter font (non-blocking) -->
+    <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
+    <link rel="preload" href="https://fonts.bunny.net/css?family=Inter:400,500,600,700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link href="https://fonts.bunny.net/css?family=Inter:400,500,600,700&display=swap" rel="stylesheet"></noscript>
+
+    <!-- Alpine.js -->
+    <script defer src="https://d1f8nxls7qx69o.cloudfront.net/assets/scripts/alpine.js/3.15.8/cdn.min.js"></script>
+
+    <!-- Structured data -->
+    {% block jsonld %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "{{ site_name }}",
+        "url": "{{ base_url }}/",
+        "description": "On-demand TF2 server reservations for competitive Team Fortress 2. Pre-loaded RGL and ETF2L configs, multiple global locations."
+    }
+    </script>
+    {% endblock %}
+
+    {% block head %}{% endblock %}
+</head>
+
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+    <!-- Header -->
+    <header class="border-b border-slate-200">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                {% if logo_url %}<img src="{{ logo_url }}" alt="" class="h-7 w-7">{% endif %}
+                <span class="text-lg font-semibold text-slate-600">{{ site_name }}</span>
+            </a>
+
+            <nav class="flex items-center gap-2 sm:gap-4">
+                {% if user %}
+                <a href="/my-reservations" class="text-sm text-slate-500 hover:text-slate-900">
+                    {{ _('nav.my_reservations') }}
+                </a>
+                {% if user.is_admin %}
+                <a href="/admin" class="text-sm text-slate-500 hover:text-slate-900">
+                    {{ _('nav.admin') }}
+                </a>
+                {% endif %}
+                <a href="/profile" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                    {% if user.avatar_url %}
+                    <img src="{{ user.avatar_url }}" alt="" class="w-6 h-6 rounded">
+                    {% endif %}
+                    <span class="text-sm text-slate-700 hidden sm:inline">{{ user.display_name }}</span>
+                </a>
+                <form method="post" action="/logout" class="inline">
+                    <button type="submit" class="text-sm text-slate-400 hover:text-slate-800 bg-transparent border-none cursor-pointer p-0">
+                        {{ _('nav.logout') }}
+                    </button>
+                </form>
+                {% else %}
+                <a href="/login" class="hover:opacity-80 transition-opacity">
+                    {% if login_image_url %}
+                    <img src="{{ login_image_url }}" alt="{{ _('nav.login_alt') }}" class="h-9 sm:hidden">
+                    {% endif %}
+                    {% if login_image_wide_url %}
+                    <img src="{{ login_image_wide_url }}" alt="{{ _('nav.login_alt') }}" class="h-8 hidden sm:block">
+                    {% elif not login_image_url %}
+                    <span class="text-sm text-slate-500 hover:text-slate-900">{{ _('nav.login_alt') }}</span>
+                    {% endif %}
+                </a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="flex-1">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-200 mt-auto">
+        <div class="max-w-4xl mx-auto px-4 py-4">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-0 text-sm text-slate-400">
+                <div class="flex items-center gap-3 sm:gap-4">
+                    <a href="/about" class="hover:text-slate-800">{{ _('footer.about') }}</a>
+                    <a href="/stats" class="hover:text-slate-800">{{ _('footer.stats') }}</a>
+                    {% if discord_url %}<a href="{{ discord_url }}" class="hover:text-slate-800">{{ _('footer.discord') }}</a>{% endif %}
+                    {% if privacy_available %}<a href="/privacy" class="hover:text-slate-800">{{ _('footer.privacy') }}</a>{% endif %}
+                </div>
+                <div class="flex items-center gap-3 sm:gap-4">
+                    <a href="/ping" class="hover:text-slate-800">
+                        {{ _('footer.ping_tagline') }}
+                    </a>
+                    <!-- Language switcher -->
+                    <form method="post" action="/set-language" class="inline flex items-center gap-1">
+                        <span class="text-slate-400">🌐</span>
+                        <select name="lang" onchange="this.form.submit()"
+                            class="bg-transparent text-slate-400 hover:text-slate-800 text-sm border-none cursor-pointer p-0 pr-3 appearance-none focus:outline-none"
+                            style="background-image: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2712%27 height=%2712%27 viewBox=%270 0 12 12%27%3E%3Cpath fill=%27%2394a3b8%27 d=%27M3 5l3 3 3-3%27/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right center;">
+                            {% for code in SUPPORTED_LOCALES %}
+                            <option value="{{ code }}" {% if request.state.locale|default('en') == code %}selected{% endif %}>
+                                {{ LOCALE_NAMES[code] }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

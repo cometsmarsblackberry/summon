@@ -1,0 +1,29 @@
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
+
+# HTTP client (for Vultr API, Steam API)
+httpx>=0.25.0
+
+# Templates and static files
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# SSE support
+sse-starlette>=1.8.0
+
+# Session management
+itsdangerous>=2.1.0
+
+# Configuration
+pydantic-settings>=2.0.0
+
+# Country code lookup
+pycountry>=24.6.1
+
+# Utilities
+python-dotenv>=1.0.0

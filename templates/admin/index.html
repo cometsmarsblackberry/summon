@@ -1,0 +1,1344 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - {{ site_name }}{% endblock %}
+
+{% block content %}
+<script>
+    var _adminLocations = {{ locations | tojson }};
+    var _adminMaps = {{ maps | tojson }};
+    var _adminTrivia = {{ trivia | tojson }};
+    var _adminUsers = {{ users | tojson }};
+    var _adminProviders = {{ providers | tojson }};
+    var _adminLocationProviders = {{ location_providers | tojson }};
+    var _adminReservations = {{ reservations | tojson }};
+    var _adminInstances = {{ instances | tojson }};
+    var _adminSettings = {
+        max_duration_hours: {{ reservation_settings.max_duration_hours }},
+        auto_end_minutes: {{ reservation_settings.auto_end_minutes }},
+        per_user_hour: {{ rate_limit_settings.per_user_hour }},
+        admin_per_hour: {{ rate_limit_settings.admin_per_hour }},
+        failed_multiplier: {{ rate_limit_settings.failed_multiplier }},
+        site_provisioning_max: {{ rate_limit_settings.site_provisioning_max }},
+        per_user_day: {{ rate_limit_settings.per_user_day }},
+        admin_per_day: {{ rate_limit_settings.admin_per_day }},
+        daily_hours_limit: {{ rate_limit_settings.daily_hours_limit }},
+        sitewide_per_hour: {{ rate_limit_settings.sitewide_per_hour }},
+        sitewide_per_day: {{ rate_limit_settings.sitewide_per_day }},
+        circuit_breaker_window_minutes: {{ rate_limit_settings.circuit_breaker_window_minutes }},
+        circuit_breaker_threshold: {{ rate_limit_settings.circuit_breaker_threshold }},
+        circuit_breaker_cooldown_minutes: {{ rate_limit_settings.circuit_breaker_cooldown_minutes }},
+        steam_min_account_age_days: {{ steam_trust_settings.min_account_age_days }},
+        steam_min_tf2_hours: {{ steam_trust_settings.min_tf2_hours }},
+        steam_require_tf2_ownership: {{ steam_trust_settings.require_tf2_ownership | tojson }},
+        steam_block_vac_banned: {{ steam_trust_settings.block_vac_banned | tojson }},
+        steam_require_public_profile: {{ steam_trust_settings.require_public_profile | tojson }},
+        captcha_enabled: {{ captcha_settings.enabled | tojson }},
+        captcha_trust_after_n: {{ captcha_settings.trust_after_n }},
+        captcha_min_tf2_hours: {{ captcha_settings.min_tf2_hours }},
+        captcha_min_account_age_days: {{ captcha_settings.min_account_age_days }},
+        fastdl_url: {{ fastdl_url | tojson }},
+    };
+
+    function adminPanel() {
+        return {
+            /* ── Tab state ── */
+            tab: 'dashboard',
+            init() {
+                const valid = ['dashboard','locations','providers','maps','trivia','users','settings'];
+                const hash = window.location.hash.slice(1);
+                if (valid.includes(hash)) this.tab = hash;
+                this.$watch('tab', v => { window.location.hash = v; });
+                this.$watch('locationSearch', () => { this.locPage = 1; });
+                this.$watch('mapSearch', () => { this.mapPage = 1; });
+                this.$watch('resSearch', () => { this.resPage = 1; });
+                this.$watch('userSearch', () => { this.userPage = 1; });
+                this.$watch('triviaSearch', () => { this.triviaPage = 1; });
+            },
+
+            /* ── Instances ── */
+            instances: _adminInstances,
+            async destroyInstance(id) {
+                if (!confirm('Force destroy this instance?')) return;
+                const res = await fetch('/admin/instances/' + id + '/destroy', { method: 'POST' });
+                if (res.ok) { this.instances = this.instances.filter(i => i.id !== id); }
+            },
+
+            /* ── Reservations ── */
+            allReservations: _adminReservations,
+            resSearch: '',
+            resPage: 1,
+            resPerPage: 20,
+            get filteredReservations() {
+                const q = this.resSearch.toLowerCase();
+                return this.allReservations.filter(r => !q
+                    || (r.user_name||'').toLowerCase().includes(q)
+                    || (r.location_name||r.location||'').toLowerCase().includes(q)
+                    || (r.status||'').toLowerCase().includes(q)
+                    || (r.first_map||'').toLowerCase().includes(q)
+                    || String(r.reservation_number).includes(q));
+            },
+            get resTotalPages() { return Math.max(1, Math.ceil(this.filteredReservations.length / this.resPerPage)); },
+            get paginatedReservations() {
+                const p = Math.min(this.resPage, this.resTotalPages);
+                return this.filteredReservations.slice((p - 1) * this.resPerPage, p * this.resPerPage);
+            },
+            statusClass(s) {
+                if (s === 'active') return 'bg-green-100 text-green-800';
+                if (s === 'provisioning') return 'bg-blue-100 text-blue-800';
+                if (s === 'failed') return 'bg-red-100 text-red-800';
+                return 'bg-slate-100 text-slate-500';
+            },
+
+            /* ── Locations ── */
+            allLocations: _adminLocations,
+            allLP: _adminLocationProviders,
+            locationSearch: '',
+            locPage: 1,
+            locPerPage: 10,
+            get filteredLocations() {
+                const q = this.locationSearch.toLowerCase();
+                return this.allLocations
+                    .filter(l => !q || (l.city||l.name||'').toLowerCase().includes(q) || (l.country||'').toLowerCase().includes(q))
+                    .sort((a, b) => (a.city||a.name||'').localeCompare(b.city||b.name||''));
+            },
+            get locTotalPages() { return Math.max(1, Math.ceil(this.filteredLocations.length / this.locPerPage)); },
+            get paginatedLocations() {
+                const p = Math.min(this.locPage, this.locTotalPages);
+                return this.filteredLocations.slice((p - 1) * this.locPerPage, p * this.locPerPage);
+            },
+            providersFor(locCode) {
+                return this.allLP.filter(lp => lp.location_code === locCode).sort((a, b) => a.priority - b.priority);
+            },
+            /* Location modal */
+            showLocModal: false,
+            locEditMode: false,
+            locEditCode: null,
+            locFormData: { code: '', name: '', provider: '', provider_region: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' },
+            get defaultProvider() { return this.providers[0]?.code || 'vultr'; },
+            openAddLoc() {
+                this.locFormData = { code: '', name: '', provider: this.defaultProvider, provider_region: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' };
+                this.locEditMode = false; this.locEditCode = null; this.showLocModal = true;
+            },
+            openEditLoc(loc) {
+                this.locFormData = {
+                    code: loc.code, name: loc.name, provider: loc.provider,
+                    provider_region: loc.provider_region,
+                    city: loc.city || '', country: loc.country || '', continent: loc.continent || '',
+                    subdivision: loc.subdivision || '',
+                    recommended: loc.recommended,
+                    instance_plan: loc.instance_plan || '',
+                    region_instance_limit: (loc.region_instance_limit == null) ? '' : String(loc.region_instance_limit),
+                };
+                this.locEditMode = true; this.locEditCode = loc.code; this.showLocModal = true;
+            },
+            async saveLoc() {
+                if (!this.locFormData.provider_region) { alert('Region ID is required'); return; }
+                if (this.locFormData.city && this.locFormData.country && !this.locFormData.name)
+                    this.locFormData.name = this.locFormData.city + ', ' + this.locFormData.country;
+                if (!this.locFormData.name) { alert('Display name is required'); return; }
+                if (!this.locFormData.code) { alert('Code is required'); return; }
+                const payload = { ...this.locFormData };
+                if (!payload.instance_plan) delete payload.instance_plan;
+                if (!payload.city) delete payload.city;
+                if (!payload.country) delete payload.country;
+                if (!payload.continent) delete payload.continent;
+                if (!payload.subdivision) delete payload.subdivision;
+                if (payload.region_instance_limit === '' || payload.region_instance_limit === null) {
+                    delete payload.region_instance_limit;
+                } else {
+                    const n = parseInt(payload.region_instance_limit, 10);
+                    if (!Number.isFinite(n) || n < 1) { alert('Region instance limit must be >= 1'); return; }
+                    payload.region_instance_limit = n;
+                }
+                const url = this.locEditMode ? '/admin/locations/' + this.locEditCode : '/admin/locations';
+                const method = this.locEditMode ? 'PUT' : 'POST';
+                const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok) { location.reload(); } else { const err = await res.json(); alert(err.detail || 'Error'); }
+            },
+            async deleteLoc(code) {
+                if (!confirm('Delete location ' + code + '?')) return;
+                const res = await fetch('/admin/locations/' + code, { method: 'DELETE' });
+                if (res.ok) { location.reload(); } else { const err = await res.json(); alert(err.detail || 'Error'); }
+            },
+            /* Location-provider modal */
+            showLPModal: false,
+            lpFormLocCode: '',
+            lpEditId: null,
+            lpFormData: { provider_code: '', provider_region: '', priority: 0, instance_plan: '', region_instance_limit: '' },
+            openAddLP(locCode) {
+                const existing = this.providersFor(locCode);
+                this.lpFormData = { provider_code: this.defaultProvider, provider_region: '', priority: existing.length > 0 ? Math.max(...existing.map(p => p.priority)) + 1 : 0, instance_plan: '', region_instance_limit: '' };
+                this.lpEditId = null; this.lpFormLocCode = locCode; this.showLPModal = true;
+            },
+            openEditLP(lp) {
+                this.lpFormLocCode = lp.location_code;
+                this.lpFormData = {
+                    provider_code: lp.provider_code, provider_region: lp.provider_region,
+                    priority: lp.priority, instance_plan: lp.instance_plan || '',
+                    region_instance_limit: (lp.region_instance_limit == null) ? '' : String(lp.region_instance_limit),
+                };
+                this.lpEditId = lp.id; this.showLPModal = true;
+            },
+            async saveLP() {
+                if (!this.lpFormData.provider_region) { alert('Region ID required'); return; }
+                const payload = { location_code: this.lpFormLocCode, ...this.lpFormData };
+                if (!payload.instance_plan) delete payload.instance_plan;
+                if (payload.region_instance_limit === '' || payload.region_instance_limit === null) {
+                    delete payload.region_instance_limit;
+                } else { payload.region_instance_limit = parseInt(payload.region_instance_limit, 10); }
+                payload.priority = parseInt(payload.priority, 10) || 0;
+                const url = this.lpEditId ? '/admin/location-providers/' + this.lpEditId : '/admin/location-providers';
+                const method = this.lpEditId ? 'PUT' : 'POST';
+                const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (res.ok) { location.reload(); } else { const err = await res.json(); alert(err.detail || 'Error'); }
+            },
+            async removeLP(id) {
+                if (!confirm('Remove this provider?')) return;
+                const res = await fetch('/admin/location-providers/' + id, { method: 'DELETE' });
+                if (res.ok) { location.reload(); } else { const err = await res.json(); alert(err.detail || 'Error'); }
+            },
+            async toggleLP(lp) {
+                const res = await fetch('/admin/location-providers/' + lp.id, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !lp.enabled })
+                });
+                if (res.ok) { lp.enabled = !lp.enabled; }
+            },
+            async resetSuspension(locCode, provCode) {
+                await fetch('/admin/provider-status/' + locCode + '/' + provCode + '/reset', { method: 'POST' });
+                location.reload();
+            },
+
+            /* ── Providers ── */
+            providers: _adminProviders,
+            showProviderModal: false,
+            editingProviderCode: null,
+            providerFormData: {},
+            async toggleProvider(p) {
+                const res = await fetch('/admin/providers/' + p.code, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !p.enabled })
+                });
+                if (res.ok) { p.enabled = !p.enabled; }
+            },
+            openEditProvider(p) {
+                this.providerFormData = { instance_plan: p.instance_plan, container_image: p.container_image, instance_limit: p.instance_limit };
+                this.editingProviderCode = p.code; this.showProviderModal = true;
+            },
+            async saveProvider() {
+                const res = await fetch('/admin/providers/' + this.editingProviderCode, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.providerFormData)
+                });
+                if (res.ok) { location.reload(); } else { const err = await res.json(); alert(err.detail || 'Error saving provider'); }
+            },
+
+            /* ── Maps ── */
+            allMaps: _adminMaps,
+            mapSearch: '',
+            mapPage: 1,
+            mapPerPage: 18,
+            showAddMap: false,
+            newMapName: '',
+            showBulkImport: false,
+            bulkMapText: '',
+            bulkImporting: false,
+            bulkResult: null,
+            get filteredMaps() {
+                const q = this.mapSearch.toLowerCase();
+                return this.allMaps.filter(m => !q || m.name.toLowerCase().includes(q));
+            },
+            get mapTotalPages() { return Math.max(1, Math.ceil(this.filteredMaps.length / this.mapPerPage)); },
+            get paginatedMaps() {
+                const p = Math.min(this.mapPage, this.mapTotalPages);
+                return this.filteredMaps.slice((p - 1) * this.mapPerPage, p * this.mapPerPage);
+            },
+            async addMap() {
+                if (!this.newMapName) return;
+                await fetch('/admin/maps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: this.newMapName, display_name: this.newMapName }) });
+                location.reload();
+            },
+            async bulkImportMaps() {
+                if (!this.bulkMapText.trim()) return;
+                this.bulkImporting = true;
+                this.bulkResult = null;
+                try {
+                    const res = await fetch('/admin/maps/bulk', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ maps_text: this.bulkMapText })
+                    });
+                    if (res.ok) {
+                        this.bulkResult = await res.json();
+                        if (this.bulkResult.added.length > 0) {
+                            setTimeout(() => location.reload(), 1500);
+                        }
+                    } else {
+                        const err = await res.json();
+                        this.bulkResult = { error: err.detail || 'Import failed' };
+                    }
+                } catch (e) {
+                    this.bulkResult = { error: 'Network error' };
+                }
+                this.bulkImporting = false;
+            },
+
+            /* ── Trivia ── */
+            allTrivia: _adminTrivia,
+            triviaSearch: '',
+            triviaPage: 1,
+            triviaPerPage: 20,
+            triviaFilterScope: '',
+            showAddTrivia: false,
+            newTriviaScope: 'city',
+            newTriviaKey: '',
+            newTriviaFact: '',
+            editingTrivia: null,
+            triviaKeysForScope(scope) {
+                const locs = _adminLocations;
+                let vals = [];
+                if (scope === 'city') vals = locs.map(l => l.city).filter(Boolean);
+                else if (scope === 'subdivision') vals = locs.map(l => l.subdivision).filter(Boolean);
+                else if (scope === 'country') vals = locs.map(l => l.country).filter(Boolean);
+                // Deduplicate by lowercase key, keep display-case label
+                const seen = new Map();
+                for (const v of vals) {
+                    const k = v.toLowerCase();
+                    if (!seen.has(k)) seen.set(k, v);
+                }
+                return [...seen.entries()]
+                    .sort((a, b) => a[1].localeCompare(b[1]))
+                    .map(([key, label]) => ({ key, label }));
+            },
+            get filteredTrivia() {
+                let items = this.allTrivia;
+                if (this.triviaFilterScope) items = items.filter(t => t.scope === this.triviaFilterScope);
+                const q = this.triviaSearch.toLowerCase();
+                if (q) items = items.filter(t => t.key.toLowerCase().includes(q) || t.fact.toLowerCase().includes(q));
+                return items;
+            },
+            get triviaTotalPages() { return Math.max(1, Math.ceil(this.filteredTrivia.length / this.triviaPerPage)); },
+            get paginatedTrivia() {
+                const p = Math.min(this.triviaPage, this.triviaTotalPages);
+                return this.filteredTrivia.slice((p - 1) * this.triviaPerPage, p * this.triviaPerPage);
+            },
+            async addTrivia() {
+                if (!this.newTriviaFact.trim()) return;
+                const res = await fetch('/admin/trivia', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope: this.newTriviaScope, key: this.newTriviaKey, fact: this.newTriviaFact })
+                });
+                if (res.ok) { const d = await res.json(); this.allTrivia.push(d); this.newTriviaFact = ''; }
+                else { const e = await res.json(); alert(e.detail || 'Error'); }
+            },
+            async deleteTrivia(id) {
+                if (!confirm('Delete this trivia fact?')) return;
+                const res = await fetch('/admin/trivia/' + id, { method: 'DELETE' });
+                if (res.ok) this.allTrivia = this.allTrivia.filter(t => t.id !== id);
+            },
+            startEditTrivia(t) {
+                this.editingTrivia = { id: t.id, scope: t.scope, key: t.key, fact: t.fact };
+            },
+            async saveEditTrivia() {
+                const e = this.editingTrivia;
+                const res = await fetch('/admin/trivia/' + e.id, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scope: e.scope, key: e.key, fact: e.fact })
+                });
+                if (res.ok) {
+                    const d = await res.json();
+                    const idx = this.allTrivia.findIndex(t => t.id === d.id);
+                    if (idx !== -1) this.allTrivia[idx] = d;
+                    this.editingTrivia = null;
+                } else { const err = await res.json(); alert(err.detail || 'Error'); }
+            },
+
+            /* ── Users ── */
+            allUsers: _adminUsers,
+            userSearch: '',
+            userPage: 1,
+            userPerPage: 20,
+            preBanSteamId: '',
+            get filteredUsers() {
+                const q = this.userSearch.toLowerCase();
+                return this.allUsers.filter(u => !q || u.display_name.toLowerCase().includes(q) || u.steam_id.includes(q));
+            },
+            get userTotalPages() { return Math.max(1, Math.ceil(this.filteredUsers.length / this.userPerPage)); },
+            get paginatedUsers() {
+                const p = Math.min(this.userPage, this.userTotalPages);
+                return this.filteredUsers.slice((p - 1) * this.userPerPage, p * this.userPerPage);
+            },
+            async preBan() {
+                const sid = this.preBanSteamId.trim();
+                if (!sid) return;
+                let reason = prompt('Ban reason (shown publicly):') || '';
+                try {
+                    const res = await fetch('/admin/users/pre-ban', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ steam_id: sid, reason })
+                    });
+                    if (!res.ok) { const e = await res.json(); throw e; }
+                    const d = await res.json();
+                    let existing = this.allUsers.find(u => u.steam_id === d.steam_id);
+                    if (existing) { existing.is_banned = true; existing.ban_reason = d.ban_reason || ''; }
+                    else { this.allUsers.unshift({ steam_id: d.steam_id, display_name: d.display_name, is_banned: true, ban_reason: d.ban_reason || '', is_admin: false, reservation_count: 0 }); }
+                    this.preBanSteamId = '';
+                } catch (e) { alert(e.detail || 'Failed to ban'); }
+            },
+
+            /* ── Settings ── */
+            settingsForm: { ..._adminSettings },
+            settingsSaved: false,
+            settingsOpen: { general: true, rates: false, circuit: false, steam: false, captcha: false },
+            async saveSettings() {
+                const res = await fetch('/admin/settings', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.settingsForm),
+                });
+                if (res.ok) { this.settingsSaved = true; setTimeout(() => this.settingsSaved = false, 2000); }
+                else { const err = await res.json(); alert(err.detail || 'Error saving settings'); }
+            },
+        };
+    }
+</script>
+
+<div x-data="adminPanel()" class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-xl font-semibold text-slate-900 mb-6">Admin Panel</h1>
+
+    <!-- ═══ Stats Cards (always visible) ═══ -->
+    <div class="grid gap-4 md:grid-cols-3 mb-6">
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Reservations</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-2xl font-semibold text-brand-400">{{ active_reservations }}</div>
+                    <div class="text-xs text-slate-400">Active</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-semibold text-slate-800">{{ total_reservations }}</div>
+                    <div class="text-xs text-slate-400">Total</div>
+                </div>
+            </div>
+        </div>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">This Month</h2>
+            {% if monthly_cost %}
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-2xl font-semibold text-green-800">${{ "%.2f"|format(monthly_cost.total_cost_usd) }}</div>
+                    <div class="text-xs text-slate-400">Cost</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-semibold text-slate-800">{{ monthly_cost.total_hours }}</div>
+                    <div class="text-xs text-slate-400">Hours</div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-slate-400 text-sm">No data yet</p>
+            {% endif %}
+        </div>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Instances</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="text-2xl font-semibold text-blue-600" x-text="instances.filter(i => i.is_available).length"></div>
+                    <div class="text-xs text-slate-400">Warm Pool</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-semibold text-slate-800" x-text="instances.length"></div>
+                    <div class="text-xs text-slate-400">Total</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Tab Navigation ═══ -->
+    <nav class="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
+        <template x-for="t in [
+            {id:'dashboard', label:'Dashboard'},
+            {id:'locations', label:'Locations'},
+            {id:'providers', label:'Providers'},
+            {id:'maps', label:'Maps'},
+            {id:'trivia', label:'Trivia'},
+            {id:'users', label:'Users'},
+            {id:'settings', label:'Settings'}
+        ]" :key="t.id">
+            <button @click="tab = t.id"
+                :class="tab === t.id ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
+                class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
+                x-text="t.label"></button>
+        </template>
+    </nav>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- DASHBOARD TAB                                               -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'dashboard'">
+
+        <!-- Active Instances -->
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4 mb-6">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Active Instances</h2>
+            <template x-if="instances.length === 0">
+                <p class="text-slate-400 text-sm">No active instances</p>
+            </template>
+            <div x-show="instances.length > 0" class="space-y-2 max-h-64 overflow-y-auto">
+                <template x-for="inst in instances" :key="inst.id">
+                    <div class="flex items-center justify-between py-2 border-b border-slate-200 last:border-0">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                                <code class="text-xs text-slate-700 truncate" x-text="inst.instance_id"></code>
+                                <template x-if="inst.is_available">
+                                    <span class="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-800 rounded">warm</span>
+                                </template>
+                            </div>
+                            <div class="text-xs text-slate-400">
+                                <span x-text="inst.location"></span> &bull;
+                                <span x-text="inst.ip_address || 'No IP'"></span>
+                                <template x-if="inst.minutes_until_billing">
+                                    <span x-text="' &bull; ' + inst.minutes_until_billing + 'm left'"></span>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-2 py-0.5 text-xs rounded"
+                                :class="inst.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'"
+                                x-text="inst.status"></span>
+                            <button @click="destroyInstance(inst.id)"
+                                class="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200">Destroy</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Recent Reservations -->
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">Recent Reservations</h2>
+                <input x-model="resSearch" placeholder="Search reservations..."
+                    class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-48">
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-xs text-slate-500 uppercase border-b border-slate-200">
+                        <tr>
+                            <th class="text-left py-2 px-1.5">#</th>
+                            <th class="text-left py-2 px-1.5">User</th>
+                            <th class="text-left py-2 px-1.5">Location</th>
+                            <th class="text-left py-2 px-1.5">Map</th>
+                            <th class="text-left py-2 px-1.5">Status</th>
+                            <th class="text-left py-2 px-1.5">IP</th>
+                            <th class="text-left py-2 px-1.5">Created</th>
+                            <th class="text-center py-2 px-1.5"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <template x-for="r in paginatedReservations" :key="r.id">
+                            <tr class="hover:bg-slate-50">
+                                <td class="py-2 px-1.5 text-slate-700" :title="r.instance_id ? 'Instance: ' + r.instance_id : ''" x-text="r.reservation_number"></td>
+                                <td class="py-2 px-1.5 max-w-[7rem] truncate">
+                                    <a :href="'https://steamcommunity.com/profiles/' + r.user_steam_id" target="_blank"
+                                        class="text-brand-400 hover:underline" x-text="r.user_name"></a>
+                                </td>
+                                <td class="py-2 px-1.5 text-slate-700" x-text="r.location_name || r.location"></td>
+                                <td class="py-2 px-1.5 text-slate-500 max-w-[7rem] truncate" :title="r.first_map" x-text="r.first_map"></td>
+                                <td class="py-2 px-1.5">
+                                    <span class="px-1.5 py-0.5 text-xs rounded" :class="statusClass(r.status)" x-text="r.status"></span>
+                                </td>
+                                <td class="py-2 px-1.5 font-mono text-xs text-slate-700" :title="r.sdr_ip ? 'SDR: ' + r.sdr_ip : ''" x-text="r.ip_address || '-'"></td>
+                                <td class="py-2 px-1.5 text-slate-400 text-xs" x-text="r.created_at ? r.created_at.substring(0,10) : '-'"></td>
+                                <td class="py-2 px-1.5 text-center">
+                                    <template x-if="r.status === 'active' || r.status === 'provisioning'">
+                                        <button @click="if(confirm('End reservation #' + r.reservation_number + '?')) fetch('/api/reservations/' + r.id + '/end', {method:'POST'}).then(()=>location.reload())"
+                                            class="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200">End</button>
+                                    </template>
+                                    <template x-if="r.status !== 'active' && r.status !== 'provisioning'">
+                                        <span class="text-slate-300">-</span>
+                                    </template>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="resTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(resPage,resTotalPages)-1)*resPerPage+1) + '\u2013' + Math.min(Math.min(resPage,resTotalPages)*resPerPage, filteredReservations.length) + ' of ' + filteredReservations.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="resPage = 1" :disabled="resPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="resPage--" :disabled="resPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(resPage,resTotalPages) + ' / ' + resTotalPages"></span>
+                    <button @click="resPage++" :disabled="resPage >= resTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="resPage = resTotalPages" :disabled="resPage >= resTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- LOCATIONS TAB                                               -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'locations'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">Locations</h2>
+                <div class="flex items-center gap-2">
+                    <input x-model="locationSearch" placeholder="Search locations..."
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-48">
+                    <button @click="openAddLoc()" class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded whitespace-nowrap">+ Add Location</button>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <template x-for="loc in paginatedLocations" :key="loc.code">
+                    <div class="bg-slate-50 rounded-lg p-2" :class="loc.enabled ? '' : 'opacity-50'">
+                        <!-- Location header -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-1.5 flex-wrap">
+                                    <span class="text-slate-800 font-medium text-sm" x-text="loc.city || loc.name"></span>
+                                    <span class="text-xs text-slate-500" x-show="loc.country" x-text="loc.country"></span>
+                                    <span class="text-xs text-yellow-800" x-show="loc.recommended">SDR</span>
+                                    <span class="text-xs text-slate-400" x-show="loc.continent" x-text="loc.continent"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <button @click="openEditLoc(loc)" class="text-xs text-slate-500 hover:text-slate-900">edit</button>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" class="sr-only peer" :checked="loc.enabled"
+                                        @change="fetch('/admin/locations/' + loc.code + '/toggle', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$event.target.checked})})">
+                                    <div class="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-3 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+                                </label>
+                                <button @click="deleteLoc(loc.code)" class="text-xs text-red-500 hover:text-red-700">&times;</button>
+                            </div>
+                        </div>
+                        <!-- Inline providers list -->
+                        <div class="mt-1 ml-2 border-l-2 border-slate-200 pl-2 space-y-0.5">
+                            <template x-for="lp in providersFor(loc.code)" :key="lp.id">
+                                <div class="flex items-center justify-between py-0.5 text-xs group" :class="lp.enabled ? '' : 'opacity-40'">
+                                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                                        <span class="font-mono text-slate-400 w-3 text-right" x-text="lp.priority"></span>
+                                        <span class="font-medium text-slate-700" x-text="lp.provider_code"></span>
+                                        <span class="text-slate-400" x-text="lp.provider_region"></span>
+                                        <span x-show="lp.instance_plan" class="text-slate-400" x-text="'(' + lp.instance_plan + ')'"></span>
+                                        <template x-if="lp.suspended">
+                                            <span class="bg-red-100 text-red-700 px-1 py-0.5 rounded">
+                                                suspended <span x-text="Math.ceil(lp.suspended_remaining_seconds / 60) + 'm'"></span>
+                                                <button @click="resetSuspension(lp.location_code, lp.provider_code)"
+                                                    class="ml-0.5 underline hover:text-red-900">reset</button>
+                                            </span>
+                                        </template>
+                                        <template x-if="!lp.suspended && lp.failures > 0">
+                                            <span class="bg-yellow-100 text-yellow-700 px-1 py-0.5 rounded" x-text="lp.failures + ' fail'"></span>
+                                        </template>
+                                    </div>
+                                    <div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button @click="openEditLP(lp)" class="text-slate-400 hover:text-slate-700">edit</button>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" class="sr-only peer" :checked="lp.enabled" @change="toggleLP(lp)">
+                                            <div class="w-6 h-3 bg-slate-200 rounded-full peer peer-checked:after:translate-x-3 peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-brand-600"></div>
+                                        </label>
+                                        <button @click="removeLP(lp.id)" class="text-red-400 hover:text-red-600">&times;</button>
+                                    </div>
+                                </div>
+                            </template>
+                            <button @click="openAddLP(loc.code)" class="text-xs text-brand-600 hover:text-brand-400 py-0.5">+ add provider</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="locTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(locPage,locTotalPages)-1)*locPerPage+1) + '\u2013' + Math.min(Math.min(locPage,locTotalPages)*locPerPage, filteredLocations.length) + ' of ' + filteredLocations.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="locPage = 1" :disabled="locPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="locPage--" :disabled="locPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(locPage,locTotalPages) + ' / ' + locTotalPages"></span>
+                    <button @click="locPage++" :disabled="locPage >= locTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="locPage = locTotalPages" :disabled="locPage >= locTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- PROVIDERS TAB                                               -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'providers'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">Providers</h2>
+            <div class="space-y-2">
+                <template x-for="p in providers" :key="p.code">
+                    <div class="py-3 px-3 bg-slate-50 rounded-lg" :class="p.enabled ? '' : 'opacity-50'">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="text-slate-800 font-medium text-sm" x-text="p.name"></span>
+                                <span class="text-xs px-1.5 py-0.5 rounded"
+                                    :class="p.billing_model === 'hourly' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'"
+                                    x-text="p.billing_model"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button @click="openEditProvider(p)" class="text-xs text-slate-500 hover:text-slate-900">edit</button>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" class="sr-only peer" :checked="p.enabled" @change="toggleProvider(p)">
+                                    <div class="w-8 h-4 bg-slate-300 peer-checked:bg-green-500 rounded-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-full"></div>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="text-xs text-slate-400 mt-1">
+                            Plan: <code x-text="p.instance_plan"></code> &bull;
+                            Image: <code x-text="p.container_image"></code> &bull;
+                            Limit: <span x-text="p.instance_limit || 'none'"></span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- MAPS TAB                                                    -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'maps'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">Map Pool</h2>
+                <div class="flex items-center gap-2">
+                    <input x-model="mapSearch" placeholder="Search maps..."
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-40">
+                    <button @click="showBulkImport = !showBulkImport; showAddMap = false"
+                        class="px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 rounded">Bulk Import</button>
+                    <button @click="showAddMap = !showAddMap; showBulkImport = false"
+                        class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded">+ Add Map</button>
+                </div>
+            </div>
+
+            <!-- Inline add form -->
+            <div x-show="showAddMap" class="mb-3 p-2 bg-slate-100 rounded-lg flex gap-2" x-cloak>
+                <input x-model="newMapName" placeholder="Map name (e.g., cp_process_f12)"
+                    class="flex-1 px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800"
+                    @keydown.enter="addMap()">
+                <button @click="addMap()" class="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 rounded">Add</button>
+            </div>
+
+            <!-- Bulk import form -->
+            <div x-show="showBulkImport" class="mb-3 p-3 bg-slate-100 rounded-lg" x-cloak>
+                <label class="block text-xs text-slate-600 mb-1">One map name per line (without .bsp extension)</label>
+                <textarea x-model="bulkMapText" rows="8"
+                    placeholder="cp_process_f12&#10;cp_snakewater_final1&#10;cp_gullywash_f9&#10;koth_product_final"
+                    class="w-full px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 font-mono"></textarea>
+                <div class="flex items-center justify-between mt-2">
+                    <span class="text-xs text-slate-500" x-text="bulkMapText.trim() ? bulkMapText.trim().split('\n').filter(l => l.trim()).length + ' map(s)' : ''"></span>
+                    <button @click="bulkImportMaps()" :disabled="bulkImporting || !bulkMapText.trim()"
+                        class="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!bulkImporting">Import</span>
+                        <span x-show="bulkImporting" x-cloak>Importing...</span>
+                    </button>
+                </div>
+                <div x-show="bulkResult" class="mt-2 text-xs" x-cloak>
+                    <template x-if="bulkResult && bulkResult.error">
+                        <p class="text-red-600" x-text="bulkResult.error"></p>
+                    </template>
+                    <template x-if="bulkResult && !bulkResult.error">
+                        <p class="text-slate-700">
+                            <span class="text-green-700" x-text="bulkResult.added.length + ' added'"></span>
+                            <template x-if="bulkResult.skipped.length > 0">
+                                <span class="text-amber-600" x-text="', ' + bulkResult.skipped.length + ' skipped (already exist)'"></span>
+                            </template>
+                        </p>
+                    </template>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1">
+                <template x-for="map in paginatedMaps" :key="map.id">
+                    <div class="flex items-center justify-between py-1 px-2 bg-slate-50 rounded text-sm"
+                        :class="map.enabled ? '' : 'opacity-50'">
+                        <span class="text-slate-800 truncate">
+                            <span x-text="map.name"></span>
+                        </span>
+                        <div class="flex items-center gap-2">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" class="sr-only peer" :checked="map.enabled" @change="
+                                    fetch('/admin/maps/' + map.id + '/toggle', {
+                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ enabled: $event.target.checked })
+                                    }).then(()=>location.reload())
+                                ">
+                                <div class="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+                            </label>
+                            <button @click="if(confirm('Delete?')) fetch('/admin/maps/' + map.id, {method:'DELETE'}).then(()=>location.reload())"
+                                class="text-xs text-red-500 hover:text-red-700">&times;</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="mapTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(mapPage,mapTotalPages)-1)*mapPerPage+1) + '\u2013' + Math.min(Math.min(mapPage,mapTotalPages)*mapPerPage, filteredMaps.length) + ' of ' + filteredMaps.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="mapPage = 1" :disabled="mapPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="mapPage--" :disabled="mapPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(mapPage,mapTotalPages) + ' / ' + mapTotalPages"></span>
+                    <button @click="mapPage++" :disabled="mapPage >= mapTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="mapPage = mapTotalPages" :disabled="mapPage >= mapTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- TRIVIA TAB                                                  -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'trivia'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">
+                    Trivia Facts
+                    <span class="text-xs font-normal text-slate-400 ml-1" x-text="'(' + allTrivia.length + ' total)'"></span>
+                </h2>
+                <div class="flex items-center gap-2">
+                    <select x-model="triviaFilterScope"
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <option value="">All scopes</option>
+                        <option value="city">City</option>
+                        <option value="subdivision">Subdivision</option>
+                        <option value="country">Country</option>
+                        <option value="generic">Generic</option>
+                    </select>
+                    <input x-model="triviaSearch" placeholder="Search trivia..."
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-48">
+                    <button @click="showAddTrivia = !showAddTrivia"
+                        class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded">+ Add Fact</button>
+                </div>
+            </div>
+
+            <!-- Add trivia form -->
+            <div x-show="showAddTrivia" class="mb-3 p-3 bg-slate-100 rounded-lg" x-cloak>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-2">
+                    <div>
+                        <label class="block text-xs text-slate-600 mb-1">Scope</label>
+                        <select x-model="newTriviaScope"
+                            class="w-full px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <option value="city">City</option>
+                            <option value="subdivision">Subdivision</option>
+                            <option value="country">Country</option>
+                            <option value="generic">Generic</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-600 mb-1">Key</label>
+                        <select x-model="newTriviaKey"
+                            :disabled="newTriviaScope === 'generic'"
+                            x-effect="if (newTriviaScope === 'generic') newTriviaKey = ''; else if (!triviaKeysForScope(newTriviaScope).some(o => o.key === newTriviaKey)) newTriviaKey = ''"
+                            class="w-full px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 disabled:opacity-50">
+                            <option value="">— Select —</option>
+                            <template x-for="opt in triviaKeysForScope(newTriviaScope)" :key="opt.key">
+                                <option :value="opt.key" x-text="opt.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-xs text-slate-600 mb-1">Fact</label>
+                        <div class="flex gap-2">
+                            <input x-model="newTriviaFact" placeholder="Enter a trivia fact..."
+                                class="flex-1 px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800"
+                                @keydown.enter="addTrivia()">
+                            <button @click="addTrivia()" class="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 rounded">Add</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit trivia modal -->
+            <div x-show="editingTrivia" class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg" x-cloak>
+                <div class="text-xs font-medium text-amber-700 mb-2">Editing fact #<span x-text="editingTrivia?.id"></span></div>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <div>
+                        <select x-model="editingTrivia.scope"
+                            class="w-full px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <option value="city">City</option>
+                            <option value="subdivision">Subdivision</option>
+                            <option value="country">Country</option>
+                            <option value="generic">Generic</option>
+                        </select>
+                    </div>
+                    <div>
+                        <select x-model="editingTrivia.key"
+                            :disabled="editingTrivia?.scope === 'generic'"
+                            x-effect="if (editingTrivia?.scope === 'generic') editingTrivia.key = ''"
+                            class="w-full px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 disabled:opacity-50">
+                            <option value="">— Select —</option>
+                            <template x-if="editingTrivia?.key && !triviaKeysForScope(editingTrivia?.scope).some(o => o.key === editingTrivia.key)">
+                                <option :value="editingTrivia.key" x-text="editingTrivia.key + ' (custom)'"></option>
+                            </template>
+                            <template x-for="opt in triviaKeysForScope(editingTrivia?.scope)" :key="opt.key">
+                                <option :value="opt.key" x-text="opt.label"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <div class="flex gap-2">
+                            <input x-model="editingTrivia.fact"
+                                class="flex-1 px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800"
+                                @keydown.enter="saveEditTrivia()">
+                            <button @click="saveEditTrivia()" class="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 rounded">Save</button>
+                            <button @click="editingTrivia = null" class="px-3 py-1 text-xs bg-slate-400 hover:bg-slate-300 rounded">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trivia table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs text-slate-500 uppercase border-b border-slate-200">
+                            <th class="py-1 px-2 w-24">Scope</th>
+                            <th class="py-1 px-2 w-32">Key</th>
+                            <th class="py-1 px-2">Fact</th>
+                            <th class="py-1 px-2 w-20 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="t in paginatedTrivia" :key="t.id">
+                            <tr class="border-b border-slate-100 hover:bg-slate-50">
+                                <td class="py-1.5 px-2">
+                                    <span class="inline-block px-1.5 py-0.5 text-xs rounded"
+                                        :class="{
+                                            'bg-blue-100 text-blue-700': t.scope === 'city',
+                                            'bg-purple-100 text-purple-700': t.scope === 'subdivision',
+                                            'bg-green-100 text-green-700': t.scope === 'country',
+                                            'bg-slate-100 text-slate-600': t.scope === 'generic'
+                                        }"
+                                        x-text="t.scope"></span>
+                                </td>
+                                <td class="py-1.5 px-2 text-slate-700 font-mono text-xs" x-text="t.key || '—'"></td>
+                                <td class="py-1.5 px-2 text-slate-800" x-text="t.fact"></td>
+                                <td class="py-1.5 px-2 text-right">
+                                    <button @click="startEditTrivia(t)" class="text-xs text-brand-600 hover:text-brand-800 mr-1">Edit</button>
+                                    <button @click="deleteTrivia(t.id)" class="text-xs text-red-500 hover:text-red-700">&times;</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty state -->
+            <div x-show="filteredTrivia.length === 0" class="text-center py-8 text-sm text-slate-400" x-cloak>
+                No trivia facts found. Add some to show on MOTD pages.
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="triviaTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(triviaPage,triviaTotalPages)-1)*triviaPerPage+1) + '\u2013' + Math.min(Math.min(triviaPage,triviaTotalPages)*triviaPerPage, filteredTrivia.length) + ' of ' + filteredTrivia.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="triviaPage = 1" :disabled="triviaPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="triviaPage--" :disabled="triviaPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(triviaPage,triviaTotalPages) + ' / ' + triviaTotalPages"></span>
+                    <button @click="triviaPage++" :disabled="triviaPage >= triviaTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="triviaPage = triviaTotalPages" :disabled="triviaPage >= triviaTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- USERS TAB                                                   -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'users'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">Users</h2>
+                <div class="flex items-center gap-2">
+                    <form class="flex items-center gap-1" @submit.prevent="preBan()">
+                        <input x-model="preBanSteamId" placeholder="Ban by Steam ID..."
+                            class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-44 font-mono">
+                        <button type="submit" class="px-2 py-1 text-xs font-medium bg-red-600 text-white rounded hover:bg-red-700">Ban</button>
+                    </form>
+                    <input x-model="userSearch" placeholder="Search users..."
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-48">
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-xs text-slate-500 uppercase border-b border-slate-200">
+                        <tr>
+                            <th class="text-left py-2 px-2">Name</th>
+                            <th class="text-left py-2 px-2">Steam ID</th>
+                            <th class="text-center py-2 px-2">Reservations</th>
+                            <th class="text-center py-2 px-2">Admin</th>
+                            <th class="text-center py-2 px-2">Banned</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <template x-for="u in paginatedUsers" :key="u.steam_id">
+                            <tr class="hover:bg-slate-50" :class="u.is_banned ? 'bg-red-50' : ''">
+                                <td class="py-2 px-2">
+                                    <a :href="'https://steamcommunity.com/profiles/' + u.steam_id" target="_blank"
+                                        class="text-brand-400 hover:underline" x-text="u.display_name"></a>
+                                </td>
+                                <td class="py-2 px-2 text-slate-500 font-mono text-xs" x-text="u.steam_id"></td>
+                                <td class="py-2 px-2 text-center text-slate-500" x-text="u.reservation_count"></td>
+                                <td class="py-2 px-2 text-center">
+                                    <template x-if="u.is_admin">
+                                        <span class="px-1.5 py-0.5 text-xs bg-purple-100 text-purple-800 rounded">admin</span>
+                                    </template>
+                                    <template x-if="!u.is_admin">
+                                        <span class="text-slate-300">-</span>
+                                    </template>
+                                </td>
+                                <td class="py-2 px-2 text-center">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" class="sr-only peer" :checked="u.is_banned" @change="
+                                            let checked = $event.target.checked;
+                                            let reason = '';
+                                            if (checked) { reason = prompt('Ban reason (shown publicly):') || ''; }
+                                            fetch('/admin/users/' + u.steam_id + '/ban', {
+                                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ banned: checked, reason: reason })
+                                            }).then(r => r.json()).then(d => { u.is_banned = d.banned; u.ban_reason = d.ban_reason || ''; });
+                                        ">
+                                        <div class="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-3 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-600"></div>
+                                    </label>
+                                    <span x-show="u.ban_reason" class="block text-xs text-red-500 mt-0.5" x-text="u.ban_reason"></span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="userTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(userPage,userTotalPages)-1)*userPerPage+1) + '\u2013' + Math.min(Math.min(userPage,userTotalPages)*userPerPage, filteredUsers.length) + ' of ' + filteredUsers.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="userPage = 1" :disabled="userPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="userPage--" :disabled="userPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(userPage,userTotalPages) + ' / ' + userTotalPages"></span>
+                    <button @click="userPage++" :disabled="userPage >= userTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="userPage = userTotalPages" :disabled="userPage >= userTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- SETTINGS TAB                                                -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'settings'" x-cloak>
+        <div class="space-y-3">
+
+            <!-- General -->
+            <div class="bg-white shadow-sm rounded-lg border border-slate-200 overflow-hidden">
+                <button @click="settingsOpen.general = !settingsOpen.general"
+                    class="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-slate-50">
+                    <span class="text-sm font-medium text-slate-700">General</span>
+                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="settingsOpen.general ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div x-show="settingsOpen.general" class="px-4 pb-4 space-y-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between gap-3 pt-3">
+                        <label class="text-xs text-slate-500 flex-1">Max duration (hours)</label>
+                        <input x-model.number="settingsForm.max_duration_hours" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Auto-end when empty (min)</label>
+                        <input x-model.number="settingsForm.auto_end_minutes" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">FastDL URL</label>
+                        <input x-model="settingsForm.fastdl_url" type="text" placeholder="https://fastdl.example.com/"
+                            class="w-48 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rate Limits -->
+            <div class="bg-white shadow-sm rounded-lg border border-slate-200 overflow-hidden">
+                <button @click="settingsOpen.rates = !settingsOpen.rates"
+                    class="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-slate-50">
+                    <span class="text-sm font-medium text-slate-700">Rate Limits</span>
+                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="settingsOpen.rates ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div x-show="settingsOpen.rates" class="px-4 pb-4 space-y-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between gap-3 pt-3">
+                        <label class="text-xs text-slate-500 flex-1">Per-user (req/hr)</label>
+                        <input x-model.number="settingsForm.per_user_hour" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Admin (req/hr)</label>
+                        <input x-model.number="settingsForm.admin_per_hour" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Failed multiplier</label>
+                        <input x-model.number="settingsForm.failed_multiplier" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Max concurrent provisioning</label>
+                        <input x-model.number="settingsForm.site_provisioning_max" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="border-t border-slate-100 pt-2 mt-2">
+                        <span class="text-xs font-medium text-slate-400 uppercase tracking-wide">Daily &amp; Sitewide</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Per-user (req/day)</label>
+                        <input x-model.number="settingsForm.per_user_day" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Admin (req/day)</label>
+                        <input x-model.number="settingsForm.admin_per_day" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Per-user (hours/day)</label>
+                        <input x-model.number="settingsForm.daily_hours_limit" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Sitewide (req/hr)</label>
+                        <input x-model.number="settingsForm.sitewide_per_hour" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Sitewide (req/day)</label>
+                        <input x-model.number="settingsForm.sitewide_per_day" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Circuit Breaker -->
+            <div class="bg-white shadow-sm rounded-lg border border-slate-200 overflow-hidden">
+                <button @click="settingsOpen.circuit = !settingsOpen.circuit"
+                    class="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-slate-50">
+                    <span class="text-sm font-medium text-slate-700">Circuit Breaker <span class="font-normal text-slate-400 text-xs">(0 threshold = disabled)</span></span>
+                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="settingsOpen.circuit ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div x-show="settingsOpen.circuit" class="px-4 pb-4 space-y-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between gap-3 pt-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Count failures in this window">Window (min)</label>
+                        <input x-model.number="settingsForm.circuit_breaker_window_minutes" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Trip after this many failures">Failure threshold</label>
+                        <input x-model.number="settingsForm.circuit_breaker_threshold" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Stay tripped until this long after last failure">Cooldown (min)</label>
+                        <input x-model.number="settingsForm.circuit_breaker_cooldown_minutes" type="number" min="1"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Steam Trust -->
+            <div class="bg-white shadow-sm rounded-lg border border-slate-200 overflow-hidden">
+                <button @click="settingsOpen.steam = !settingsOpen.steam"
+                    class="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-slate-50">
+                    <span class="text-sm font-medium text-slate-700">Steam Trust <span class="font-normal text-slate-400 text-xs">(0 or unchecked = disabled)</span></span>
+                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="settingsOpen.steam ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div x-show="settingsOpen.steam" class="px-4 pb-4 space-y-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between gap-3 pt-3">
+                        <label class="text-xs text-slate-500 flex-1">Min account age (days)</label>
+                        <input x-model.number="settingsForm.steam_min_account_age_days" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="GetOwnedGames may return empty for private profiles">Min TF2 hours</label>
+                        <input x-model.number="settingsForm.steam_min_tf2_hours" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Require TF2 ownership</label>
+                        <input x-model="settingsForm.steam_require_tf2_ownership" type="checkbox" class="rounded border-slate-300">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Block VAC banned</label>
+                        <input x-model="settingsForm.steam_block_vac_banned" type="checkbox" class="rounded border-slate-300">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">Require public profile</label>
+                        <input x-model="settingsForm.steam_require_public_profile" type="checkbox" class="rounded border-slate-300">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Captcha -->
+            <div class="bg-white shadow-sm rounded-lg border border-slate-200 overflow-hidden">
+                <button @click="settingsOpen.captcha = !settingsOpen.captcha"
+                    class="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-slate-50">
+                    <span class="text-sm font-medium text-slate-700">Captcha <span class="font-normal text-slate-400 text-xs">(hCaptcha)</span></span>
+                    <svg class="w-4 h-4 text-slate-400 transition-transform" :class="settingsOpen.captcha ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+                <div x-show="settingsOpen.captcha" class="px-4 pb-4 space-y-2 border-t border-slate-100">
+                    <div class="flex items-center justify-between gap-3 pt-3">
+                        <label class="text-xs text-slate-500 flex-1">Enabled</label>
+                        <input x-model="settingsForm.captcha_enabled" type="checkbox" class="rounded border-slate-300">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Users with fewer reservations than this will see captcha">Trust after N reservations</label>
+                        <input x-model.number="settingsForm.captcha_trust_after_n" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Users with fewer TF2 hours will see captcha (0 = disabled)">Min TF2 hours for trust</label>
+                        <input x-model.number="settingsForm.captcha_min_tf2_hours" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1" title="Steam accounts younger than this will see captcha (0 = disabled)">Min account age (days)</label>
+                        <input x-model.number="settingsForm.captcha_min_account_age_days" type="number" min="0"
+                            class="w-20 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800 text-right">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Save button -->
+            <div class="flex items-center justify-end gap-2 pt-2">
+                <span x-show="settingsSaved" class="text-xs text-green-800">Saved</span>
+                <button @click="saveSettings()" class="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-500 rounded font-medium">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- MODALS                                                      -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+
+    <!-- Location Form Modal -->
+    <div x-show="showLocModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showLocModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/20" @click="showLocModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-5 space-y-3">
+                <h3 class="text-sm font-semibold text-slate-900" x-text="locEditMode ? 'Edit Location' : 'Add Location'"></h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <select x-model="locFormData.provider"
+                        @change="if (!locEditMode && locFormData.provider_region) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <template x-for="p in providers" :key="p.code">
+                            <option :value="p.code" x-text="p.name"></option>
+                        </template>
+                    </select>
+                    <input x-model="locFormData.provider_region" placeholder="Region ID (e.g., sgp)"
+                        @input="if (!locEditMode) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <input x-model="locFormData.city" placeholder="City (e.g., Singapore)"
+                        @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model="locFormData.country" placeholder="Country"
+                        @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <select x-model="locFormData.continent" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <option value="">Continent...</option>
+                        <option>Africa</option><option>Asia</option><option>Australia</option><option>Europe</option>
+                        <option>Middle East</option><option>North America</option><option>Oceania</option><option>South America</option>
+                    </select>
+                    <input x-model="locFormData.subdivision" placeholder="Subdivision (e.g., California, US-CA)"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="flex items-center gap-2 px-2">
+                        <input type="checkbox" x-model="locFormData.recommended" id="loc-recommended" class="w-4 h-4 bg-white border-slate-300 rounded text-yellow-600">
+                        <label for="loc-recommended" class="text-xs text-slate-700">SDR relay</label>
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end pt-2 border-t border-slate-100">
+                    <button @click="showLocModal = false" class="px-3 py-1.5 text-xs bg-slate-200 hover:bg-slate-300 rounded">Cancel</button>
+                    <button @click="saveLoc()" class="px-3 py-1.5 text-xs bg-green-600 hover:bg-green-500 text-white rounded" x-text="locEditMode ? 'Update' : 'Create'">Create</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Location-Provider Form Modal -->
+    <div x-show="showLPModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showLPModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/20" @click="showLPModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-5 space-y-3">
+                <h3 class="text-sm font-semibold text-slate-900">
+                    <span x-text="lpEditId ? 'Edit provider for' : 'Add provider to'"></span>
+                    <span class="text-brand-600" x-text="lpFormLocCode"></span>
+                </h3>
+                <div class="grid grid-cols-3 gap-2">
+                    <select x-model="lpFormData.provider_code" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <template x-for="p in providers" :key="p.code">
+                            <option :value="p.code" x-text="p.name"></option>
+                        </template>
+                    </select>
+                    <input x-model="lpFormData.provider_region" placeholder="Region ID"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model="lpFormData.priority" type="number" min="0" placeholder="Priority"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <input x-model="lpFormData.instance_plan" placeholder="Plan override (optional)"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model="lpFormData.region_instance_limit" type="number" min="1" placeholder="Instance limit"
+                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="flex gap-2 justify-end pt-2 border-t border-slate-100">
+                    <button @click="showLPModal = false" class="px-3 py-1.5 text-xs bg-slate-200 hover:bg-slate-300 rounded">Cancel</button>
+                    <button @click="saveLP()" class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded" x-text="lpEditId ? 'Update' : 'Add'">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Provider Edit Modal -->
+    <div x-show="showProviderModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showProviderModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/20" @click="showProviderModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-sm w-full p-5 space-y-3">
+                <h3 class="text-sm font-semibold text-slate-900">
+                    Edit Provider: <span class="text-brand-600" x-text="editingProviderCode"></span>
+                </h3>
+                <div class="space-y-2">
+                    <div>
+                        <label class="text-xs text-slate-500">Instance plan</label>
+                        <input x-model="providerFormData.instance_plan" placeholder="Instance plan"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">Container image</label>
+                        <input x-model="providerFormData.container_image" placeholder="Container image"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">Instance limit</label>
+                        <input x-model.number="providerFormData.instance_limit" type="number" min="1" placeholder="10"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                </div>
+                <div class="flex gap-2 justify-end pt-2 border-t border-slate-100">
+                    <button @click="showProviderModal = false" class="px-3 py-1.5 text-xs bg-slate-200 hover:bg-slate-300 rounded">Cancel</button>
+                    <button @click="saveProvider()" class="px-3 py-1.5 text-xs bg-green-600 hover:bg-green-500 text-white rounded">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

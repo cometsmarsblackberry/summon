@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('stats.title') }}{% endblock %}
+{% block meta_description %}{{ _('stats.description') }}{% endblock %}
+{% block canonical %}{{ base_url }}/stats{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8" x-data="statsPage()" x-init="init()">
+    <h1 class="text-3xl font-bold mb-6 text-slate-900">{{ _('stats.heading') }}</h1>
+
+    <!-- Tab bar -->
+    <div class="border-b border-slate-200 mb-6">
+        <nav class="flex gap-6">
+            <button @click="tab = 'reservations'"
+                :class="tab === 'reservations' ? 'text-brand-600 border-brand-600' : 'text-slate-500 border-transparent hover:text-slate-700'"
+                class="pb-3 border-b-2 font-medium text-sm transition-colors">
+                {{ _('stats.tab_reservations') }}
+            </button>
+            <button @click="tab = 'ping'; loadPing()"
+                :class="tab === 'ping' ? 'text-brand-600 border-brand-600' : 'text-slate-500 border-transparent hover:text-slate-700'"
+                class="pb-3 border-b-2 font-medium text-sm transition-colors">
+                {{ _('stats.tab_latency') }}
+            </button>
+        </nav>
+    </div>
+
+    <!-- ==================== RESERVATIONS TAB ==================== -->
+    <div x-show="tab === 'reservations'" x-cloak>
+        <!-- Loading -->
+        <div x-show="res.loading" class="bg-white rounded-lg p-12 border border-slate-200 text-center">
+            <svg class="inline-block w-6 h-6 animate-spin text-slate-400" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p class="text-slate-500 mt-2 text-sm">{{ _('stats.loading') }}</p>
+        </div>
+
+        <!-- Error -->
+        <div x-show="res.error" x-cloak class="bg-white rounded-lg p-8 border border-slate-200 text-center">
+            <p class="text-red-600 text-sm" x-text="res.error"></p>
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="!res.loading && !res.error && res.data && res.data.overview.total === 0" x-cloak class="bg-white rounded-lg p-12 border border-slate-200 text-center">
+            <h2 class="text-xl font-semibold mb-2 text-slate-800">{{ _('stats.no_reservations') }}</h2>
+            <p class="text-slate-500 text-sm">{{ _('stats.create_to_start', link_start='<a href="/reserve" class="text-brand-600 hover:underline">', link_end='</a>') | safe }}</p>
+        </div>
+
+        <div x-show="!res.loading && !res.error && res.data && res.data.overview.total > 0" x-cloak>
+            <!-- Overview cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
+                <template x-for="card in [
+                    {label: 'Total', value: res.data?.overview.total},
+                    {label: 'Active Now', value: res.data?.overview.active},
+                    {label: 'Today', value: res.data?.overview.today},
+                    {label: 'This Week', value: res.data?.overview.this_week},
+                    {label: 'This Month', value: res.data?.overview.this_month},
+                ]" :key="card.label">
+                    <div class="bg-white rounded-lg border border-slate-200 p-4">
+                        <p class="text-sm text-slate-500" x-text="card.label"></p>
+                        <p class="text-2xl font-bold text-slate-900 tabular-nums" x-text="card.value"></p>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Server usage table -->
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">{{ _('stats.server_usage') }}</h2>
+            <div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-200 text-slate-500">
+                                <th class="text-left px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="resSort('name')">
+                                    {{ _('stats.col_location') }} <span x-show="res.sortField === 'name'" x-text="res.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="resSort('total')">
+                                    {{ _('stats.col_reservations') }} <span x-show="res.sortField === 'total'" x-text="res.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700 hidden sm:table-cell" @click="resSort('avg_duration')">
+                                    {{ _('stats.col_avg_duration') }} <span x-show="res.sortField === 'avg_duration'" x-text="res.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="resSort('this_month')">
+                                    {{ _('stats.col_this_month') }} <span x-show="res.sortField === 'this_month'" x-text="res.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="loc in sortedResLocations" :key="loc.location">
+                                <tr class="border-b border-slate-200 hover:bg-slate-50">
+                                    <td class="px-4 py-3 text-slate-800" x-text="loc.name"></td>
+                                    <td class="px-4 py-3 text-right text-slate-600 tabular-nums" x-text="loc.total"></td>
+                                    <td class="px-4 py-3 text-right text-slate-600 tabular-nums hidden sm:table-cell" x-text="loc.avg_duration + ' min'"></td>
+                                    <td class="px-4 py-3 text-right text-slate-600 tabular-nums" x-text="loc.this_month"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Last 30 days bar chart -->
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">{{ _('stats.last_30_days') }}</h2>
+            <div class="bg-white rounded-lg border border-slate-200 p-4 pb-2">
+                <div class="relative" style="height: 120px;">
+                    <!-- Y-axis max label -->
+                    <span class="absolute -top-1 left-0 text-xs text-slate-400 tabular-nums" x-text="chartMax"></span>
+                    <!-- Bars -->
+                    <div class="flex items-end h-full gap-px pl-1">
+                        <template x-for="(day, i) in res.data?.activity" :key="day.date">
+                            <div class="flex-1 flex items-end h-full group relative">
+                                <div class="w-full rounded-t-sm bg-blue-500 transition-colors group-hover:bg-blue-600"
+                                    :style="'height: ' + barHeight(day.count)">
+                                </div>
+                                <!-- Tooltip -->
+                                <div class="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-10">
+                                    <div class="bg-slate-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap shadow">
+                                        <span x-text="formatDate(day.date)"></span>: <span class="font-medium" x-text="day.count"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <!-- X-axis date labels -->
+                <div class="flex justify-between mt-1.5 text-xs text-slate-400 tabular-nums pl-1">
+                    <template x-for="label in chartLabels" :key="label.index">
+                        <span x-text="label.text"></span>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== PING TAB ==================== -->
+    <div x-show="tab === 'ping'" x-cloak>
+        <!-- Loading -->
+        <div x-show="ping.loading" class="bg-white rounded-lg p-12 border border-slate-200 text-center">
+            <svg class="inline-block w-6 h-6 animate-spin text-slate-400" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p class="text-slate-500 mt-2 text-sm">{{ _('stats.loading') }}</p>
+        </div>
+
+        <!-- Error -->
+        <div x-show="ping.error" x-cloak class="bg-white rounded-lg p-8 border border-slate-200 text-center">
+            <p class="text-red-600 text-sm" x-text="ping.error"></p>
+        </div>
+
+        <!-- Empty state -->
+        <div x-show="!ping.loading && ping.data && ping.data.total_submissions === 0" x-cloak class="bg-white rounded-lg p-12 border border-slate-200 text-center">
+            <h2 class="text-xl font-semibold mb-2 text-slate-800">{{ _('stats.no_data_yet') }}</h2>
+            <p class="text-slate-500 text-sm">{{ _('stats.contribute', link_start='<a href="/ping" class="text-brand-600 hover:underline">', link_end='</a>') | safe }}</p>
+        </div>
+
+        <!-- Ping stats content -->
+        <div x-show="!ping.loading && ping.data && ping.data.total_submissions > 0" x-cloak>
+            <!-- Summary card -->
+            <div class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+                <p class="text-sm text-slate-500">{{ _('stats.total_submissions') }}</p>
+                <p class="text-3xl font-bold text-slate-900 tabular-nums" x-text="ping.data.total_submissions"></p>
+                <p class="text-xs text-slate-400 mt-1">{{ _('stats.submissions_description', link_start='<a href="/ping" class="text-brand-600 hover:underline">', link_end='</a>') | safe }}</p>
+            </div>
+
+            <!-- Server locations table -->
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">{{ _('stats.server_locations') }}</h2>
+            <div class="bg-white rounded-lg border border-slate-200 overflow-hidden mb-6">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-200 text-slate-500">
+                                <th class="text-left px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="pingSort('name')">
+                                    {{ _('stats.col_location') }} <span x-show="ping.sortField === 'name'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="pingSort('avg_ms')">
+                                    {{ _('stats.col_avg') }} <span x-show="ping.sortField === 'avg_ms'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700 hidden sm:table-cell" @click="pingSort('median_ms')">
+                                    {{ _('stats.col_median') }} <span x-show="ping.sortField === 'median_ms'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700 hidden sm:table-cell" @click="pingSort('min_ms')">
+                                    {{ _('stats.col_min') }} <span x-show="ping.sortField === 'min_ms'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700" @click="pingSort('submissions')">
+                                    {{ _('stats.col_tests') }} <span x-show="ping.sortField === 'submissions'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                                <th class="text-right px-4 py-3 font-medium cursor-pointer hover:text-slate-700 hidden sm:table-cell" @click="pingSort('times_best')">
+                                    {{ _('stats.col_best') }} <span x-show="ping.sortField === 'times_best'" x-text="ping.sortAsc ? '↑' : '↓'"></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="loc in sortedPingLocations" :key="loc.code">
+                                <tr class="border-b border-slate-200 hover:bg-slate-50">
+                                    <td class="px-4 py-3 text-slate-800" x-text="loc.name"></td>
+                                    <td class="px-4 py-3 text-right tabular-nums">
+                                        <span :class="latencyColor(loc.avg_ms)" class="font-medium" x-text="loc.avg_ms + ' ms'"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-right tabular-nums hidden sm:table-cell">
+                                        <span :class="latencyColor(loc.median_ms)" class="font-medium" x-text="loc.median_ms + ' ms'"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-right tabular-nums hidden sm:table-cell">
+                                        <span :class="latencyColor(loc.min_ms)" class="font-medium" x-text="loc.min_ms + ' ms'"></span>
+                                    </td>
+                                    <td class="px-4 py-3 text-right text-slate-600 tabular-nums" x-text="loc.submissions"></td>
+                                    <td class="px-4 py-3 text-right text-slate-600 tabular-nums hidden sm:table-cell" x-text="loc.times_best"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Countries breakdown -->
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">{{ _('stats.top_countries') }}</h2>
+            <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-slate-200 text-slate-500">
+                            <th class="text-left px-4 py-3 font-medium">{{ _('stats.col_country') }}</th>
+                            <th class="text-right px-4 py-3 font-medium">{{ _('stats.col_submissions') }}</th>
+                            <th class="text-left px-4 py-3 font-medium hidden sm:table-cell">{{ _('stats.col_most_common_best') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="c in ping.data.countries" :key="c.country_code">
+                            <tr class="border-b border-slate-200 hover:bg-slate-50">
+                                <td class="px-4 py-3 text-slate-800" x-text="c.country"></td>
+                                <td class="px-4 py-3 text-right text-slate-600 tabular-nums" x-text="c.submissions"></td>
+                                <td class="px-4 py-3 text-slate-500 hidden sm:table-cell" x-text="c.most_common_best"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function statsPage() {
+    return {
+        tab: 'reservations',
+
+        // Reservation state
+        res: {
+            data: null,
+            loading: true,
+            error: null,
+            sortField: 'total',
+            sortAsc: false,
+        },
+
+        // Ping state
+        ping: {
+            data: null,
+            loading: false,
+            loaded: false,
+            error: null,
+            sortField: 'avg_ms',
+            sortAsc: true,
+        },
+
+        init() {
+            const params = new URLSearchParams(window.location.search);
+            const requestedTab = params.get('tab');
+            if (requestedTab === 'ping') {
+                this.tab = 'ping';
+                this.loadPing();
+                return;
+            }
+            this.tab = 'reservations';
+            this.loadReservations();
+        },
+
+        async loadReservations() {
+            try {
+                const resp = await fetch('/api/reservation-stats');
+                if (!resp.ok) throw new Error('Failed to load reservation stats.');
+                this.res.data = await resp.json();
+            } catch (e) {
+                this.res.error = e.message || 'Failed to load statistics.';
+            } finally {
+                this.res.loading = false;
+            }
+        },
+
+        async loadPing() {
+            if (this.ping.loaded) return;
+            this.ping.loading = true;
+            try {
+                const resp = await fetch('/api/ping-stats');
+                if (!resp.ok) throw new Error('Failed to load ping stats.');
+                this.ping.data = await resp.json();
+                this.ping.loaded = true;
+            } catch (e) {
+                this.ping.error = e.message || 'Failed to load statistics.';
+            } finally {
+                this.ping.loading = false;
+            }
+        },
+
+        // Reservation sorting
+        resSort(field) {
+            if (this.res.sortField === field) {
+                this.res.sortAsc = !this.res.sortAsc;
+            } else {
+                this.res.sortField = field;
+                this.res.sortAsc = field === 'name';
+            }
+        },
+
+        get sortedResLocations() {
+            if (!this.res.data || !this.res.data.locations) return [];
+            const arr = [...this.res.data.locations];
+            const dir = this.res.sortAsc ? 1 : -1;
+            const field = this.res.sortField;
+            arr.sort((a, b) => {
+                if (field === 'name') return dir * a.name.localeCompare(b.name);
+                return dir * (a[field] - b[field]);
+            });
+            return arr;
+        },
+
+        // Ping sorting
+        pingSort(field) {
+            if (this.ping.sortField === field) {
+                this.ping.sortAsc = !this.ping.sortAsc;
+            } else {
+                this.ping.sortField = field;
+                this.ping.sortAsc = field === 'name';
+            }
+        },
+
+        get sortedPingLocations() {
+            if (!this.ping.data || !this.ping.data.locations) return [];
+            const arr = [...this.ping.data.locations];
+            const dir = this.ping.sortAsc ? 1 : -1;
+            const field = this.ping.sortField;
+            arr.sort((a, b) => {
+                if (field === 'name') return dir * a.name.localeCompare(b.name);
+                return dir * (a[field] - b[field]);
+            });
+            return arr;
+        },
+
+        // Bar chart helpers
+        get chartMax() {
+            const activity = this.res.data?.activity;
+            if (!activity) return 1;
+            return Math.max(1, ...activity.map(d => d.count));
+        },
+
+        barHeight(count) {
+            if (count === 0) return '2px';
+            return Math.max(4, (count / this.chartMax) * 100) + '%';
+        },
+
+        formatDate(dateStr) {
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        },
+
+        get chartLabels() {
+            const activity = this.res.data?.activity;
+            if (!activity) return [];
+            const labels = [];
+            for (let i = 0; i < activity.length; i += 7) {
+                labels.push({ index: i, text: this.formatDate(activity[i].date) });
+            }
+            return labels;
+        },
+
+        latencyColor(ms) {
+            if (ms < 50) return 'text-green-800';
+            if (ms < 100) return 'text-yellow-800';
+            if (ms < 200) return 'text-orange-600';
+            return 'text-red-600';
+        },
+    };
+}
+</script>
+{% endblock %}

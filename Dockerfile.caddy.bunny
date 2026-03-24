@@ -1,0 +1,12 @@
+FROM caddy:2-builder AS builder
+
+RUN xcaddy build \
+    --with github.com/digilolnet/caddy-bunny-ip
+
+FROM caddy:2-alpine
+
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+COPY caddy-entrypoint.sh /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

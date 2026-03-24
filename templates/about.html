@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('about.title') }}{% endblock %}
+{% block meta_description %}{{ _('about.description') }}{% endblock %}
+{% block canonical %}{{ base_url }}/about{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": "What is {{ site_name }}?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "{{ site_name }} lets you instantly reserve a private Team Fortress 2 server. Pick a location, choose a map, and a server is spun up for you. Reservations last {{ reservation_settings.max_duration_hours }} hours and auto-end when the server is empty for {{ reservation_settings.auto_end_minutes }} minutes."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What commands can I use during a reservation?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Available commands: !reservation (shows info), !end (owner only — starts end countdown), !cancel (owner only — cancels end countdown), !changemap <mapname> (owner only — changes map), !config [configname] (owner only — loads a league config like RGL, ETF2L, FBTF, or resets to defaults), !restart (owner only — opens a menu to restart the tournament, game, or round), !sdr (re-connect using SDR)."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Is {{ site_name }} open source?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. {{ site_name }} is open source, licensed under the GNU Affero General Public License v3 (AGPL-3.0), and available on GitHub at https://github.com/cometsmarsblackberry/summon."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What happens if I abuse the service?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "If you abuse the service, you will be permanently banned. Banned players are listed on the bans page."
+            }
+        }
+    ]
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-6 text-slate-900">{{ _('about.heading') }}</h1>
+    <div class="space-y-6">
+        <div class="bg-white rounded-lg p-8 border border-slate-200">
+            <h2 class="text-2xl font-bold text-slate-900">{{ _('about.what_is_title') }}</h2>
+            <p class="mt-2 text-slate-600">{{ _('about.what_is_body', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) }}</p>
+        </div>
+
+        <div class="bg-white rounded-lg p-8 border border-slate-200">
+            <h2 class="text-2xl font-bold text-slate-900">{{ _('about.commands_title') }}</h2>
+            <p class="mt-2 text-slate-600">{{ _('about.commands_intro') }}</p>
+            <dl class="mt-6 space-y-4">
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">!reservation</dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_reservation') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">
+                        !end
+                        <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{{ _('about.owner_only') }}</span>
+                    </dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_end') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">
+                        !cancel
+                        <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{{ _('about.owner_only') }}</span>
+                    </dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_cancel') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">
+                        !changemap &lt;mapname&gt;
+                        <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{{ _('about.owner_only') }}</span>
+                    </dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_changemap') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">
+                        !config [configname]
+                        <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{{ _('about.owner_only') }}</span>
+                    </dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_config') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">
+                        !restart
+                        <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">{{ _('about.owner_only') }}</span>
+                    </dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_restart') }}</dd>
+                </div>
+                <div>
+                    <dt class="text-lg font-semibold text-slate-900">!sdr</dt>
+                    <dd class="text-slate-600">{{ _('about.cmd_sdr') }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        <div class="bg-white rounded-lg p-8 border border-slate-200">
+            <h2 class="text-2xl font-bold text-slate-900">{{ _('about.bans_title') }}</h2>
+            <p class="mt-2 text-slate-600">{{ _('about.bans_body_1') }}
+                {% if rules_url %}<a href="{{ rules_url }}" class="text-brand-600 hover:underline">{{ _('about.bans_body_rules') }}</a>
+                {{ _('about.bans_body_2') }}{% endif %}
+                <a href="/bans" class="text-brand-600 hover:underline">{{ _('about.bans_body_link') }}</a>.</p>
+        </div>
+
+        <div class="bg-white rounded-lg p-8 border border-slate-200">
+            <h2 class="text-2xl font-bold text-slate-900">{{ _('about.open_source_title') }}</h2>
+            <p class="mt-2 text-slate-600">{{ _('about.open_source_body') }}
+                <a href="https://github.com/cometsmarsblackberry/summon" class="text-brand-600 hover:underline">GitHub</a>.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

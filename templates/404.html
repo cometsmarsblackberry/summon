@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('error_404.title') }}{% endblock %}
+
+{% block head %}
+<style>
+    .error-artwork {
+        position: relative;
+        width: 100%;
+        max-width: 560px;
+        aspect-ratio: 16 / 9;
+        border-radius: 0.75rem;
+        overflow: hidden;
+        background: #0c4a6e;
+    }
+
+    .error-artwork::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        opacity: 0.08;
+        background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        background-size: 200px 200px;
+    }
+
+    .error-artwork .blob {
+        position: absolute;
+        filter: blur(50px);
+    }
+
+    .error-artwork .blob-1 {
+        width: 55%;
+        height: 70%;
+        top: -15%;
+        left: -5%;
+        border-radius: 60% 40% 50% 70%;
+        background: radial-gradient(ellipse at 30% 40%, #38bdf8, #075985);
+        opacity: 0.9;
+    }
+
+    .error-artwork .blob-2 {
+        width: 50%;
+        height: 60%;
+        bottom: -20%;
+        right: -5%;
+        border-radius: 40% 65% 35% 55%;
+        background: radial-gradient(ellipse at 70% 60%, #7dd3fc, #0284c7);
+        opacity: 0.85;
+    }
+
+    .error-artwork .blob-3 {
+        width: 35%;
+        height: 45%;
+        top: 10%;
+        left: 40%;
+        border-radius: 55% 45% 60% 40%;
+        background: radial-gradient(ellipse at 50% 30%, #bae6fd, #0ea5e9);
+        opacity: 0.75;
+    }
+
+    .error-artwork .blob-4 {
+        width: 30%;
+        height: 35%;
+        top: 55%;
+        left: 10%;
+        border-radius: 45% 55% 40% 60%;
+        background: radial-gradient(ellipse at 40% 70%, #0ea5e9, #0c4a6e);
+        opacity: 0.7;
+    }
+
+    .error-artwork .blob-5 {
+        width: 25%;
+        height: 30%;
+        top: -5%;
+        right: 15%;
+        border-radius: 50% 35% 55% 45%;
+        background: radial-gradient(ellipse at 60% 30%, #e0f2fe, #38bdf8);
+        opacity: 0.6;
+    }
+
+    .error-pill {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+    }
+
+    .error-pill span {
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(8px);
+        padding: 0.75rem 2.5rem;
+        border-radius: 0.625rem;
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: #0c4a6e;
+        letter-spacing: -0.01em;
+        box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-16 flex flex-col items-center gap-8">
+    <div class="error-artwork">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+        <div class="blob blob-4"></div>
+        <div class="blob blob-5"></div>
+        <div class="error-pill">
+            <span>{{ _('error_404.heading') }}</span>
+        </div>
+    </div>
+
+    <div class="text-center space-y-2">
+        <p class="text-slate-500">{{ _('error_404.message') }}</p>
+        <a href="/" class="inline-block text-brand-600 hover:text-brand-500 text-sm font-medium">
+            {{ _('error_404.back_home') }}
+        </a>
+    </div>
+</div>
+{% endblock %}
