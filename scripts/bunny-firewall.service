@@ -1,0 +1,11 @@
+[Unit]
+Description=Update iptables with Bunny CDN edge server IPs
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/summon/scripts/bunny-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

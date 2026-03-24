@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('profile.title') }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
+
+    {% if user.is_banned %}
+    <!-- Ban Notice -->
+    <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <div>
+                <h3 class="text-sm font-semibold text-red-800">{{ _('profile.account_banned') }}</h3>
+                <p class="text-sm text-red-700 mt-1">
+                    {{ _('profile.banned_message') }}
+                    {% if user.ban_reason %}{{ _('profile.ban_reason', reason=user.ban_reason) }}{% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Account Info -->
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6">
+        <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-4">{{ _('profile.account_info') }}</h2>
+        <div class="flex items-start gap-5">
+            <a href="https://steamcommunity.com/profiles/{{ user.steam_id }}" target="_blank">
+                {% if user.avatar_url %}
+                <img src="{{ user.avatar_url }}" alt="" class="w-16 h-16 rounded-lg hover:opacity-80 transition-opacity">
+                {% endif %}
+            </a>
+            <div>
+                <a href="https://steamcommunity.com/profiles/{{ user.steam_id }}" target="_blank"
+                   class="text-lg font-semibold text-slate-800 hover:underline">
+                    {{ user.display_name }}
+                </a>
+                <div class="mt-2 text-xs text-slate-500 space-y-0.5">
+                    <div>{{ _('profile.member_since', date=user.created_at.strftime('%b %d, %Y')) }}</div>
+                    <div>{{ _('profile.last_login', date=user.last_login_at.strftime('%b %d, %Y %H:%M')) }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Usage & Limits -->
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6">
+        <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-4">{{ _('profile.usage_limits') }}</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 text-center">
+            <div>
+                <div class="text-2xl font-bold text-slate-800">{{ 1 if active_reservation else 0 }}/1</div>
+                <div class="text-xs text-slate-500 mt-1">{{ _('profile.active_reservation') }}</div>
+            </div>
+            <div>
+                <div class="text-2xl font-bold text-slate-800">
+                    {{ hourly_count }}/{{ rate_limits.admin_per_hour if user.is_admin else rate_limits.per_user_hour }}
+                </div>
+                <div class="text-xs text-slate-500 mt-1">{{ _('profile.this_hour') }}</div>
+            </div>
+            <div>
+                <div class="text-2xl font-bold text-slate-800">
+                    {{ daily_count }}/{{ rate_limits.admin_per_day if user.is_admin else rate_limits.per_user_day }}
+                </div>
+                <div class="text-xs text-slate-500 mt-1">{{ _('profile.today_reservations') }}</div>
+            </div>
+            <div>
+                <div class="text-2xl font-bold text-slate-800">
+                    {{ daily_hours_used }}/{{ rate_limits.daily_hours_limit }}h
+                </div>
+                <div class="text-xs text-slate-500 mt-1">{{ _('profile.today_hours') }}</div>
+            </div>
+            <div>
+                <div class="text-2xl font-bold text-slate-800">{{ user.reservation_count }}</div>
+                <div class="text-xs text-slate-500 mt-1">{{ _('profile.lifetime') }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Steam Trust -->
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6">
+        <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-4">{{ _('profile.steam_trust') }}</h2>
+        <div class="space-y-3">
+
+            {% macro trust_dot(pass, enabled) %}
+            {% if not enabled %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-300" title="{{ _('profile.disabled') }}"></span>
+            {% elif pass is none %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-300" title="{{ _('profile.unknown') }}"></span>
+            {% elif pass %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="{{ _('profile.pass') }}"></span>
+            {% else %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="{{ _('profile.fail') }}"></span>
+            {% endif %}
+            {% endmacro %}
+
+            <!-- Account Age -->
+            {% set age_enabled = steam_trust.min_account_age_days > 0 %}
+            <div class="flex items-center gap-2 text-sm">
+                {{ trust_dot(age_days is not none and age_days >= steam_trust.min_account_age_days if age_enabled and age_days is not none else none, age_enabled) }}
+                <span class="text-slate-700">{{ _('profile.account_age') }}</span>
+                <span class="text-slate-500">
+                    {% if age_days is not none %}{{ _('profile.days', count=age_days) }}{% else %}{{ _('profile.unknown') }}{% endif %}
+                    {% if age_enabled %}{{ _('profile.min_label', value=steam_trust.min_account_age_days) }}{% endif %}
+                </span>
+            </div>
+
+            <!-- TF2 Hours -->
+            {% set hours_enabled = steam_trust.min_tf2_hours > 0 %}
+            <div class="flex items-center gap-2 text-sm">
+                {{ trust_dot(user.tf2_playtime_hours is not none and user.tf2_playtime_hours >= steam_trust.min_tf2_hours if hours_enabled and user.tf2_playtime_hours is not none else none, hours_enabled) }}
+                <span class="text-slate-700">{{ _('profile.tf2_hours') }}</span>
+                <span class="text-slate-500">
+                    {% if user.tf2_playtime_hours is not none %}{{ user.tf2_playtime_hours }}h{% else %}{{ _('profile.unknown') }}{% endif %}
+                    {% if hours_enabled %}{{ _('profile.min_label', value=steam_trust.min_tf2_hours) }}{% endif %}
+                </span>
+            </div>
+
+            <!-- TF2 Ownership -->
+            <div class="flex items-center gap-2 text-sm">
+                {{ trust_dot(user.owns_tf2 if steam_trust.require_tf2_ownership and user.owns_tf2 is not none else none, steam_trust.require_tf2_ownership) }}
+                <span class="text-slate-700">{{ _('profile.tf2_ownership') }}</span>
+                <span class="text-slate-500">
+                    {% if user.owns_tf2 is none %}{{ _('profile.unknown') }}{% elif user.owns_tf2 %}{{ _('profile.owned') }}{% else %}{{ _('profile.not_owned') }}{% endif %}
+                </span>
+            </div>
+
+            <!-- VAC Ban -->
+            <div class="flex items-center gap-2 text-sm">
+                {{ trust_dot(not user.has_vac_ban if steam_trust.block_vac_banned and user.has_vac_ban is not none else none, steam_trust.block_vac_banned) }}
+                <span class="text-slate-700">{{ _('profile.vac_ban') }}</span>
+                <span class="text-slate-500">
+                    {% if user.has_vac_ban is none %}{{ _('profile.unknown') }}{% elif user.has_vac_ban %}{{ _('profile.banned') }}{% else %}{{ _('profile.clean') }}{% endif %}
+                </span>
+            </div>
+
+            <!-- Profile Visibility -->
+            <div class="flex items-center gap-2 text-sm">
+                {{ trust_dot(user.profile_public if steam_trust.require_public_profile and user.profile_public is not none else none, steam_trust.require_public_profile) }}
+                <span class="text-slate-700">{{ _('profile.profile_visibility') }}</span>
+                <span class="text-slate-500">
+                    {% if user.profile_public is none %}{{ _('profile.unknown') }}{% elif user.profile_public %}{{ _('profile.public') }}{% else %}{{ _('profile.private') }}{% endif %}
+                </span>
+            </div>
+        </div>
+
+        {% if user.steam_data_updated_at %}
+        <div class="mt-4 text-xs text-slate-400">
+            {{ _('profile.last_updated', date=user.steam_data_updated_at.strftime('%b %d, %Y %H:%M')) }}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Export Data -->
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6">
+        <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-2">{{ _('profile.export_data') }}</h2>
+        <p class="text-sm text-slate-600 mb-4">{{ _('profile.export_description') }}</p>
+        <a href="/api/account/export"
+           download
+           class="inline-block px-4 py-2 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+            {{ _('profile.export_button') }}
+        </a>
+    </div>
+
+    <!-- Delete Account -->
+    <div class="bg-white shadow-sm rounded-lg border border-red-200 p-6" x-data="{ confirmOpen: false, deleting: false }">
+        <h2 class="text-sm font-medium text-red-500 uppercase tracking-wide mb-2">{{ _('profile.delete_account') }}</h2>
+        <p class="text-sm text-slate-600 mb-4">
+            {{ _('profile.delete_description') }}
+            {% if user.is_banned %}{{ _('profile.ban_persists') }}{% endif %}
+        </p>
+        <button @click="confirmOpen = true"
+                x-show="!confirmOpen"
+                class="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors">
+            {{ _('profile.delete_button') }}
+        </button>
+        <div x-show="confirmOpen" x-cloak class="space-y-3">
+            <p class="text-sm font-medium text-red-700">{{ _('profile.delete_confirm') }}</p>
+            <div class="flex gap-3">
+                <button @click="deleting = true; fetch('/api/account', { method: 'DELETE' }).then(r => { if (r.ok) window.location.href = '/'; else r.json().then(d => { alert(d.detail || 'Failed to delete account'); deleting = false; }).catch(() => { alert('Failed to delete account'); deleting = false; }); }).catch(() => { alert('Failed to delete account'); deleting = false; })"
+                        :disabled="deleting"
+                        class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50">
+                    <span x-show="!deleting">{{ _('profile.yes_delete') }}</span>
+                    <span x-show="deleting">{{ _('profile.deleting') }}</span>
+                </button>
+                <button @click="confirmOpen = false"
+                        :disabled="deleting"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

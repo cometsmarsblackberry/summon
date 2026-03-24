@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Bunny CDN firewall rules every 6 hours
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=6h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

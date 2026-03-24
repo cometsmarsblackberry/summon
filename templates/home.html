@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('home.title') }}{% endblock %}
+{% block meta_description %}{{ _('home.description', count=locations|length if locations else 29) }}{% endblock %}
+
+{% set can_reserve = user and not beta_locked and not active_reservation and cloud_configured %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8" x-data="{
+    status: {},
+    pings: {},
+    pingDone: false,
+    activeContinent: 'All',
+    sortBy: 'region',
+    get continents() {
+        const cs = new Set();
+        Object.values(this.status).forEach(loc => { if (loc.continent) cs.add(loc.continent); });
+        return ['All', ...[...cs].sort()];
+    },
+    get flatList() {
+        const entries = this.activeContinent === 'All'
+            ? Object.entries(this.status)
+            : Object.entries(this.status).filter(([, loc]) => loc.continent === this.activeContinent);
+        if (this.sortBy === 'ping') {
+            const sorted = entries.sort(([codeA], [codeB]) => {
+                const a = this.pings[codeA] || Infinity;
+                const b = this.pings[codeB] || Infinity;
+                return a - b;
+            });
+            return sorted.map(e => ({type: 'row', entry: e}));
+        }
+        const sorted = entries.sort(([, a], [, b]) => {
+            const ca = a.continent || '', cb = b.continent || '';
+            if (ca !== cb) return ca.localeCompare(cb);
+            return (a.city || a.name || '').localeCompare(b.city || b.name || '');
+        });
+        if (this.activeContinent !== 'All') return sorted.map(e => ({type: 'row', entry: e}));
+        const result = [];
+        let lastContinent = null;
+        sorted.forEach(([code, loc]) => {
+            const c = loc.continent || 'Other';
+            if (c !== lastContinent) { result.push({type: 'header', name: c}); lastContinent = c; }
+            result.push({type: 'row', entry: [code, loc]});
+        });
+        return result;
+    },
+    modalOpen: false,
+    loc: null,
+    firstMap: '',
+    enableDirectConnect: false,
+    submitting: false,
+    error: null,
+    captchaRequired: false,
+    captchaSiteKey: '',
+    captchaToken: null,
+    captchaWidgetId: null,
+    get bestPingCode() {
+        let best = Infinity, code = null;
+        for (const [c, ms] of Object.entries(this.pings)) {
+            if (ms > 0 && ms < best) { best = ms; code = c; }
+        }
+        return code;
+    },
+    pingOnce(url) {
+        return new Promise(resolve => {
+            const img = new Image();
+            const t0 = performance.now();
+            const done = () => { clearTimeout(timer); resolve(performance.now() - t0); };
+            const timer = setTimeout(() => { img.src = ''; resolve(Infinity); }, 5000);
+            img.onload = img.onerror = done;
+            img.src = `${url}?${Date.now()}`;
+        });
+    },
+    savePingCache(complete) {
+        try { localStorage.setItem('ping_cache', JSON.stringify({ ts: Date.now(), data: this.pings, complete })); } catch {}
+    },
+    loadOrRunPings() {
+        const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+        try {
+            const cached = JSON.parse(localStorage.getItem('ping_cache'));
+            if (cached && Date.now() - cached.ts < CACHE_TTL && cached.data) {
+                this.pings = cached.data;
+                if (cached.complete !== false) {
+                    this.pingDone = true;
+                    return;
+                }
+            }
+        } catch {}
+        this.runPings();
+    },
+    async runPings() {
+        const urls = typeof _pingUrls !== 'undefined' ? _pingUrls : {};
+        const codes = Object.keys(urls);
+        if (!codes.length) return;
+
+        const tested = new Set(Object.keys(this.pings));
+
+        // Group by continent using status data
+        const byContinent = {};
+        for (const code of codes) {
+            const c = (this.status[code] && this.status[code].continent) || 'Other';
+            (byContinent[c] ??= []).push(code);
+        }
+
+        // Phase 1: one scout per continent (skip already tested)
+        const scouts = Object.values(byContinent).map(cs => cs[0]);
+        const untestedScouts = scouts.filter(c => !tested.has(c));
+        if (untestedScouts.length) {
+            await Promise.all(untestedScouts.map(async code => {
+                const url = urls[code];
+                await this.pingOnce(url); // warmup
+                let best = Infinity;
+                for (let r = 0; r < 2; r++) {
+                    const ms = await this.pingOnce(url);
+                    if (ms < best) best = ms;
+                }
+                if (best < Infinity) this.pings = { ...this.pings, [code]: Math.round(best) };
+                tested.add(code);
+            }));
+            this.savePingCache(false);
+        }
+
+        // Find best continent
+        let bestContinent = null, bestMs = Infinity;
+        for (const code of scouts) {
+            const ms = this.pings[code];
+            if (ms && ms < bestMs) {
+                bestMs = ms;
+                bestContinent = (this.status[code] && this.status[code].continent) || 'Other';
+            }
+        }
+
+        // Phase 2: remaining from best continent first, then rest (skip already tested)
+        const remaining = codes.filter(c => !tested.has(c));
+        const priority = remaining.filter(c =>
+            ((this.status[c] && this.status[c].continent) || 'Other') === bestContinent
+        );
+        const rest = remaining.filter(c =>
+            ((this.status[c] && this.status[c].continent) || 'Other') !== bestContinent
+        );
+        const ordered = [...priority, ...rest];
+
+        // Test in batches of 5
+        const BATCH = 5;
+        for (let i = 0; i < ordered.length; i += BATCH) {
+            await Promise.all(ordered.slice(i, i + BATCH).map(async code => {
+                const url = urls[code];
+                await this.pingOnce(url); // warmup
+                let best = Infinity;
+                for (let r = 0; r < 2; r++) {
+                    const ms = await this.pingOnce(url);
+                    if (ms < best) best = ms;
+                }
+                if (best < Infinity) this.pings = { ...this.pings, [code]: Math.round(best) };
+            }));
+            this.savePingCache(false);
+        }
+
+        this.pingDone = true;
+        this.savePingCache(true);
+    },
+    async openModal(code, loc) {
+        if (!loc.enabled || loc.available <= 0) return;
+        this.loc = { code, ...loc };
+        this.enableDirectConnect = !loc.recommended;
+        this.error = null;
+        this.submitting = false;
+        this.captchaToken = null;
+        this.captchaRequired = false;
+        this.captchaWidgetId = null;
+        this.modalOpen = true;
+        try {
+            const resp = await fetch('/api/captcha/check');
+            if (resp.ok) {
+                const data = await resp.json();
+                this.captchaRequired = data.required;
+                this.captchaSiteKey = data.site_key || '';
+                if (data.required && data.site_key && typeof hcaptcha !== 'undefined') {
+                    this.$nextTick(() => {
+                        const el = document.getElementById('hcaptcha-container');
+                        if (el) {
+                            this.captchaWidgetId = hcaptcha.render(el, {
+                                sitekey: data.site_key,
+                                callback: (token) => { this.captchaToken = token; },
+                                'expired-callback': () => { this.captchaToken = null; },
+                            });
+                        }
+                    });
+                }
+            }
+        } catch {}
+    },
+    async submit() {
+        this.submitting = true;
+        this.error = null;
+        try {
+            const body = {
+                location: this.loc.code,
+                first_map: this.firstMap,
+                enable_direct_connect: this.enableDirectConnect,
+            };
+            if (this.captchaToken) body.captcha_token = this.captchaToken;
+            const resp = await fetch('/api/reservations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const result = await resp.json();
+            if (resp.ok) {
+                window.location.href = '/reservations/' + result.id;
+            } else if (resp.status === 428) {
+                this.captchaRequired = true;
+                this.error = 'Please complete the captcha verification.';
+                if (!this.captchaSiteKey) {
+                    try {
+                        const check = await fetch('/api/captcha/check');
+                        if (check.ok) {
+                            const data = await check.json();
+                            this.captchaSiteKey = data.site_key || '';
+                        }
+                    } catch {}
+                }
+                if (this.captchaSiteKey && typeof hcaptcha !== 'undefined' && this.captchaWidgetId === null) {
+                    this.$nextTick(() => {
+                        const el = document.getElementById('hcaptcha-container');
+                        if (el) {
+                            this.captchaWidgetId = hcaptcha.render(el, {
+                                sitekey: this.captchaSiteKey,
+                                callback: (token) => { this.captchaToken = token; },
+                                'expired-callback': () => { this.captchaToken = null; },
+                            });
+                        }
+                    });
+                }
+                this.submitting = false;
+            } else {
+                this.error = result.detail || 'Failed to create reservation';
+                if (this.captchaWidgetId !== null && typeof hcaptcha !== 'undefined') {
+                    hcaptcha.reset(this.captchaWidgetId);
+                    this.captchaToken = null;
+                }
+                this.submitting = false;
+            }
+        } catch (err) {
+            this.error = 'Network error — check your connection and try again.';
+            this.submitting = false;
+        }
+    }
+}" x-init="
+    if (typeof _homeMaps !== 'undefined' && _homeMaps.length) {
+        firstMap = _homeMaps[0].name;
+    } else {
+        firstMap = '';
+    }
+    status = typeof _initialStatus !== 'undefined' ? _initialStatus : {};
+    $nextTick(() => {
+        if (document.readyState === 'complete') loadOrRunPings();
+        else window.addEventListener('load', () => loadOrRunPings());
+    });
+    setInterval(() => fetch('/api/status').then(r => r.json()).then(data => status = data), 10000);
+">
+    {% if error %}
+    <div class="mb-6 p-3 bg-red-100 border border-red-200 rounded text-red-800 text-sm">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="text-center mb-8">
+        <h1 class="text-2xl font-semibold text-slate-900 mb-2">{{ _('home.heading') }}</h1>
+        <p class="text-slate-500 text-sm">{{ _('home.choose_locations', count=locations|length if locations else 29) }}</p>
+    </div>
+
+    {% if beta_mode %}
+    <div class="mb-6 p-3 bg-slate-100 border border-slate-200 rounded text-slate-600 text-sm text-center">
+        <strong>🔒 {{ _('home.beta_mode') }}</strong> — {{ _('home.beta_notice') }}
+    </div>
+    {% endif %}
+
+    {% if active_reservation %}
+    <div class="mb-6 p-4 bg-white shadow-sm border border-slate-200 rounded-lg flex items-center justify-between">
+        <div>
+            <p class="text-sm font-medium text-slate-800">{{ _('home.active_reservation') }}</p>
+            <p class="text-xs text-slate-500 mt-0.5">#{{ active_reservation.reservation_number }} &mdash; {{
+                location_cities.get(active_reservation.location, active_reservation.location) }}</p>
+        </div>
+        <a href="/reservations/{{ active_reservation.id }}"
+            class="px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+            {{ _('home.view') }}
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- Status -->
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">{{ _('home.server_status') }}</h2>
+            {% if not user %}
+            <a href="/login" class="hover:opacity-80 transition-opacity">
+                {% if login_image_wide_url %}
+                <img src="{{ login_image_wide_url }}" alt="Login with Steam" class="h-7">
+                {% else %}
+                <span class="text-sm text-slate-500 hover:text-slate-900">{{ _('nav.login_alt') }}</span>
+                {% endif %}
+            </a>
+            {% elif can_reserve %}
+            <span class="text-xs text-slate-300">{{ _('home.click_to_reserve') }}</span>
+            {% endif %}
+        </div>
+
+        <!-- Filters -->
+        <div class="flex flex-wrap items-center gap-1 mb-3">
+            <template x-for="c in continents" :key="c">
+                <button x-show="continents.length > 2" @click="activeContinent = c; sortBy = 'region'"
+                    :class="activeContinent === c && sortBy === 'region' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
+                    class="px-2.5 py-1 text-xs rounded-full transition-colors" x-text="c"></button>
+            </template>
+            <button x-show="pingDone" @click="sortBy = 'ping'; activeContinent = 'All'"
+                :class="sortBy === 'ping' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
+                class="px-2.5 py-1 text-xs rounded-full transition-colors">📍 {{ _('home.by_ping') }}</button>
+        </div>
+
+        <div class="space-y-0">
+            <template x-for="item in flatList" :key="item.type === 'header' ? 'h-' + item.name : item.entry[0]">
+                <div>
+                    <template x-if="item.type === 'header'">
+                        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider pt-4 pb-1 first:pt-1"
+                            x-text="item.name"></div>
+                    </template>
+                    <template x-if="item.type === 'row'">
+                        <div class="flex items-center justify-between py-2 border-b border-slate-200 -mx-1 px-1 rounded transition-colors"
+                            {% if can_reserve %} @click="openModal(item.entry[0], item.entry[1])"
+                            :class="item.entry[1].enabled && item.entry[1].available > 0 ? 'cursor-pointer hover:bg-slate-100' : 'opacity-50'"
+                            {% endif %}>
+                            <div class="flex items-center gap-2">
+                                <template x-if="item.entry[1].flag">
+                                    <img :src="item.entry[1].flag.src" :alt="item.entry[1].flag.alt"
+                                        class="w-5 h-5 shrink-0">
+                                </template>
+                                <div>
+                                    <span class="text-slate-800"
+                                        x-text="item.entry[1].city || item.entry[1].name"></span><span
+                                        class="text-slate-400 text-sm" x-show="item.entry[1].country"
+                                        x-text="', ' + item.entry[1].country"></span>
+                                </div>
+                                <span x-show="item.entry[1].instant"
+                                    class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded cursor-help"
+                                    title="{{ _('home.instant_tooltip') }}">⚡ {{ _('home.instant') }}</span>
+                                <span x-show="item.entry[1].recommended"
+                                    class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded cursor-help"
+                                    title="{{ _('home.sdr_tooltip') }}">🛡️ {{ _('home.sdr') }}</span>
+                                <span x-show="pingDone && bestPingCode === item.entry[0]"
+                                    class="text-xs px-1.5 py-0.5 bg-brand-100 text-brand-700 rounded cursor-help"
+                                    title="{{ _('home.lowest_ping_tooltip') }}">📍 {{ _('home.lowest_ping') }}</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <span class="flex items-center justify-center w-5 h-4 leading-none"
+                                    :class="pings[item.entry[0]] ? 'cursor-help' : ''"
+                                    :title="pings[item.entry[0]] ? (_approxPings.has(item.entry[0]) ? '~' : '') + pings[item.entry[0]] + ' ms' : (typeof _pingUrls !== 'undefined' && _pingUrls[item.entry[0]] ? (pingDone ? '{{ _('home.ping_timed_out') }}' : '{{ _('home.ping_measuring') }}') : '{{ _('home.ping_not_available') }}')">
+                                    <svg viewBox="0 0 20 16" class="block w-5 h-4">
+                                        <!-- Bar 1 -->
+                                        <rect x="1" y="12" width="3" height="4" rx="0.5"
+                                            :class="pings[item.entry[0]] ? 'fill-current' : 'fill-slate-200'"
+                                            :style="pings[item.entry[0]] ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : pings[item.entry[0]] < 100 ? '#a16207' : pings[item.entry[0]] < 200 ? '#ea580c' : '#dc2626') : ''" />
+                                        <!-- Bar 2 (<150ms) -->
+                                        <rect x="6" y="8" width="3" height="8" rx="0.5"
+                                            :class="pings[item.entry[0]] && pings[item.entry[0]] < 150 ? 'fill-current' : 'fill-slate-200'"
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 150 ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : pings[item.entry[0]] < 100 ? '#a16207' : '#ea580c') : ''" />
+                                        <!-- Bar 3 (<100ms) -->
+                                        <rect x="11" y="4" width="3" height="12" rx="0.5"
+                                            :class="pings[item.entry[0]] && pings[item.entry[0]] < 100 ? 'fill-current' : 'fill-slate-200'"
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 100 ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : '#a16207') : ''" />
+                                        <!-- Bar 4 (<50ms) -->
+                                        <rect x="16" y="0" width="3" height="16" rx="0.5"
+                                            :class="pings[item.entry[0]] && pings[item.entry[0]] < 50 ? 'fill-current' : 'fill-slate-200'"
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 50 ? 'color:#15803d' : ''" />
+                                    </svg>
+                                </span>
+                                <span class="text-sm hidden sm:inline min-w-[10rem] text-right tabular-nums">
+                                    <span class="text-brand-400 inline-block min-w-[2ch] text-right" x-text="item.entry[1].active"></span>
+                                    <span class="text-slate-400">{{ _('home.active') }}</span>
+                                    <span class="text-slate-300 mx-1">/</span>
+                                    <span class="text-green-800 inline-block min-w-[2ch] text-right" x-text="item.entry[1].available"></span>
+                                    <span class="text-slate-400"
+                                        title="Remaining slots across all regions">{{ _('home.available') }}</span>
+                                </span>
+                                <span x-show="!item.entry[1].enabled"
+                                    class="text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">
+                                    {{ _('home.disabled') }}
+                                </span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <div x-show="Object.keys(status).length === 0" class="text-slate-400 text-sm py-2">
+                {{ _('home.loading') }}
+            </div>
+        </div>
+    </div>
+
+    {% if not cloud_configured and user %}
+    <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-sm">
+        {{ _('home.not_configured') }}
+    </div>
+    {% endif %}
+
+    <!-- Reservation dialog -->
+    {% if can_reserve %}
+    <div x-show="modalOpen" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+        @keydown.escape.window="modalOpen = false">
+        <div class="absolute inset-0 bg-black/60" @click="!submitting && (modalOpen = false)"></div>
+        <div class="relative w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-2xl p-5">
+            <div class="mb-4">
+                <h2 class="text-base font-semibold text-slate-900"
+                    x-text="loc ? (loc.city || loc.name) + (loc.country ? ', ' + loc.country : '') : ''"></h2>
+                <div class="flex gap-1.5 mt-1">
+                    <span x-show="loc && loc.instant"
+                        class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded">⚡ {{ _('home.instant') }}</span>
+                    <span x-show="loc && loc.recommended"
+                        class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">🛡️ {{ _('home.sdr') }}</span>
+                </div>
+            </div>
+
+            <div x-show="error" class="mb-3 p-2.5 bg-red-100 border border-red-200 rounded text-red-800 text-sm"
+                x-text="error"></div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">{{ _('home.first_map') }}</label>
+                    <select x-model="firstMap"
+                        class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                        <template x-for="m in (typeof _homeMaps !== 'undefined' ? _homeMaps : [])" :key="m.name">
+                            <option :value="m.name" x-text="m.display"></option>
+                        </template>
+                    </select>
+                </div>
+                <div x-show="loc" class="flex items-center justify-between">
+                    <div>
+                        <label class="text-sm text-slate-700">{{ _('home.enable_direct_connect') }}</label>
+                        <p class="text-xs text-slate-400">{{ _('home.direct_connect_hint') }}</p>
+                    </div>
+                    <button type="button" @click="enableDirectConnect = !enableDirectConnect"
+                        :class="enableDirectConnect ? 'bg-brand-600' : 'bg-slate-200'"
+                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
+                        <span :class="enableDirectConnect ? 'translate-x-4' : 'translate-x-0'"
+                            class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                    </button>
+                </div>
+                <p class="text-xs text-slate-400">{{ _('home.reservation_duration', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) }}
+                </p>
+                <div x-show="captchaRequired" x-cloak class="mt-1">
+                    <div id="hcaptcha-container"></div>
+                </div>
+            </div>
+
+            <div class="flex gap-2 mt-5">
+                <button @click="modalOpen = false" :disabled="submitting"
+                    class="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors">
+                    {{ _('home.cancel') }}
+                </button>
+                <button @click="submit()" :disabled="submitting"
+                    class="flex-1 px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-100 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors">
+                    <span x-show="!submitting">{{ _('home.reserve') }}</span>
+                    <span x-show="submitting" class="inline-flex items-center justify-center gap-1.5">
+                        <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none"
+                            viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                            </circle>
+                            <path class="opacity-75" fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                            </path>
+                        </svg>
+                        {{ _('home.creating') }}
+                    </span>
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if hcaptcha_site_key %}
+<script src="https://js.hcaptcha.com/1/api.js?render=explicit" async defer></script>
+{% endif %}
+<script>
+    var _initialStatus = {{ initial_status | tojson }};
+    var _homeMaps = {{ maps | tojson }};
+    var _pingUrls = {{ ping_urls | tojson }};
+    var _approxPings = new Set({{ approximate_pings | tojson }});
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database
+data/
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+agent/tf2-agent
+static/tf2-agent
+static/css/tailwind.css
+
+# Instance-specific templates and locale overrides
+templates/privacy.html
+locales/local/
+
+# Development files
+.claude/
+.agent/
+mockups/
+plans/
+external/

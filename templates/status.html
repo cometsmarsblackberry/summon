@@ -1,0 +1,994 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('status.title', number=reservation.reservation_number) }}{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-8">
+    {% if message %}
+    <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
+        {{ message }}
+    </div>
+    {% endif %}
+
+    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6" x-data="{
+        status: '{{ reservation.status.value }}',
+        currentMap: '{{ reservation.first_map }}',
+        endsAt: '{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:00Z') }}',
+        connection: null,
+        error: null,
+        bootProgress: null,
+        displayProgress: 5,
+        pollInterval: null,
+        players: [],
+        playerCount: 0,
+        playersUpdatedAt: 0,
+        playerSnapshotStaleSeconds: 25,
+        emptySince: null,
+        playerPollInterval: null,
+        autoEndSeconds: 30 * 60,
+        countdownInterval: null,
+        _tick: 0,
+
+        normalizeIso(value) {
+            if (!value) return value;
+            if (/[zZ]|[+-]\d{2}:\d{2}$/.test(value)) return value;
+            return value + 'Z';
+        },
+
+        formatLocal(value) {
+            if (!value) return '';
+            const date = new Date(this.normalizeIso(value));
+            return Number.isNaN(date.getTime())
+                ? ''
+                : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: false });
+        },
+
+        formatUtc(value) {
+            if (!value) return '';
+            const date = new Date(this.normalizeIso(value));
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+        },
+
+        init() {
+            // Always fetch latest status on load
+            this.fetchStatus();
+
+            if (this.status === 'pending' || this.status === 'provisioning') {
+                this.connectSSE();
+                // Also poll as fallback every 3 seconds
+                this.pollInterval = setInterval(() => this.fetchStatus(), 3000);
+            }
+
+            if (this.status === 'active') {
+                this.startPlayerPolling();
+                this.loadConfigs();
+            }
+
+            // Watch for status changes to start/stop player polling
+            this.$watch('status', (newStatus, oldStatus) => {
+                if (newStatus === 'active' && oldStatus !== 'active') {
+                    this.startPlayerPolling();
+                    this.loadConfigs();
+                } else if (newStatus !== 'active' && oldStatus === 'active') {
+                    this.stopPlayerPolling();
+                }
+            });
+        },
+        
+        async fetchStatus() {
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const prevStatus = this.status;
+                    this.status = data.status;
+                    if (data.ends_at) {
+                        this.endsAt = data.ends_at;
+                    }
+                    if (this.status !== prevStatus && (this.status === 'pending' || this.status === 'provisioning')) {
+                        this.resetBootProgress();
+                    }
+                    // Always update connection info if available
+                    if (data.sdr_ip || data.enable_direct_connect) {
+                        this.connection = {
+                            sdr_ip: data.sdr_ip,
+                            sdr_port: data.sdr_port,
+                            sdr_tv_port: data.sdr_tv_port,
+                            password: data.password,
+                            // NOTE: Intentionally excluded from API responses to avoid exposing RCON creds.
+                            // Re-enable by uncommenting this line (and the backend fields).
+                            // rcon_password: data.rcon_password,
+                            tv_password: data.tv_password,
+                            enable_direct_connect: data.enable_direct_connect,
+                            ip_address: data.ip_address,
+                        };
+                    }
+                    // Show failure reason from polling (fallback if SSE missed it)
+                    if (data.status === 'failed' && data.failure_reason && !this.error) {
+                        this.error = data.failure_reason;
+                    }
+                    // Boot progress from polling (fallback if SSE missed it)
+                    if (data.boot_progress && this.status === 'provisioning') {
+                        this.setBootProgress(data.boot_progress);
+                    }
+                    // Stop polling for terminal states
+                    if (['active', 'ended', 'failed', 'cancelled'].includes(this.status)) {
+                        this.stopPolling();
+                        this.resetBootProgress();
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to fetch status:', e);
+            }
+        },
+        
+        stopPolling() {
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+                this.pollInterval = null;
+            }
+        },
+
+        resetBootProgress() {
+            this.bootProgress = null;
+            this.displayProgress = 5;
+        },
+
+        setBootProgress(progress) {
+            if (!progress) return;
+            const next = Number(progress.progress);
+            if (Number.isFinite(next)) {
+                this.displayProgress = Math.max(this.displayProgress, next);
+            }
+            this.bootProgress = progress;
+        },
+        
+        connectSSE() {
+            const es = new EventSource('/api/reservations/{{ reservation.id }}/events');
+            
+            es.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'status_change') {
+                    const prevStatus = this.status;
+                    this.status = data.status;
+                    if (this.status !== prevStatus && (this.status === 'pending' || this.status === 'provisioning')) {
+                        this.resetBootProgress();
+                    }
+                    if (data.connection) {
+                        this.connection = data.connection;
+                    }
+                    if (data.error) {
+                        this.error = data.error;
+                    }
+                    if (data.boot_progress && this.status === 'provisioning') {
+                        this.setBootProgress(data.boot_progress);
+                    }
+                    if (['active', 'ended', 'failed', 'cancelled'].includes(this.status)) {
+                        this.resetBootProgress();
+                    }
+                } else if (data.type === 'boot_progress') {
+                    if (data.boot_progress) {
+                        this.setBootProgress(data.boot_progress);
+                    }
+                } else if (data.type === 'error') {
+                    this.error = data.message;
+                    es.close();
+                }
+                
+                // Close SSE for terminal states
+                if (['active', 'ended', 'failed', 'cancelled'].includes(this.status)) {
+                    es.close();
+                    this.stopPolling();
+                }
+            };
+            
+            es.onerror = () => {
+                es.close();
+                // Keep polling as fallback
+            };
+        },
+        
+        async endReservation() {
+            if (!confirm('End this reservation?')) return;
+            
+            const response = await fetch('/api/reservations/{{ reservation.id }}/end', {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                this.status = 'ended';
+            }
+        },
+
+        async restartServer() {
+            if (!confirm('Restart the server? This will disconnect players.')) return;
+
+            this.error = null;
+            const response = await fetch('/api/reservations/{{ reservation.id }}/restart', {
+                method: 'POST'
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                this.error = data?.detail || 'Failed to restart server.';
+                return;
+            }
+
+            this.status = 'provisioning';
+            this.emptySince = null;
+            this.resetBootProgress();
+            this.setBootProgress({ progress: 5, message: 'Restarting server...' });
+            this.stopPolling();
+            this.connectSSE();
+            this.pollInterval = setInterval(() => this.fetchStatus(), 3000);
+        },
+
+        startPlayerPolling() {
+            if (this.playerPollInterval) return;
+            this.fetchPlayers();
+            this.playerPollInterval = setInterval(() => { this.fetchPlayers(); this.fetchStatus(); }, 10000);
+            this.countdownInterval = setInterval(() => { this._tick++; }, 1000);
+        },
+
+        stopPlayerPolling() {
+            if (this.playerPollInterval) {
+                clearInterval(this.playerPollInterval);
+                this.playerPollInterval = null;
+            }
+            if (this.countdownInterval) {
+                clearInterval(this.countdownInterval);
+                this.countdownInterval = null;
+            }
+        },
+
+        async fetchPlayers() {
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/players');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const updatedAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+                    this.players = data.players || [];
+                    this.playerCount = data.player_count || 0;
+                    this.playersUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : 0;
+                    this.emptySince = data.empty_since || null;
+                }
+            } catch (e) {
+                console.error('Failed to fetch players:', e);
+            }
+        },
+
+        // Competitive configs
+        configs: {},
+        configsAvailable: false,
+        configsLoaded: false,
+        configsHint: '',
+        selectedLeague: '',
+        selectedFormat: '',
+        selectedConfig: '',
+        configLoading: false,
+        configMessage: '',
+        configError: '',
+
+        async loadConfigs() {
+            if (this.configsLoaded) return;
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/configs');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    this.configsAvailable = !!data.available;
+                    this.configsHint = data.message || '';
+                    this.configs = data.configs || {};
+                    if (data.available) {
+                        this.configsLoaded = true;
+                    } else {
+                        // Agent may not have reported configs yet; retry
+                        this.scheduleConfigRetry();
+                    }
+                } else {
+                    this.configsAvailable = false;
+                    this.configsHint = 'Config list unavailable. Use !config in-game to see available configs.';
+                    this.configs = {};
+                    this.scheduleConfigRetry();
+                }
+            } catch (e) {
+                console.error('Failed to load configs:', e);
+                this.configsAvailable = false;
+                this.configsHint = 'Config list unavailable. Use !config in-game to see available configs.';
+                this.configs = {};
+                this.scheduleConfigRetry();
+            }
+        },
+
+        scheduleConfigRetry() {
+            if (this._configRetries >= 6) return;  // Stop after ~30s
+            this._configRetries = (this._configRetries || 0) + 1;
+            setTimeout(() => this.loadConfigs(), 5000);
+        },
+
+        get leagueOptions() {
+            return Object.keys(this.configs).filter(l => l !== 'Reset');
+        },
+
+        get formatOptions() {
+            if (!this.selectedLeague || !this.configs[this.selectedLeague]) return [];
+            return Object.keys(this.configs[this.selectedLeague]);
+        },
+
+        get configOptions() {
+            if (!this.selectedLeague || !this.selectedFormat) return [];
+            const league = this.configs[this.selectedLeague];
+            return league ? (league[this.selectedFormat] || []) : [];
+        },
+
+        async execConfig(cfgFile) {
+            this.configLoading = true;
+            this.configMessage = '';
+            this.configError = '';
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({cfg_file: cfgFile}),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    this.configMessage = data.message;
+                    setTimeout(() => this.configMessage = '', 5000);
+                } else {
+                    this.configError = data.detail || 'Failed to load config.';
+                    setTimeout(() => this.configError = '', 5000);
+                }
+            } catch (e) {
+                this.configError = 'Failed to load config.';
+                setTimeout(() => this.configError = '', 5000);
+            }
+            this.configLoading = false;
+        },
+
+        async resetConfig() {
+            await this.execConfig('summon_reset');
+        },
+
+        // Map change
+        mapChanging: false,
+        mapChangeOpen: false,
+        mapList: [],
+        mapListLoaded: false,
+        mapMessage: '',
+        mapError: '',
+
+        async openMapChange() {
+            this.mapChangeOpen = true;
+            if (!this.mapListLoaded) {
+                try {
+                    const resp = await fetch('/api/reservations/{{ reservation.id }}/maps');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        this.mapList = data.maps || [];
+                        this.mapListLoaded = true;
+                    }
+                } catch (e) {
+                    console.error('Failed to load maps:', e);
+                }
+            }
+        },
+
+        async changeMap(mapName) {
+            this.mapChanging = true;
+            this.mapMessage = '';
+            this.mapError = '';
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/changelevel', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({map_name: mapName}),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    this.currentMap = mapName;
+                    this.mapMessage = data.message;
+                    this.mapChangeOpen = false;
+                    setTimeout(() => this.mapMessage = '', 5000);
+                } else {
+                    this.mapError = data.detail || 'Failed to change map.';
+                    setTimeout(() => this.mapError = '', 5000);
+                }
+            } catch (e) {
+                this.mapError = 'Failed to change map.';
+                setTimeout(() => this.mapError = '', 5000);
+            }
+            this.mapChanging = false;
+        },
+
+        kickedIds: {},
+
+        async kickPlayer(steamId, playerName) {
+            if (!confirm('Kick ' + playerName + '?')) return;
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/kick', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({steam_id: steamId}),
+                });
+                if (!resp.ok) {
+                    const data = await resp.json().catch(() => null);
+                    this.error = data?.detail || 'Failed to kick player.';
+                    return;
+                }
+                this.kickedIds[steamId] = true;
+                setTimeout(() => { delete this.kickedIds[steamId]; this.kickedIds = {...this.kickedIds}; }, 5000);
+            } catch (e) {
+                this.error = 'Failed to kick player.';
+            }
+        },
+
+        get autoEndRemaining() {
+            void this._tick; // trigger reactivity every second
+            if (!this.emptySince) return null;
+            const emptyAt = new Date(this.normalizeIso(this.emptySince)).getTime();
+            if (!Number.isFinite(emptyAt)) return null;
+            const endAt = emptyAt + this.autoEndSeconds * 1000;
+            const remaining = Math.max(0, Math.floor((endAt - Date.now()) / 1000));
+            return remaining;
+        },
+
+        formatAutoEnd(seconds) {
+            if (seconds === null || seconds === undefined) return '';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            if (m > 0) return m + 'm ' + s + 's';
+            return s + 's';
+        },
+
+        liveConnectTime(snapshotSeconds) {
+            void this._tick;
+            if (!snapshotSeconds || snapshotSeconds < 0) return 0;
+            if (!this.playersUpdatedAt) return snapshotSeconds;
+            const elapsed = Math.floor((Date.now() - this.playersUpdatedAt) / 1000);
+            return snapshotSeconds + elapsed;
+        },
+
+        get playerSnapshotAge() {
+            void this._tick;
+            if (!this.playersUpdatedAt) return null;
+            return Math.max(0, Math.floor((Date.now() - this.playersUpdatedAt) / 1000));
+        },
+
+        get playersAreStale() {
+            const age = this.playerSnapshotAge;
+            return age !== null && age > this.playerSnapshotStaleSeconds;
+        },
+
+        formatSnapshotAge(seconds) {
+            if (seconds === null || seconds === undefined) return '';
+            if (seconds < 60) return seconds + 's ago';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            if (m < 60) return m + 'm ' + s + 's ago';
+            const h = Math.floor(m / 60);
+            const remM = m % 60;
+            return h + 'h ' + remM + 'm ago';
+        },
+
+        formatPing(ping) {
+            if (this.playersAreStale) return '--';
+            if (!Number.isFinite(ping) || ping < 0) return '--';
+            return ping + ' ms';
+        },
+
+        formatConnectTime(seconds) {
+            if (!seconds || seconds < 0) return '0s';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            if (h > 0) return h + 'h ' + m + 'm';
+            if (m > 0) return m + 'm ' + s + 's';
+            return s + 's';
+        }
+    }">
+        <div class="flex items-center justify-between mb-4">
+            <h1 class="text-lg font-semibold">{{ _('status.heading', number=reservation.reservation_number) }}</h1>
+            <span class="px-2 py-1 text-xs font-medium rounded" :class="{
+                    'bg-yellow-100 text-yellow-800': status === 'pending',
+                    'bg-blue-100 text-blue-800': status === 'provisioning',
+                    'bg-green-100 text-green-800': status === 'active',
+                    'bg-slate-100 text-slate-500': status === 'ended' || status === 'cancelled',
+                    'bg-red-100 text-red-800': status === 'failed',
+                }" x-text="status"></span>
+        </div>
+
+        {% if owner_name %}
+        <div class="mb-4 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-sm">
+            {{ _('status.admin_viewing', owner=owner_name) }}
+        </div>
+        {% endif %}
+
+        <!-- Progress bar during provisioning -->
+        <div x-show="status === 'pending' || status === 'provisioning'" class="mb-6">
+            <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div class="h-full bg-brand-500 rounded-full transition-all duration-300"
+                    :class="{ 'animate-pulse': !bootProgress }"
+                    :style="'width: ' + displayProgress + '%'"></div>
+            </div>
+            <p class="text-sm text-slate-500 mt-2">
+                <span x-show="status === 'pending'">{{ _('status.waiting_provision') }}</span>
+                <span x-show="status === 'provisioning' && !bootProgress">{{ _('status.creating_instance') }}</span>
+                <span x-show="bootProgress" x-text="bootProgress ? bootProgress.message : ''"></span>
+            </p>
+            <p x-show="bootProgress && displayProgress" class="text-xs text-slate-400 mt-1"
+                x-text="displayProgress + '% complete'"></p>
+        </div>
+
+        <!-- Failed state -->
+        <div x-show="status === 'failed'" x-cloak class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-red-800 font-medium mb-2">❌ {{ _('status.server_failed') }}</p>
+            <p class="text-red-600 text-sm"
+                x-text="error || 'An error occurred during provisioning. Please try again.'"></p>
+            <a href="/reserve"
+                class="inline-block mt-3 px-4 py-2 bg-red-100 hover:bg-red-200 rounded text-sm text-red-800">
+                {{ _('status.try_again') }}
+            </a>
+        </div>
+
+        <!-- Error message (for other errors) -->
+        <div x-show="error && status !== 'failed'" x-cloak
+            class="mb-4 p-3 bg-red-100 border border-red-200 rounded text-red-800 text-sm" x-text="error"></div>
+
+        <!-- Server details -->
+        <div class="space-y-3">
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">{{ _('status.location') }}</span>
+                <span class="text-slate-800">{{ location_display }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">{{ _('status.map') }}</span>
+                <span class="text-slate-800 flex items-center gap-1">
+                    <span x-text="currentMap"></span>
+                    {% if map_download_url %}
+                    <a href="{{ map_download_url }}" title="{{ _('status.download_map') }}" class="text-slate-400 hover:text-brand-400 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </a>
+                    {% endif %}
+                    {% if is_owner %}
+                    <button x-show="status === 'active'" x-cloak
+                        @click="openMapChange()"
+                        title="{{ _('status.change_map') }}"
+                        class="text-slate-400 hover:text-brand-400 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                        </svg>
+                    </button>
+                    {% endif %}
+                </span>
+            </div>
+            {% if is_owner %}
+            <div x-show="mapMessage && !mapChangeOpen" x-cloak
+                class="p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs" x-text="mapMessage"></div>
+            <!-- Map change dropdown -->
+            <div x-show="mapChangeOpen" x-cloak x-transition class="mt-1">
+                <div x-show="mapError"
+                    class="mb-2 p-2 bg-red-50 border border-red-200 rounded text-red-800 text-xs" x-text="mapError"></div>
+                <div class="flex gap-2">
+                    <select x-ref="mapSelect" :disabled="mapChanging || !mapListLoaded"
+                        class="flex-1 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
+                        <option value="">{{ _('status.select_map') }}</option>
+                        <template x-for="m in mapList" :key="m.name">
+                            <option :value="m.name" x-text="m.display || m.name"></option>
+                        </template>
+                    </select>
+                    <button @click="if ($refs.mapSelect.value) changeMap($refs.mapSelect.value)"
+                        :disabled="mapChanging"
+                        class="px-3 py-1.5 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded text-brand-800 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!mapChanging">{{ _('status.change') }}</span>
+                        <span x-show="mapChanging" x-cloak>...</span>
+                    </button>
+                    <button @click="mapChangeOpen = false"
+                        class="px-2 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-500 text-xs transition-colors">
+                        {{ _('home.cancel') }}
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        <div class="flex justify-between text-sm">
+            <span class="text-slate-500">{{ _('status.ends_at') }}</span>
+            <span class="text-slate-800" :title="formatUtc(endsAt)" x-text="formatLocal(endsAt)"></span>
+        </div>
+            <div class="flex justify-between text-sm">
+                <span class="text-slate-500">{{ _('status.auto_end_when_empty') }}</span>
+                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default') }}</span>
+                <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800"
+                    x-text="formatAutoEnd(autoEndRemaining)"></span>
+            </div>
+        </div>
+
+        <!-- Connection details (owner only, when active) -->
+        {% if is_owner %}
+        <div x-show="status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+            x-data="{ connType: 'connect', connTypeInit: false }"
+            x-effect="if (!connTypeInit && connection && connection.enable_direct_connect && connection.ip_address) { connType = 'direct'; connTypeInit = true; }">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">{{ _('status.connection_details') }}</h2>
+                <select x-model="connType"
+                    class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">
+                    <option value="connect">{{ _('status.connect') }}</option>
+                    <option value="stv">{{ _('status.source_tv') }}</option>
+                    <template x-if="connection && connection.enable_direct_connect && connection.ip_address">
+                        <option value="direct">{{ _('status.direct_connect') }}</option>
+                    </template>
+                    <template x-if="connection && connection.enable_direct_connect && connection.ip_address">
+                        <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
+                    </template>
+                </select>
+            </div>
+
+            <!-- Connect (SDR) -->
+            <div x-show="connType === 'connect' && connection && connection.sdr_ip" x-data="{ copied: false }">
+                <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                        x-text="'connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password"></code>
+                    <button
+                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
+                        class="px-2 py-2 rounded text-xs transition-colors"
+                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                        <span x-show="!copied">{{ _('status.copy') }}</span>
+                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- SourceTV (SDR) -->
+            <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
+                <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                        x-text="'connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password"></code>
+                    <button
+                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        class="px-2 py-2 rounded text-xs transition-colors"
+                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                        <span x-show="!copied">{{ _('status.copy') }}</span>
+                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Direct Connect -->
+            <div x-show="connType === 'direct' && connection && connection.ip_address" x-data="{ copied: false }">
+                <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                        x-text="'connect ' + connection.ip_address + ':27015; password ' + connection.password"></code>
+                    <button
+                        @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27015; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
+                        class="px-2 py-2 rounded text-xs transition-colors"
+                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                        <span x-show="!copied">{{ _('status.copy') }}</span>
+                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Direct SourceTV -->
+            <div x-show="connType === 'direct_stv' && connection && connection.ip_address" x-data="{ copied: false }">
+                <div class="flex items-center gap-2">
+                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                        x-text="'connect ' + connection.ip_address + ':27020; password ' + connection.tv_password"></code>
+                    <button
+                        @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27020; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        class="px-2 py-2 rounded text-xs transition-colors"
+                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                        <span x-show="!copied">{{ _('status.copy') }}</span>
+                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="mt-6 space-y-2" x-show="status === 'active' || status === 'provisioning'">
+            <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning'"
+                class="w-full px-4 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-amber-800 text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
+                {{ _('status.restart_server') }}
+            </button>
+            <button @click="endReservation()"
+                class="w-full px-4 py-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg text-red-800 text-sm transition-colors">
+                {{ _('status.end_reservation') }}
+            </button>
+        </div>
+
+        <!-- Competitive config (owner only, when active) -->
+        <div x-show="status === 'active'" x-cloak
+            class="mt-6 pt-6 border-t border-slate-200">
+            <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.competitive_config') }}</h2>
+
+            <div x-show="configMessage" x-cloak
+                class="mb-3 p-2 bg-green-50 border border-green-200 rounded text-green-800 text-sm" x-text="configMessage"></div>
+            <div x-show="configError" x-cloak
+                class="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-800 text-sm" x-text="configError"></div>
+            <p x-show="configsLoaded && !configsAvailable" x-cloak
+                class="mb-3 text-sm text-slate-500" x-text="configsHint"></p>
+
+            <div class="space-y-2">
+                <div class="grid grid-cols-3 gap-2">
+                    <select x-model="selectedLeague" @change="selectedFormat = ''; selectedConfig = '';"
+                        :disabled="!configsAvailable"
+                        class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
+                        <option value="">{{ _('status.league') }}</option>
+                        <template x-for="league in leagueOptions" :key="league">
+                            <option :value="league" x-text="league"></option>
+                        </template>
+                    </select>
+
+                    <select x-model="selectedFormat" @change="selectedConfig = '';"
+                        :disabled="!configsAvailable || !selectedLeague"
+                        class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
+                        <option value="">{{ _('status.format') }}</option>
+                        <template x-for="fmt in formatOptions" :key="fmt">
+                            <option :value="fmt" x-text="fmt"></option>
+                        </template>
+                    </select>
+
+                    <select x-model="selectedConfig"
+                        :disabled="!configsAvailable || !selectedFormat"
+                        class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
+                        <option value="">{{ _('status.config') }}</option>
+                        <template x-for="c in configOptions" :key="c.cfg_file">
+                            <option :value="c.cfg_file" x-text="c.name"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <div class="flex gap-2">
+                    <button @click="execConfig(selectedConfig)"
+                        :disabled="!configsAvailable || !selectedConfig || configLoading"
+                        class="flex-1 px-3 py-1.5 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded text-brand-800 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!configLoading">{{ _('status.load_config') }}</span>
+                        <span x-show="configLoading" x-cloak>{{ _('status.loading_config') }}</span>
+                    </button>
+                    <button @click="resetConfig()"
+                        :disabled="configLoading"
+                        class="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-600 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="{{ _('status.reset_tooltip') }}">
+                        {{ _('status.reset') }}
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Upload links (logs.tf / demos.tf) -->
+        <div x-show="status === 'active' || status === 'ended'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+            x-data="{
+                uploads: [],
+                uploadsLoaded: false,
+
+                async fetchUploads() {
+                    try {
+                        const resp = await fetch('/api/reservations/{{ reservation.id }}/uploads');
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            this.uploads = data.uploads || [];
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch uploads:', e);
+                    }
+                    this.uploadsLoaded = true;
+                },
+
+                get logs() { return this.uploads.filter(u => u.type === 'log'); },
+                get demos() { return this.uploads.filter(u => u.type === 'demo'); },
+            }"
+            x-init="fetchUploads(); if (status === 'active') { setInterval(() => fetchUploads(), 30000); }">
+
+            <div x-show="uploads.length > 0">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.uploads') }}</h2>
+                <div class="space-y-2">
+                    <template x-for="upload in uploads" :key="upload.type + upload.external_id">
+                        <div class="flex items-center justify-between text-sm">
+                            <a :href="upload.url" target="_blank" rel="noopener"
+                                class="text-brand-400 hover:text-brand-300 hover:underline flex items-center gap-1.5">
+                                <span x-show="upload.type === 'log'" class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">LOG</span>
+                                <span x-show="upload.type === 'demo'" class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">STV</span>
+                                <span x-text="upload.url"></span>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                                    <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                </svg>
+                            </a>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        {% if is_owner %}
+        <!-- Player list -->
+        <div x-show="status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">{{ _('status.players') }}</h2>
+                <span class="px-2 py-0.5 text-xs font-medium rounded-full"
+                    :class="playerCount > 0 ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-500'"
+                    x-text="playerCount"></span>
+            </div>
+
+            <p x-show="playersUpdatedAt" x-cloak class="mb-3 text-xs"
+                :class="playersAreStale ? 'text-amber-600' : 'text-slate-400'"
+                x-text="playersAreStale ? 'Live player stats are delayed. Last update ' + formatSnapshotAge(playerSnapshotAge) : 'Updated ' + formatSnapshotAge(playerSnapshotAge)"></p>
+
+            <div x-show="playerCount === 0" class="text-sm text-slate-500">
+                <p>{{ _('status.no_players') }}</p>
+            </div>
+
+            <!-- Player table -->
+            <div x-show="playerCount > 0">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs text-slate-400 uppercase tracking-wide">
+                            <th class="pb-2 font-medium">{{ _('status.player') }}</th>
+                            <th class="pb-2 font-medium text-right">{{ _('status.connected') }}</th>
+                            <th class="pb-2 font-medium text-right">{{ _('status.ping') }}</th>
+                            {% if is_owner %}<th class="pb-2 w-8"></th>{% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="p in players" :key="p.steam_id">
+                            <tr class="border-t border-slate-100">
+                                <td class="py-1.5">
+                                    <a :href="'https://steamcommunity.com/profiles/' + p.steam_id"
+                                        target="_blank" rel="noopener"
+                                        class="text-brand-600 hover:text-brand-500 hover:underline"
+                                        x-text="p.name"></a>
+                                </td>
+                                <td class="py-1.5 text-right text-slate-500 tabular-nums"
+                                    x-text="formatConnectTime(liveConnectTime(p.connect_time))"></td>
+                                <td class="py-1.5 text-right text-slate-500 tabular-nums"
+                                    x-text="formatPing(p.ping)"></td>
+                                {% if is_owner %}
+                                <td class="py-1.5">
+                                    <div class="flex items-center justify-end">
+                                        <span x-show="kickedIds[p.steam_id]" x-cloak class="text-xs text-red-600">{{ _('status.kicked') }}</span>
+                                        <button x-show="!kickedIds[p.steam_id]" @click="kickPlayer(p.steam_id, p.name)"
+                                            class="text-slate-300 hover:text-red-600 transition-colors leading-none"
+                                            title="{{ _('status.kick_player') }}">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                                {% endif %}
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+	        {% if is_owner %}
+	        <!-- Stats for nerds (collapsible, hidden by default) -->
+	        <div x-show="status === 'provisioning' || status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+	            x-data="{
+	                open: false,
+	                stats: null,
+	                providerName: null,
+	                fetchingStats: false,
+	                statsPollInterval: null,
+
+	                startStatsPolling() {
+	                    this.fetchStats();
+	                    // Agent stats update ~every 10s by default; poll a bit faster than that for snappy UI.
+	                    this.statsPollInterval = setInterval(() => this.fetchStats(), 5000);
+	                },
+
+	                stopStatsPolling() {
+	                    if (this.statsPollInterval) {
+	                        clearInterval(this.statsPollInterval);
+	                        this.statsPollInterval = null;
+	                    }
+	                },
+
+	                async fetchStats() {
+	                    if (document.hidden || this.fetchingStats) return;
+	                    this.fetchingStats = true;
+	                    try {
+	                        const resp = await fetch('/api/reservations/{{ reservation.id }}/stats');
+	                        if (resp.ok) {
+	                            const data = await resp.json();
+	                            if (data.stats) this.stats = data.stats;
+	                            if (data.provider_name) this.providerName = data.provider_name;
+	                        }
+	                    } catch (e) {
+	                        console.error('Failed to fetch stats:', e);
+	                    } finally {
+	                        this.fetchingStats = false;
+	                    }
+	                },
+
+                fmtUptime(sec) {
+                    if (!sec) return '--';
+                    const d = Math.floor(sec / 86400);
+                    const h = Math.floor((sec % 86400) / 3600);
+                    const m = Math.floor((sec % 3600) / 60);
+                    if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+                    if (h > 0) return h + 'h ' + m + 'm';
+                    return m + 'm';
+                },
+
+                fmtPct(v) {
+                    if (v === null || v === undefined) return '--';
+                    return v.toFixed(1) + '%';
+                },
+
+                fmtLoad(v) {
+                    if (v === null || v === undefined) return '--';
+                    return v.toFixed(2);
+                }
+            }">
+            <button @click="open = !open; if (open && !statsPollInterval) startStatsPolling(); if (!open) stopStatsPolling();"
+                class="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 transition-transform" :class="open && 'rotate-90'" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                </svg>
+                {{ _('status.stats_for_nerds') }}
+            </button>
+
+            <div x-show="open" x-cloak x-transition class="mt-3">
+                <div x-show="!stats" class="text-xs text-slate-400">{{ _('status.waiting_for_data') }}</div>
+                <div x-show="stats" class="space-y-2 text-xs font-mono">
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-slate-50 rounded-lg p-3">
+                        <template x-if="stats && stats.cpu_model">
+                            <div class="contents">
+                                <div class="text-slate-400">{{ _('status.cpu_model') }}</div>
+                                <div class="text-slate-700 text-right" x-text="stats.cpu_model"></div>
+                            </div>
+                        </template>
+
+                        <div class="text-slate-400">{{ _('status.cpus') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? stats.num_cpus : '--'"></div>
+
+                        <div class="text-slate-400">{{ _('status.cpu') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? fmtPct(stats.cpu_percent) : '--'"></div>
+
+                        <div class="text-slate-400">{{ _('status.load_avg') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? (fmtLoad(stats.load_avg_1) + '  ' + fmtLoad(stats.load_avg_5) + '  ' + fmtLoad(stats.load_avg_15)) : '--'"></div>
+
+                        <div class="text-slate-400">{{ _('status.ram') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? (stats.mem_used_mb + ' / ' + stats.mem_total_mb + ' MB (' + fmtPct(stats.mem_percent) + ')') : '--'"></div>
+
+                        <template x-if="stats && stats.swap_total_mb > 0">
+                            <div class="contents">
+                                <div class="text-slate-400">{{ _('status.swap') }}</div>
+                                <div class="text-slate-700 text-right" x-text="stats.swap_used_mb + ' / ' + stats.swap_total_mb + ' MB (' + fmtPct(stats.swap_percent) + ')'"></div>
+                            </div>
+                        </template>
+
+                        <div class="text-slate-400">{{ _('status.disk') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? (stats.disk_used_gb.toFixed(1) + ' / ' + stats.disk_total_gb.toFixed(1) + ' GB (' + fmtPct(stats.disk_percent) + ')') : '--'"></div>
+
+                        <div class="text-slate-400">{{ _('status.uptime') }}</div>
+                        <div class="text-slate-700 text-right" x-text="stats ? fmtUptime(stats.uptime_sec) : '--'"></div>
+
+                        <template x-if="providerName">
+                            <div class="contents">
+                                <div class="text-slate-400">{{ _('status.provider') }}</div>
+                                <div class="text-slate-700 text-right" x-text="providerName"></div>
+                            </div>
+                        </template>
+                    </div>
+                    <p x-show="stats && stats.updated_at" class="text-slate-400 text-right"
+                        x-text="stats && stats.updated_at ? 'Updated ' + new Date(stats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''"></p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Back link -->
+        <div class="mt-6 text-center">
+            <a href="/" class="text-sm text-slate-500 hover:text-slate-900">{{ _('status.back_to_home') }}</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
