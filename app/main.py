@@ -202,15 +202,31 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down %s...", settings.site_name)
 
 
+def _read_version_file() -> dict:
+    """Read .version file written by deploy.sh."""
+    try:
+        info = {}
+        for line in Path(".version").read_text().strip().splitlines():
+            key, _, value = line.partition("=")
+            if key and value:
+                info[key] = value
+        return info
+    except FileNotFoundError:
+        return {"describe": "dev"}
+
+
+_version_info = _read_version_file()
+
 app = FastAPI(
     title=settings.site_name,
     description="On-demand TF2 server reservation system",
-    version="0.1.0",
+    version=_version_info.get("describe", "dev"),
     lifespan=lifespan,
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
     openapi_url="/openapi.json" if settings.api_docs_enabled else None,
 )
+app.state.version_info = _version_info
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
