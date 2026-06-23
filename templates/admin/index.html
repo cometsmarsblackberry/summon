@@ -450,6 +450,12 @@
             </div>
         </div>
     </div>
+    {% if version_info %}
+    <div class="text-xs text-slate-400 text-right -mt-2 mb-1">
+        {{ version_info.get("describe", "dev") }}
+        {% if version_info.get("date") %}<span class="ml-1 text-slate-300">deployed {{ version_info["date"][:10] }}</span>{% endif %}
+    </div>
+    {% endif %}
 
     <!-- ═══ Tab Navigation ═══ -->
     <nav class="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">

@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     gcore_project_id: int = 0
     onidel_api_key: str = ""
     onidel_team_id: str = ""
+    oneqode_username: str = ""
+    oneqode_password: str = ""
+    oneqode_project_id: str = ""
+    oneqode_auth_url: str = "https://auth.ocs.oneqode.com:5000/v3/"
+    oneqode_region: str = "Guam"
+    oneqode_image_id: str = ""
+    oneqode_network_id: str = ""
     
     # Steam
     steam_api_key: str = ""
@@ -104,6 +111,10 @@ class Settings(BaseSettings):
     # IPinfo token for geolocation (optional — ping submissions work without it)
     ipinfo_token: str = ""
 
+    # Instance isolation — filter cloud API list calls by site_name prefix.
+    # Enable when multiple deployments share the same provider API key.
+    instance_isolation: bool = False
+
     # SSH public key for debugging access to cloud instances (optional)
     ssh_pubkey: str = ""
 
@@ -151,9 +162,14 @@ class Settings(BaseSettings):
         return bool(self.onidel_api_key) and bool(self.onidel_team_id)
 
     @property
+    def oneqode_configured(self) -> bool:
+        """Check if OneQode API is configured."""
+        return bool(self.oneqode_username) and bool(self.oneqode_password) and bool(self.oneqode_project_id)
+
+    @property
     def cloud_configured(self) -> bool:
         """Check if any cloud provider is configured."""
-        return self.vultr_configured or self.gcore_configured or self.onidel_configured
+        return self.vultr_configured or self.gcore_configured or self.onidel_configured or self.oneqode_configured
     
     @property
     def steam_configured(self) -> bool:

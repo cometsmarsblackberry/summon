@@ -35,6 +35,7 @@ Thumbs.db
 agent/tf2-agent
 static/tf2-agent
 static/css/tailwind.css
+.version
 
 # Instance-specific templates and locale overrides
 templates/privacy.html

@@ -78,6 +78,9 @@ def get_cloud_client(provider_code: str = "vultr") -> Optional[CloudProvider]:
     elif provider_code == "onidel":
         from app.services.onidel import get_onidel_client
         return get_onidel_client()
+    elif provider_code == "oneqode":
+        from app.services.oneqode import get_oneqode_client
+        return get_oneqode_client()
     return None
 
 
@@ -85,4 +88,4 @@ def any_cloud_configured() -> bool:
     """Check if any cloud provider is configured."""
     from app.config import get_settings
     settings = get_settings()
-    return settings.vultr_configured or settings.gcore_configured or settings.onidel_configured
+    return settings.vultr_configured or settings.gcore_configured or settings.onidel_configured or settings.oneqode_configured

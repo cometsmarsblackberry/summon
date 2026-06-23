@@ -668,6 +668,7 @@ async def seed_default_providers(db: AsyncSession) -> None:
         Provider(code="vultr", name="Vultr", billing_model="hourly", enabled=True, display_order=1),
         Provider(code="gcore", name="Gcore", billing_model="hourly", enabled=False, display_order=2),
         Provider(code="onidel", name="Onidel", billing_model="hourly", enabled=False, display_order=3),
+        Provider(code="oneqode", name="OneQode", billing_model="hourly", enabled=False, display_order=4),
     ]
 
     existing = await db.execute(select(Provider.code))
@@ -888,7 +889,8 @@ async def sync_cloud_instances() -> int:
                 continue
 
             try:
-                cloud_instances = await client.list_instances()
+                label_prefix = settings.site_name if settings.instance_isolation else None
+                cloud_instances = await client.list_instances(label_prefix=label_prefix)
                 cloud_by_id = {inst.id: inst for inst in cloud_instances}
             except Exception as e:
                 logger.error(f"Failed to list instances from {provider_code}: {e}")

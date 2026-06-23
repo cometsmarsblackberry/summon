@@ -318,6 +318,7 @@ async def admin_panel(
             "reservation_settings": reservation_settings,
             "captcha_settings": captcha_settings,
             "trivia": trivia_data,
+            "version_info": request.app.state.version_info,
         }
     )
 
