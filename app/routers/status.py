@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 _status_cache: dict | None = None
 _status_cache_time: float = 0
 _STATUS_CACHE_TTL: float = 3.0  # seconds
+_STATUS_CACHE_CONTROL = "public, max-age=2, s-maxage=3, stale-while-revalidate=5"
+_status_cache_lock = asyncio.Lock()
 
 _reservation_stream_lock = asyncio.Lock()
 _reservation_stream_counts: dict[int, int] = {}
@@ -184,16 +186,26 @@ async def _build_status(db: AsyncSession) -> dict:
 
 
 @router.get("/api/status")
-async def get_status(db: AsyncSession = Depends(get_db)):
-    """Cached wrapper around _build_status."""
+async def get_status(response: Response, db: AsyncSession = Depends(get_db)):
+    """Return public status without stampeding the database on cache expiry."""
     global _status_cache, _status_cache_time
+    response.headers["Cache-Control"] = _STATUS_CACHE_CONTROL
+
     now = time.monotonic()
     if _status_cache is not None and (now - _status_cache_time) < _STATUS_CACHE_TTL:
         return _status_cache
-    result = await _build_status(db)
-    _status_cache = result
-    _status_cache_time = now
-    return result
+
+    # Multiple clients often poll on the same cadence. Only one request should
+    # rebuild the shared status snapshot when its short TTL expires.
+    async with _status_cache_lock:
+        now = time.monotonic()
+        if _status_cache is not None and (now - _status_cache_time) < _STATUS_CACHE_TTL:
+            return _status_cache
+
+        result = await _build_status(db)
+        _status_cache = result
+        _status_cache_time = time.monotonic()
+        return result
 
 
 @router.get("/api/banned_user.cfg")

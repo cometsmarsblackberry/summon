@@ -2,7 +2,7 @@
 
 import enum
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -24,6 +24,11 @@ class Reservation(Base):
     """Server reservation record."""
     
     __tablename__ = "reservations"
+    __table_args__ = (
+        Index("ix_reservations_created_at", "created_at"),
+        Index("ix_reservations_user_created_at", "user_id", "created_at"),
+        Index("ix_reservations_status_created_at", "status", "created_at"),
+    )
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     reservation_number: Mapped[int] = mapped_column(
