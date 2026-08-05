@@ -1,4 +1,14 @@
-# Stage 1: Build Tailwind CSS
+# Stage 1: Build the game-server agent served by the web application
+FROM golang:1.25-bookworm AS agent-builder
+
+WORKDIR /build/agent
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -trimpath -ldflags "-s -w" -o /tf2-agent .
+
+# Stage 2: Build Tailwind CSS
 FROM debian:bookworm-slim AS css-builder
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -12,7 +22,7 @@ COPY static/src/ static/src/
 COPY templates/ templates/
 RUN tailwindcss -i static/src/input.css -o static/css/tailwind.css --minify
 
-# Stage 2: Application
+# Stage 3: Application
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -24,8 +34,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY . .
 
-# Copy built CSS from stage 1
+# Copy built CSS from stage 2
 COPY --from=css-builder /build/static/css/tailwind.css static/css/tailwind.css
+
+# The agent is intentionally generated during the image build rather than
+# committed as a platform-specific binary.
+COPY --from=agent-builder --chmod=755 /tf2-agent static/tf2-agent
 
 # Create data directory and non-root user
 RUN mkdir -p /data/logs \
