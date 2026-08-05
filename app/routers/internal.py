@@ -831,6 +831,32 @@ class PlayerUpdateResponse(BaseModel):
     success: bool
 
 
+def _update_persisted_player_state(
+    reservation: Reservation,
+    player_count: int,
+    now: datetime,
+) -> bool:
+    """Apply player-derived fields and report whether a database write is needed."""
+    changed = False
+
+    if player_count > 0 and not reservation.player_joined:
+        reservation.player_joined = True
+        changed = True
+
+    if player_count > reservation.peak_player_count:
+        reservation.peak_player_count = player_count
+        changed = True
+
+    if player_count == 0 and reservation.empty_since is None:
+        reservation.empty_since = now
+        changed = True
+    elif player_count > 0 and reservation.empty_since is not None:
+        reservation.empty_since = None
+        changed = True
+
+    return changed
+
+
 @router.post("/reservations/{reservation_number}/players", response_model=PlayerUpdateResponse)
 async def update_players(
     reservation_number: int,
@@ -864,20 +890,15 @@ async def update_players(
         if reservation.status != ReservationStatus.ACTIVE:
             return PlayerUpdateResponse(success=True)
 
-        # Track if any player has ever joined
-        if body.player_count > 0:
-            reservation.player_joined = True
+        changed = _update_persisted_player_state(
+            reservation,
+            body.player_count,
+            datetime.now(timezone.utc),
+        )
 
-        # Track peak player count
-        if body.player_count > reservation.peak_player_count:
-            reservation.peak_player_count = body.player_count
-
-        # Track empty_since for auto-end
-        if body.player_count == 0 and reservation.empty_since is None:
-            reservation.empty_since = datetime.now(timezone.utc)
-        elif body.player_count > 0:
-            reservation.empty_since = None
-
-        await db.commit()
+        # Periodic updates arrive every ten seconds. Avoid an unnecessary
+        # transaction commit when none of the persisted state changed.
+        if changed:
+            await db.commit()
 
     return PlayerUpdateResponse(success=True)

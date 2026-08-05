@@ -376,10 +376,6 @@ def _install_i18n_globals(templates: Jinja2Templates) -> None:
         from app.i18n import translate
         return translate(key, locale, **kwargs)
 
-    # Newer Jinja2 includes env.globals in the template cache key, which fails
-    # when any global value is unhashable (e.g. LOCALE_NAMES dict).
-    env.cache = None  # type: ignore[assignment]
-
     env.globals["_"] = _translate
     env.globals["SUPPORTED_LOCALES"] = SUPPORTED_LOCALES
     env.globals["LOCALE_NAMES"] = LOCALE_NAMES

@@ -1,7 +1,7 @@
 """Database setup and session management."""
 
-import os
 from pathlib import Path
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -24,6 +24,24 @@ engine = create_async_engine(
     settings.database_url,
     echo=False,
 )
+
+
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine.sync_engine, "connect")
+    def _configure_sqlite(dbapi_connection, _connection_record) -> None:
+        """Tune every pooled SQLite connection for concurrent web traffic."""
+        cursor = dbapi_connection.cursor()
+        try:
+            # WAL lets readers continue while player/status updates are written.
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.execute("PRAGMA wal_autocheckpoint=1000")
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            cursor.execute("PRAGMA cache_size=-20000")  # 20 MiB per connection
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
 async_session_maker = async_sessionmaker(
     engine,
@@ -60,6 +78,7 @@ async def create_tables():
         # MOTD access token (unguessable URL)
         await _migrate_add_column(conn, "reservations", "motd_token", "VARCHAR(64) DEFAULT ''")
         await _backfill_motd_tokens(conn)
+        await _migrate_create_indexes(conn)
 
 
 # Tables and columns that are allowed in migrations (prevents SQL injection)
@@ -105,6 +124,16 @@ async def _backfill_motd_tokens(conn):
             text("UPDATE reservations SET motd_token = :token WHERE id = :id"),
             {"token": token, "id": row_id},
         )
+
+
+async def _migrate_create_indexes(conn) -> None:
+    """Create indexes used by rate-limit and historical-stat queries."""
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS ix_reservations_created_at ON reservations (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_reservations_user_created_at ON reservations (user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_reservations_status_created_at ON reservations (status, created_at)",
+    ):
+        await conn.execute(text(statement))
 
 
 async def get_db() -> AsyncSession:

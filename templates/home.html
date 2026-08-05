@@ -257,7 +257,11 @@
         if (document.readyState === 'complete') loadOrRunPings();
         else window.addEventListener('load', () => loadOrRunPings());
     });
-    setInterval(() => fetch('/api/status').then(r => r.json()).then(data => status = data), 10000);
+    setInterval(() => {
+        if (!document.hidden) {
+            fetch('/api/status').then(r => r.json()).then(data => status = data);
+        }
+    }, 10000);
 ">
     {% if error %}
     <div class="mb-6 p-3 bg-red-100 border border-red-200 rounded text-red-800 text-sm">
