@@ -26,3 +26,16 @@ docker-compose up       # http://localhost:8000
 ```
 
 Requires Python 3.12+, Docker, and Go 1.19+ (for the agent).
+
+## Container Images
+
+GitHub Actions builds and publishes the production images to GitHub Container
+Registry on every push to `main` and every `v*.*.*` tag:
+
+- `ghcr.io/cometsmarsblackberry/summon`
+- `ghcr.io/cometsmarsblackberry/summon-caddy`
+- `ghcr.io/cometsmarsblackberry/summon-caddy-bunny`
+
+The default branch is tagged as `latest` and `main`. Version tags produce
+semantic-version tags, and every published build also receives a `sha-<commit>`
+tag. Pull requests build the images for validation without publishing them.
