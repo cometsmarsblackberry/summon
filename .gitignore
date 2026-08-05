@@ -41,6 +41,7 @@ templates/privacy.html
 locales/local/
 
 # Development files
+.version
 .claude/
 .agent/
 mockups/
