@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import re
+import shlex
 from typing import Optional
 
 import httpx
@@ -141,11 +142,28 @@ class OnidelClient(CloudProvider):
             if key not in _FCOS_ONLY_ENVS:
                 env_lines.append(f"Environment={key}={value}")
 
-        # Extract agent download URL from curl command
+        # Extract the final HTTP(S) argument from the agent curl command.
         agent_url = ""
-        curl_match = re.search(r"curl\s+-L\s+-o\s+\S+\s+(\S+)", agent_unit)
-        if curl_match:
-            agent_url = curl_match.group(1)
+        for line in agent_unit.splitlines():
+            stripped_line = line.strip()
+            if not stripped_line.startswith("ExecStartPre="):
+                continue
+            command = stripped_line.removeprefix("ExecStartPre=")
+            try:
+                arguments = shlex.split(command)
+            except ValueError:
+                continue
+            if not arguments or not arguments[0].endswith("/curl"):
+                continue
+            agent_url = next(
+                (arg for arg in reversed(arguments) if arg.startswith(("http://", "https://"))),
+                "",
+            )
+            if agent_url:
+                break
+
+        if not agent_url:
+            raise CloudProviderError("Agent download URL not found in Ignition config")
 
         # Extract SSH keys from Ignition passwd section
         ssh_keys = []
@@ -177,21 +195,20 @@ if [ ! -f /var/swapfile ]; then
     mkswap /var/swapfile
     swapon /var/swapfile
 fi
-{ssh_setup}
-# Download agent
-curl -L -o /usr/local/bin/tf2-agent {agent_url}
-chmod +x /usr/local/bin/tf2-agent
-
-# Create systemd service
+{ssh_setup}# Create systemd service
 cat > /etc/systemd/system/tf2-agent.service << 'UNIT'
 [Unit]
 Description=TF2 Server Agent
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 {env_block}
+ExecStartPre=/usr/bin/curl --fail --location --retry 5 --retry-connrefused --retry-delay 5 --output /usr/local/bin/tf2-agent.download {agent_url}
+ExecStartPre=/usr/bin/chmod 0755 /usr/local/bin/tf2-agent.download
+ExecStartPre=/usr/bin/mv /usr/local/bin/tf2-agent.download /usr/local/bin/tf2-agent
 ExecStart=/usr/local/bin/tf2-agent
 Restart=always
 RestartSec=5

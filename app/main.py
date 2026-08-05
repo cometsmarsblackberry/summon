@@ -243,12 +243,20 @@ class LocaleMiddleware(BaseHTTPMiddleware):
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
-    """Default to no-store for dynamic responses so CDN does not cache them."""
+    """Cache successful static assets, never dynamic responses or errors."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if "cache-control" not in response.headers and not request.url.path.startswith("/static"):
-            response.headers["Cache-Control"] = "no-store"
+        if "cache-control" not in response.headers:
+            is_successful_static = (
+                request.url.path.startswith("/static/")
+                and 200 <= response.status_code < 300
+            )
+            response.headers["Cache-Control"] = (
+                "public, max-age=2592000, immutable"
+                if is_successful_static
+                else "no-store"
+            )
         return response
 
 

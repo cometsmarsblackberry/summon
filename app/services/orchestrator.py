@@ -2,9 +2,12 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import select
@@ -25,6 +28,18 @@ from app.services.provider_priority import (
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_AGENT_BINARY_PATH = Path(__file__).resolve().parents[2] / "static" / "tf2-agent"
+
+
+@lru_cache(maxsize=1)
+def _agent_binary_sha256() -> str:
+    """Return the embedded agent digest used to bypass stale CDN objects."""
+    try:
+        return hashlib.sha256(_AGENT_BINARY_PATH.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise CloudProviderError(
+            "TF2 agent binary is missing from the web image"
+        ) from exc
 
 
 async def is_hourly_billing(location_code: str, db: AsyncSession) -> bool:
@@ -66,8 +81,12 @@ def generate_ignition_config(
     ws_protocol = "wss" if settings.base_url.startswith("https") else "ws"
     ws_url = f"{ws_protocol}://{base_host}/internal/ws/agent/{instance_id}"
 
-    # Agent download URL
-    agent_url = f"{settings.base_url}/static/tf2-agent"
+    # Fingerprint the URL so a CDN cannot serve an older agent (or a cached
+    # not-found response) after the web image changes.
+    agent_url = (
+        f"{settings.base_url}/static/tf2-agent"
+        f"?sha256={_agent_binary_sha256()}"
+    )
 
     ignition_config = {
         "ignition": {
@@ -91,6 +110,7 @@ Description=TF2 Server Agent
 After=network-online.target user@1000.service
 Wants=network-online.target
 Requires=user@1000.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -103,8 +123,9 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 	Environment=RESERVATION_ID={reservation.id}
 	Environment=HEARTBEAT_INTERVAL_SEC={settings.agent_heartbeat_interval_sec}
 	ExecStartPre=/usr/bin/loginctl enable-linger core
-	ExecStartPre=/usr/bin/curl -L -o /home/core/tf2-agent {agent_url}
-	ExecStartPre=/usr/bin/chmod +x /home/core/tf2-agent
+	ExecStartPre=/usr/bin/curl --fail --location --retry 5 --retry-connrefused --retry-delay 5 --output /home/core/tf2-agent.download {agent_url}
+	ExecStartPre=/usr/bin/chmod 0755 /home/core/tf2-agent.download
+	ExecStartPre=/usr/bin/mv /home/core/tf2-agent.download /home/core/tf2-agent
 	ExecStartPre=/usr/bin/chcon -t bin_t /home/core/tf2-agent
 	ExecStart=/home/core/tf2-agent
 Restart=always
