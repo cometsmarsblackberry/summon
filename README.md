@@ -6,7 +6,7 @@ On-demand Team Fortress 2 server reservation system. Reserve temporary game serv
 
 ```bash
 cp .env.example .env   # configure API keys, Steam credentials, etc.
-docker-compose up       # http://localhost:8000
+docker compose up       # http://localhost:8000
 ```
 
 ## Features
@@ -19,13 +19,15 @@ docker-compose up       # http://localhost:8000
 - SourceMod plugin for in-game management
 - i18n and customizable branding
 
-## Production Deploy
+## Production
 
 ```bash
-./deploy.sh [--bunny] [user@host]
+cp .env.example .env
+mkdir -p data/logs
+sudo chown -R 65532:65532 data
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
-
-Requires Python 3.12+, Docker, and Go 1.19+ (for the agent).
 
 ## Container Images
 
@@ -34,7 +36,6 @@ Registry on every push to `main` and every `v*.*.*` tag:
 
 - `ghcr.io/cometsmarsblackberry/summon`
 - `ghcr.io/cometsmarsblackberry/summon-caddy`
-- `ghcr.io/cometsmarsblackberry/summon-caddy-bunny`
 
 The default branch is tagged as `latest` and `main`. Version tags produce
 semantic-version tags, and every published build also receives a `sha-<commit>`

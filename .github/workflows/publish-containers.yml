@@ -41,10 +41,6 @@ jobs:
             dockerfile: Dockerfile.caddy
             image_suffix: -caddy
             cache_scope: summon-caddy
-          - name: Caddy with Bunny IP support
-            dockerfile: Dockerfile.caddy.bunny
-            image_suffix: -caddy-bunny
-            cache_scope: summon-caddy-bunny
 
     steps:
       - name: Check out repository
