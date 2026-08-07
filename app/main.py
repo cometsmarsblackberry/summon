@@ -205,7 +205,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.site_name,
     description="On-demand TF2 server reservation system",
-    version="0.1.0",
+    version="0.1.1",
     lifespan=lifespan,
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
