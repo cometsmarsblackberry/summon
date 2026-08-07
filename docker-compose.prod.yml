@@ -25,10 +25,9 @@ services:
       start_period: 10s
 
   caddy:
-    image: ${CADDY_IMAGE:-ghcr.io/cometsmarsblackberry/summon-caddy:latest}
+    image: ${CADDY_IMAGE:-caddy:2.11.4-alpine}
     environment:
-      - BASE_URL=${BASE_URL}
-      - ORIGIN_HOSTNAME=${ORIGIN_HOSTNAME:-}
+      ORIGIN_HOSTNAME: ${ORIGIN_HOSTNAME:-${BASE_URL}}
     ports:
       - "80:80"
       - "443:443"
