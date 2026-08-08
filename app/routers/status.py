@@ -16,6 +16,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.database import get_db
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.instance import EnabledLocation, CloudInstance, Provider, LocationProvider
+from app.services.cloud_provider import get_cloud_client
 from app.services.failure_messages import public_failure_reason
 from app.services.orchestrator import get_enabled_locations
 from app.utils.location_flags import build_location_flag
@@ -37,6 +38,34 @@ _reservation_stream_ip_counts: dict[tuple[int, str], int] = {}
 _MAX_STREAMS_PER_RESERVATION = 12
 _MAX_STREAMS_PER_IP_OWNER = 4
 _MAX_STREAMS_PER_IP_ANON = 2
+
+
+async def _get_vultr_account_instance_count(local_instance_ids: set[str]) -> int:
+    """Return quota-consuming Vultr instances visible to this API key.
+
+    CloudInstance only contains servers created by this deployment.  Multiple
+    deployments (or manually-created servers) can share a Vultr account, so
+    the provider API is the source of truth for the account-wide quota.  Keep
+    local IDs in the union to cover the short interval before a newly-created
+    instance appears in Vultr's list response.
+    """
+    client = get_cloud_client("vultr")
+    if not client:
+        return len(local_instance_ids)
+
+    try:
+        remote_instances = await client.list_instances()
+    except Exception as exc:
+        # Status should remain available during a provider API outage.  The
+        # local count is the same conservative fallback used before account
+        # reconciliation was added.
+        logger.warning("Failed to load account-wide Vultr usage: %s", exc)
+        return len(local_instance_ids)
+
+    remote_instance_ids = {
+        instance.id for instance in remote_instances if instance.id
+    }
+    return len(local_instance_ids | remote_instance_ids)
 
 
 async def _build_status(db: AsyncSession) -> dict:
@@ -86,15 +115,14 @@ async def _build_status(db: AsyncSession) -> dict:
     )
     all_instances = list(instance_result.scalars().all())
 
-    # Active (non-warm) counts per provider (global) and per (provider, region)
-    active_by_provider: dict[str, int] = {}
+    # Active (non-warm) counts per (provider, region)
     active_by_provider_region: dict[tuple[str, str], int] = {}
-    # Warm counts per location, per provider, per (provider, region)
+    # Warm counts per location and per (provider, region)
     warm_by_location: dict[str, int] = {}
-    warm_by_provider: dict[str, int] = {}
     warm_by_provider_region: dict[tuple[str, str], int] = {}
-    # Warm counts per (location, provider)
-    warm_by_loc_provider: dict[tuple[str, str], int] = {}
+    # IDs tracked by this deployment, used to merge local state with global
+    # provider account state without double-counting the same instance.
+    instance_ids_by_provider: dict[str, set[str]] = {}
 
     for inst in all_instances:
         prov = inst.provider_code
@@ -109,15 +137,14 @@ async def _build_status(db: AsyncSession) -> dict:
         if not prov:
             continue
 
+        instance_ids_by_provider.setdefault(prov, set()).add(inst.id)
+
         if inst.is_available:
             warm_by_location[inst.location] = warm_by_location.get(inst.location, 0) + 1
-            warm_by_provider[prov] = warm_by_provider.get(prov, 0) + 1
-            warm_by_loc_provider[(inst.location, prov)] = warm_by_loc_provider.get((inst.location, prov), 0) + 1
             if prov_region:
                 key = (prov, prov_region)
                 warm_by_provider_region[key] = warm_by_provider_region.get(key, 0) + 1
         else:
-            active_by_provider[prov] = active_by_provider.get(prov, 0) + 1
             if prov_region:
                 key = (prov, prov_region)
                 active_by_provider_region[key] = active_by_provider_region.get(key, 0) + 1
@@ -125,6 +152,18 @@ async def _build_status(db: AsyncSession) -> dict:
     # Load provider limits (only enabled providers)
     providers_result = await db.execute(select(Provider).where(Provider.enabled == True))
     providers: dict[str, Provider] = {p.code: p for p in providers_result.scalars().all()}
+
+    # Vultr's instance limit is global to the API account, not to this
+    # deployment's database.  Include instances created by other deployments
+    # (or manually) that use the same API key.
+    provider_instance_counts = {
+        provider_code: len(instance_ids)
+        for provider_code, instance_ids in instance_ids_by_provider.items()
+    }
+    if "vultr" in providers:
+        provider_instance_counts["vultr"] = await _get_vultr_account_instance_count(
+            instance_ids_by_provider.get("vultr", set())
+        )
 
     status = {}
     for location in locations:
@@ -157,9 +196,8 @@ async def _build_status(db: AsyncSession) -> dict:
                 region_warm = warm_by_provider_region.get(region_key, 0)
                 total_remaining += max(0, region_limit - region_active - region_warm)
             else:
-                provider_active = active_by_provider.get(lp.provider_code, 0)
-                provider_warm = warm_by_provider.get(lp.provider_code, 0)
-                total_remaining += max(0, default_limit - provider_active - provider_warm)
+                provider_in_use = provider_instance_counts.get(lp.provider_code, 0)
+                total_remaining += max(0, default_limit - provider_in_use)
 
         location_available = warm_count + total_remaining
 
