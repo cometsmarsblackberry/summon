@@ -5,6 +5,7 @@
 .env.local
 .claude/
 .agent/
+.playwright-mcp/
 
 venv/
 .venv/
