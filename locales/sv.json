@@ -7,7 +7,9 @@
         "my_reservations": "Mina reservationer",
         "admin": "Admin",
         "logout": "Logga ut",
-        "login_alt": "Logga in med Steam"
+        "login_alt": "Logga in med Steam",
+        "use_dark_mode": "Använd mörkt läge",
+        "use_light_mode": "Använd ljust läge"
     },
     "footer": {
         "about": "Om",

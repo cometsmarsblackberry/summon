@@ -364,19 +364,19 @@
                                         <!-- Bar 1 -->
                                         <rect x="1" y="12" width="3" height="4" rx="0.5"
                                             :class="pings[item.entry[0]] ? 'fill-current' : 'fill-slate-200'"
-                                            :style="pings[item.entry[0]] ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : pings[item.entry[0]] < 100 ? '#a16207' : pings[item.entry[0]] < 200 ? '#ea580c' : '#dc2626') : ''" />
+                                            :style="pings[item.entry[0]] ? 'color:' + (pings[item.entry[0]] < 50 ? 'var(--ping-good)' : pings[item.entry[0]] < 100 ? 'var(--ping-fair)' : pings[item.entry[0]] < 200 ? 'var(--ping-poor)' : 'var(--ping-bad)') : ''" />
                                         <!-- Bar 2 (<150ms) -->
                                         <rect x="6" y="8" width="3" height="8" rx="0.5"
                                             :class="pings[item.entry[0]] && pings[item.entry[0]] < 150 ? 'fill-current' : 'fill-slate-200'"
-                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 150 ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : pings[item.entry[0]] < 100 ? '#a16207' : '#ea580c') : ''" />
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 150 ? 'color:' + (pings[item.entry[0]] < 50 ? 'var(--ping-good)' : pings[item.entry[0]] < 100 ? 'var(--ping-fair)' : 'var(--ping-poor)') : ''" />
                                         <!-- Bar 3 (<100ms) -->
                                         <rect x="11" y="4" width="3" height="12" rx="0.5"
                                             :class="pings[item.entry[0]] && pings[item.entry[0]] < 100 ? 'fill-current' : 'fill-slate-200'"
-                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 100 ? 'color:' + (pings[item.entry[0]] < 50 ? '#15803d' : '#a16207') : ''" />
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 100 ? 'color:' + (pings[item.entry[0]] < 50 ? 'var(--ping-good)' : 'var(--ping-fair)') : ''" />
                                         <!-- Bar 4 (<50ms) -->
                                         <rect x="16" y="0" width="3" height="16" rx="0.5"
                                             :class="pings[item.entry[0]] && pings[item.entry[0]] < 50 ? 'fill-current' : 'fill-slate-200'"
-                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 50 ? 'color:#15803d' : ''" />
+                                            :style="pings[item.entry[0]] && pings[item.entry[0]] < 50 ? 'color:var(--ping-good)' : ''" />
                                     </svg>
                                 </span>
                                 <span class="text-sm hidden sm:inline min-w-[10rem] text-right tabular-nums">
@@ -448,7 +448,7 @@
                         :class="enableDirectConnect ? 'bg-brand-600' : 'bg-slate-200'"
                         class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
                         <span :class="enableDirectConnect ? 'translate-x-4' : 'translate-x-0'"
-                            class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                            class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
                     </button>
                 </div>
                 <p class="text-xs text-slate-400">{{ _('home.reservation_duration', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) }}

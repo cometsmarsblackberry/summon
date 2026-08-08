@@ -7,7 +7,9 @@
         "my_reservations": "Omat varaukset",
         "admin": "Ylläpito",
         "logout": "Kirjaudu ulos",
-        "login_alt": "Kirjaudu sisään Steamillä"
+        "login_alt": "Kirjaudu sisään Steamillä",
+        "use_dark_mode": "Käytä tummaa tilaa",
+        "use_light_mode": "Käytä vaaleaa tilaa"
     },
     "footer": {
         "about": "Tietoa",

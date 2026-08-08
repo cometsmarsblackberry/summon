@@ -7,7 +7,9 @@
         "my_reservations": "내 예약",
         "admin": "관리자",
         "logout": "로그아웃",
-        "login_alt": "Steam으로 로그인"
+        "login_alt": "Steam으로 로그인",
+        "use_dark_mode": "다크 모드 사용",
+        "use_light_mode": "라이트 모드 사용"
     },
     "footer": {
         "about": "소개",

@@ -26,6 +26,74 @@
     <!-- Tailwind CSS -->
     <link rel="stylesheet" href="/static/css/tailwind.css">
 
+    <!-- Apply the saved/system theme before first paint to avoid a flash. -->
+    <script>
+        (function () {
+            const storageKey = 'summon-theme';
+            const root = document.documentElement;
+            const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+            function savedTheme() {
+                try {
+                    const value = localStorage.getItem(storageKey);
+                    return value === 'dark' || value === 'light' ? value : null;
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function syncToggleLabels() {
+                const isDark = root.classList.contains('dark');
+                document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
+                    const label = isDark ? button.dataset.lightLabel : button.dataset.darkLabel;
+                    button.setAttribute('aria-label', label);
+                    button.setAttribute('title', label);
+                });
+            }
+
+            function applyTheme(theme, persist) {
+                const isDark = theme === 'dark';
+                root.classList.toggle('dark', isDark);
+                root.style.colorScheme = isDark ? 'dark' : 'light';
+
+                if (persist) {
+                    try {
+                        localStorage.setItem(storageKey, theme);
+                    } catch (_) {}
+                }
+
+                syncToggleLabels();
+            }
+
+            const stored = savedTheme();
+            applyTheme(stored || (systemTheme.matches ? 'dark' : 'light'), false);
+
+            window.summonTheme = {
+                toggle: function () {
+                    applyTheme(root.classList.contains('dark') ? 'light' : 'dark', true);
+                }
+            };
+
+            function followSystemTheme(event) {
+                if (!savedTheme()) {
+                    applyTheme(event.matches ? 'dark' : 'light', false);
+                }
+            }
+
+            if (systemTheme.addEventListener) {
+                systemTheme.addEventListener('change', followSystemTheme);
+            } else {
+                systemTheme.addListener(followSystemTheme);
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', syncToggleLabels);
+            } else {
+                syncToggleLabels();
+            }
+        })();
+    </script>
+
     <!-- Inter font (non-blocking) -->
     <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
     <link rel="preload" href="https://fonts.bunny.net/css?family=Inter:400,500,600,700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
@@ -69,6 +137,30 @@
                     {{ _('nav.admin') }}
                 </a>
                 {% endif %}
+                {% endif %}
+
+                <button type="button"
+                    data-theme-toggle
+                    data-dark-label="{{ _('nav.use_dark_mode') }}"
+                    data-light-label="{{ _('nav.use_light_mode') }}"
+                    aria-label="{{ _('nav.use_dark_mode') }}"
+                    title="{{ _('nav.use_dark_mode') }}"
+                    onclick="window.summonTheme.toggle()"
+                    class="theme-toggle inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2">
+                    <svg class="theme-icon-moon h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                        aria-hidden="true">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"></path>
+                    </svg>
+                    <svg class="theme-icon-sun h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                        aria-hidden="true">
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
+                    </svg>
+                </button>
+
+                {% if user %}
                 <a href="/profile" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
                     {% if user.avatar_url %}
                     <img src="{{ user.avatar_url }}" alt="" class="w-6 h-6 rounded">

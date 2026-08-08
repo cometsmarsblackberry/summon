@@ -7,7 +7,9 @@
         "my_reservations": "マイ予約",
         "admin": "管理者",
         "logout": "ログアウト",
-        "login_alt": "Steamでログイン"
+        "login_alt": "Steamでログイン",
+        "use_dark_mode": "ダークモードを使用",
+        "use_light_mode": "ライトモードを使用"
     },
     "footer": {
         "about": "概要",

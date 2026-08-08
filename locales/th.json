@@ -7,7 +7,9 @@
         "my_reservations": "การจองของฉัน",
         "admin": "ผู้ดูแลระบบ",
         "logout": "ออกจากระบบ",
-        "login_alt": "เข้าสู่ระบบด้วย Steam"
+        "login_alt": "เข้าสู่ระบบด้วย Steam",
+        "use_dark_mode": "ใช้โหมดมืด",
+        "use_light_mode": "ใช้โหมดสว่าง"
     },
     "footer": {
         "about": "เกี่ยวกับ",
