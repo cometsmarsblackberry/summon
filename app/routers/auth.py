@@ -379,6 +379,15 @@ async def get_current_user(
     return user
 
 
+def has_beta_access(user: Optional[User]) -> bool:
+    """Return whether a user may use the site under the current beta settings."""
+    if not settings.beta_mode:
+        return True
+    if user is None:
+        return False
+    return user.is_admin or user.steam_id in settings.beta_allowlist_steam_id_list
+
+
 async def require_user(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -389,7 +398,7 @@ async def require_user(
         raise HTTPException(status_code=401, detail=t("errors.not_authenticated"))
     if user.is_banned:
         raise HTTPException(status_code=403, detail=t("errors.account_banned"))
-    if settings.beta_mode and not user.is_admin:
+    if not has_beta_access(user):
         raise HTTPException(status_code=403, detail=t("home.beta_notice"))
     return user
 
@@ -402,7 +411,7 @@ async def require_user_allow_banned(
     user = await get_current_user(request, db)
     if user is None:
         raise HTTPException(status_code=401, detail=t("errors.not_authenticated"))
-    if settings.beta_mode and not user.is_admin:
+    if not has_beta_access(user):
         raise HTTPException(status_code=403, detail=t("home.beta_notice"))
     return user
 

@@ -105,10 +105,17 @@ async def lifespan(app: FastAPI):
             "Agent tokens may appear in URLs and intermediary logs."
         )
     if settings.beta_mode and not settings.admin_steam_id_list:
-        logger.warning(
-            "BETA_MODE=true but ADMIN_STEAM_IDS is empty. "
-            "No one will be able to reserve or access /admin until an admin SteamID is configured."
-        )
+        if settings.beta_allowlist_steam_id_list:
+            logger.warning(
+                "BETA_MODE=true but ADMIN_STEAM_IDS is empty. "
+                "Allowlisted users can reserve, but no one can access /admin."
+            )
+        else:
+            logger.warning(
+                "BETA_MODE=true but both ADMIN_STEAM_IDS and "
+                "BETA_ALLOWLIST_STEAM_IDS are empty. No one will be able to "
+                "reserve or access /admin until a SteamID is configured."
+            )
     
     # Start background task for instance cleanup and sync
     async def cleanup_loop():

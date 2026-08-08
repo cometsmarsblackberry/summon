@@ -43,8 +43,11 @@ class Settings(BaseSettings):
     # Admin Steam IDs (comma-separated)
     admin_steam_ids: str = ""
     
-    # Beta mode - only admins can use the site
+    # Beta mode - only admins and allowlisted users can use the site
     beta_mode: bool = True
+
+    # Non-admin Steam IDs allowed to use the site while beta mode is enabled
+    beta_allowlist_steam_ids: str = ""
 
     # Reverse proxy handling
     trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
@@ -124,6 +127,15 @@ class Settings(BaseSettings):
     def admin_steam_id_list(self) -> list[str]:
         """Get list of admin Steam IDs."""
         return [sid.strip() for sid in self.admin_steam_ids.split(",") if sid.strip()]
+
+    @property
+    def beta_allowlist_steam_id_list(self) -> list[str]:
+        """Get list of non-admin Steam IDs allowed during beta mode."""
+        return [
+            sid.strip()
+            for sid in self.beta_allowlist_steam_ids.split(",")
+            if sid.strip()
+        ]
 
     @property
     def trusted_proxy_cidr_list(self) -> list[str]:

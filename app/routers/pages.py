@@ -12,7 +12,12 @@ from app.config import get_settings
 from app.database import get_db
 from app.i18n import t
 from app.models.user import User
-from app.routers.auth import get_current_user, require_user, require_user_allow_banned
+from app.routers.auth import (
+    get_current_user,
+    has_beta_access,
+    require_user,
+    require_user_allow_banned,
+)
 from app.services.orchestrator import get_enabled_locations
 from app.services.reservation import (
     get_user_reservations,
@@ -164,7 +169,7 @@ async def home(
     locations = await get_enabled_locations(db)
 
     # Beta mode check
-    beta_locked = settings.beta_mode and (not user or not user.is_admin)
+    beta_locked = not has_beta_access(user)
 
     # Check for existing active reservation (to show notice instead of form)
     active_reservation = None
