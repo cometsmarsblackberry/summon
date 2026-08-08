@@ -7,7 +7,9 @@
         "my_reservations": "Minhas reservas",
         "admin": "Admin",
         "logout": "Sair",
-        "login_alt": "Entrar com Steam"
+        "login_alt": "Entrar com Steam",
+        "use_dark_mode": "Usar modo escuro",
+        "use_light_mode": "Usar modo claro"
     },
     "footer": {
         "about": "Sobre",

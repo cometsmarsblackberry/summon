@@ -7,7 +7,9 @@
         "my_reservations": "Đặt chỗ của tôi",
         "admin": "Quản trị",
         "logout": "Đăng xuất",
-        "login_alt": "Đăng nhập bằng Steam"
+        "login_alt": "Đăng nhập bằng Steam",
+        "use_dark_mode": "Dùng chế độ tối",
+        "use_light_mode": "Dùng chế độ sáng"
     },
     "footer": {
         "about": "Giới thiệu",

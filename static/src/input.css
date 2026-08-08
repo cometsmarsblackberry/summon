@@ -5,3 +5,316 @@
 [x-cloak] {
     display: none !important;
 }
+
+:root {
+    color-scheme: light;
+    --ping-good: #15803d;
+    --ping-fair: #a16207;
+    --ping-poor: #ea580c;
+    --ping-bad: #dc2626;
+}
+
+html {
+    background-color: #f8fafc;
+}
+
+html.dark {
+    color-scheme: dark;
+    background-color: #09090b;
+    --ping-good: #4ade80;
+    --ping-fair: #facc15;
+    --ping-poor: #fb923c;
+    --ping-bad: #f87171;
+}
+
+.theme-icon-sun {
+    display: none;
+}
+
+.dark .theme-icon-moon {
+    display: none;
+}
+
+.dark .theme-icon-sun {
+    display: block;
+}
+
+.dark .theme-toggle {
+    color: #d4d4d8;
+}
+
+.dark .theme-toggle:hover {
+    background-color: #27272a;
+    color: #fafafa;
+}
+
+.dark .theme-toggle:focus-visible {
+    --tw-ring-offset-color: #09090b;
+}
+
+/*
+ * The templates use the slate scale consistently as a set of surface and
+ * text roles. Remap those roles under the root .dark class so shared pages,
+ * Alpine-generated class strings, and instance templates stay in sync.
+ */
+.dark .bg-white {
+    background-color: #18181b;
+}
+
+.dark .bg-slate-50 {
+    background-color: #09090b;
+}
+
+.dark .bg-slate-100 {
+    background-color: #27272a;
+}
+
+.dark .bg-slate-200 {
+    background-color: #3f3f46;
+}
+
+.dark .bg-slate-300 {
+    background-color: #52525b;
+}
+
+.dark .bg-slate-400 {
+    background-color: #3f3f46;
+}
+
+.dark .text-slate-900 {
+    color: #fafafa;
+}
+
+.dark .text-slate-800 {
+    color: #f4f4f5;
+}
+
+.dark .text-slate-700 {
+    color: #e4e4e7;
+}
+
+.dark .text-slate-600,
+.dark .text-slate-500 {
+    color: #a1a1aa;
+}
+
+.dark .text-slate-300 {
+    color: #52525b;
+}
+
+.dark .border-slate-100,
+.dark .border-slate-200 {
+    border-color: #27272a;
+}
+
+.dark .border-slate-300 {
+    border-color: #3f3f46;
+}
+
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #27272a;
+}
+
+.dark .fill-slate-200 {
+    fill: #3f3f46;
+}
+
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-slate-100:hover {
+    background-color: #27272a;
+}
+
+.dark .hover\:bg-slate-200:hover {
+    background-color: #3f3f46;
+}
+
+.dark .hover\:bg-slate-300:hover {
+    background-color: #52525b;
+}
+
+.dark .hover\:border-slate-300:hover {
+    border-color: #52525b;
+}
+
+.dark .hover\:text-slate-900:hover,
+.dark .hover\:text-slate-800:hover {
+    color: #fafafa;
+}
+
+.dark .hover\:text-slate-700:hover,
+.dark .hover\:text-slate-600:hover {
+    color: #f4f4f5;
+}
+
+.dark .disabled\:bg-slate-100:disabled {
+    background-color: #3f3f46;
+}
+
+.dark .theme-toggle-knob {
+    background-color: #fafafa;
+}
+
+.dark select option,
+.dark select optgroup {
+    background-color: #18181b;
+    color: #f4f4f5;
+}
+
+/* Brand accents stay blue, but light-theme ink colors become brighter links. */
+.dark .bg-brand-50 {
+    background-color: rgb(14 165 233 / 0.12);
+}
+
+.dark .bg-brand-100 {
+    background-color: rgb(14 165 233 / 0.2);
+}
+
+.dark .border-brand-200 {
+    border-color: rgb(56 189 248 / 0.45);
+}
+
+.dark .text-brand-500,
+.dark .text-brand-600 {
+    color: #38bdf8;
+}
+
+.dark .text-brand-700,
+.dark .text-brand-800 {
+    color: #7dd3fc;
+}
+
+.dark .hover\:bg-brand-100:hover {
+    background-color: rgb(14 165 233 / 0.28);
+}
+
+.dark .hover\:text-brand-500:hover,
+.dark .hover\:text-brand-400:hover {
+    color: #7dd3fc;
+}
+
+.dark .hover\:text-brand-800:hover {
+    color: #bae6fd;
+}
+
+/* Muted status fills retain meaning without glowing against near-black. */
+.dark .bg-red-50,
+.dark .bg-red-100 {
+    background-color: rgb(127 29 29 / 0.32);
+}
+
+.dark .bg-red-200 {
+    background-color: rgb(153 27 27 / 0.45);
+}
+
+.dark .border-red-200,
+.dark .border-red-300 {
+    border-color: rgb(248 113 113 / 0.35);
+}
+
+.dark .text-red-900,
+.dark .text-red-800,
+.dark .text-red-700 {
+    color: #fca5a5;
+}
+
+.dark .text-red-600,
+.dark .text-red-500 {
+    color: #f87171;
+}
+
+.dark .hover\:bg-red-50:hover,
+.dark .hover\:bg-red-100:hover {
+    background-color: rgb(153 27 27 / 0.45);
+}
+
+.dark .hover\:bg-red-200:hover {
+    background-color: rgb(185 28 28 / 0.55);
+}
+
+.dark .hover\:text-red-900:hover,
+.dark .hover\:text-red-700:hover,
+.dark .hover\:text-red-600:hover {
+    color: #fecaca;
+}
+
+.dark .bg-green-50,
+.dark .bg-green-100 {
+    background-color: rgb(20 83 45 / 0.42);
+}
+
+.dark .border-green-200,
+.dark .border-green-800 {
+    border-color: rgb(74 222 128 / 0.35);
+}
+
+.dark .text-green-800,
+.dark .text-green-700 {
+    color: #86efac;
+}
+
+.dark .bg-yellow-50,
+.dark .bg-yellow-100,
+.dark .bg-amber-50,
+.dark .bg-amber-100 {
+    background-color: rgb(120 53 15 / 0.38);
+}
+
+.dark .border-yellow-200,
+.dark .border-amber-200 {
+    border-color: rgb(251 191 36 / 0.35);
+}
+
+.dark .text-yellow-800,
+.dark .text-yellow-700,
+.dark .text-amber-800,
+.dark .text-amber-700 {
+    color: #fde68a;
+}
+
+.dark .text-yellow-600,
+.dark .text-amber-600 {
+    color: #fbbf24;
+}
+
+.dark .hover\:bg-amber-100:hover {
+    background-color: rgb(146 64 14 / 0.5);
+}
+
+.dark .bg-blue-50,
+.dark .bg-blue-100 {
+    background-color: rgb(30 64 175 / 0.3);
+}
+
+.dark .border-blue-200 {
+    border-color: rgb(96 165 250 / 0.35);
+}
+
+.dark .text-blue-800,
+.dark .text-blue-700,
+.dark .text-blue-600 {
+    color: #93c5fd;
+}
+
+.dark .bg-emerald-100 {
+    background-color: rgb(6 78 59 / 0.55);
+}
+
+.dark .text-emerald-700 {
+    color: #6ee7b7;
+}
+
+.dark .bg-violet-100,
+.dark .bg-purple-100 {
+    background-color: rgb(76 29 149 / 0.45);
+}
+
+.dark .text-violet-700,
+.dark .text-purple-800,
+.dark .text-purple-700 {
+    color: #c4b5fd;
+}
+
+.dark .text-orange-600 {
+    color: #fb923c;
+}

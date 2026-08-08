@@ -7,7 +7,9 @@
         "my_reservations": "Aking Mga Reserbasyon",
         "admin": "Admin",
         "logout": "Mag-logout",
-        "login_alt": "Mag-login gamit ang Steam"
+        "login_alt": "Mag-login gamit ang Steam",
+        "use_dark_mode": "Gamitin ang madilim na mode",
+        "use_light_mode": "Gamitin ang maliwanag na mode"
     },
     "footer": {
         "about": "Tungkol",

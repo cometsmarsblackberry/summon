@@ -5,7 +5,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if reservation %}{{ site_name }} #{{ reservation.reservation_number }}{% else %}{{ site_name }}{% endif %}</title>
+    <script>
+        var savedTheme = null;
+        try {
+            savedTheme = localStorage.getItem('summon-theme');
+        } catch (_) {}
+        var useDarkTheme = savedTheme === 'dark' ||
+            (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (useDarkTheme) {
+            document.documentElement.className = 'dark';
+            document.documentElement.style.colorScheme = 'dark';
+        }
+    </script>
     <style>
+        :root { color-scheme: light; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #f8fafc; color: #1e293b; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; }
         .container { max-width: 420px; margin: 0 auto; padding: 24px 16px; }
@@ -36,6 +49,22 @@
         .trivia-heading { font-size: 11px; font-weight: 600; color: #0369a1; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
         .trivia-text { font-size: 13px; color: #0c4a6e; }
         .not-found { padding: 64px 16px; text-align: center; color: #64748b; }
+        .dark body { background: #09090b; color: #f4f4f5; }
+        .dark h1 { color: #e4e4e7; }
+        .dark .subtitle,
+        .dark .connection-heading,
+        .dark .info-label,
+        .dark .not-found { color: #a1a1aa; }
+        .dark .connection-panel,
+        .dark .info-card { background: #18181b; border-color: #27272a; }
+        .dark .connection-select { background: #09090b; color: #e4e4e7; border-color: #3f3f46; }
+        .dark .icon-button { background: #18181b; color: #e4e4e7; border-color: #3f3f46; }
+        .dark .icon-button:hover { background: #27272a; }
+        .dark .icon-button.is-active { background: #3f3f46; color: #fafafa; }
+        .dark .connection-command { background: #09090b; color: #e4e4e7; border-color: #27272a; }
+        .dark .trivia { background: rgba(14, 165, 233, 0.12); border-color: rgba(56, 189, 248, 0.4); }
+        .dark .trivia-heading { color: #7dd3fc; }
+        .dark .trivia-text { color: #bae6fd; }
         @media (max-width: 360px) {
             .connection-picker { width: 100%; margin-left: 0; }
             .connection-select { flex: 1; min-width: 0; }

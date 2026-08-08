@@ -7,7 +7,9 @@
         "my_reservations": "Tempahan Saya",
         "admin": "Pentadbir",
         "logout": "Log Keluar",
-        "login_alt": "Log Masuk dengan Steam"
+        "login_alt": "Log Masuk dengan Steam",
+        "use_dark_mode": "Gunakan mod gelap",
+        "use_light_mode": "Gunakan mod cerah"
     },
     "footer": {
         "about": "Tentang",
