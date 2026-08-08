@@ -44,6 +44,7 @@ locales/local/
 .version
 .claude/
 .agent/
+.playwright-mcp/
 mockups/
 plans/
 external/
