@@ -69,7 +69,10 @@ class CreateReservationRequest(BaseModel):
     """Request body for creating a reservation."""
     location: str = Field(..., description="Location code (e.g., 'santiago', 'seoul')")
     first_map: str = Field("cp_badlands", description="Initial map")
+    config_file: str | None = Field(None, description="Competitive config to load on startup")
     enable_direct_connect: bool = Field(False, description="Allow direct IP connections (opens UDP ports)")
+    enable_logs_tf_upload: bool = Field(True, description="Upload match logs to logs.tf")
+    enable_demos_tf_upload: bool = Field(True, description="Upload SourceTV demos to demos.tf")
     captcha_token: str | None = Field(None, description="hCaptcha response token")
 
 
@@ -82,6 +85,7 @@ class ReservationResponse(BaseModel):
     starts_at: datetime
     ends_at: datetime
     first_map: str
+    config_file: Optional[str] = None
     created_at: datetime
     # Connection details (only for owner when active)
     password: Optional[str] = None
@@ -94,6 +98,8 @@ class ReservationResponse(BaseModel):
     sdr_tv_port: Optional[int] = None
     # Direct connect
     enable_direct_connect: bool = False
+    enable_logs_tf_upload: bool = True
+    enable_demos_tf_upload: bool = True
     ip_address: Optional[str] = None
     # Boot progress (during provisioning)
     boot_progress: Optional[dict] = None
@@ -118,8 +124,11 @@ def reservation_to_response(
         starts_at=reservation.starts_at,
         ends_at=reservation.ends_at,
         first_map=reservation.first_map,
+        config_file=reservation.config_file,
         created_at=reservation.created_at,
         enable_direct_connect=reservation.enable_direct_connect,
+        enable_logs_tf_upload=reservation.enable_logs_tf_upload,
+        enable_demos_tf_upload=reservation.enable_demos_tf_upload,
         failure_reason=public_failure_reason(
             reservation.status,
             reservation.provision_attempts,
@@ -278,6 +287,35 @@ async def create_reservation_endpoint(
             detail=t("errors.invalid_map", map=request.first_map)
         )
 
+    config_file = (request.config_file or "").strip() or None
+    if config_file:
+        if not _CFG_FILE_RE.fullmatch(config_file):
+            raise HTTPException(status_code=400, detail=t("errors.invalid_config"))
+        from app.services.competitive_configs import ALLOWED_PREFIXES
+        allowed_prefixes = list(ALLOWED_PREFIXES)
+        if settings.custom_config_prefixes:
+            allowed_prefixes.extend(
+                prefix.strip()
+                for prefix in settings.custom_config_prefixes.split(",")
+                if prefix.strip()
+            )
+        if not config_file.startswith(tuple(allowed_prefixes)):
+            raise HTTPException(status_code=400, detail=t("errors.unknown_config"))
+
+        # Validate against agents' authoritative config lists when available.
+        # With a cold cache, prefix/name validation still lets provisioning run.
+        from app.routers.internal import competitive_configs as cfg_cache
+        reported_configs = {
+            cfg
+            for item in cfg_cache.values()
+            for cfg in (item.get("exec_cfg_files") or [])
+        }
+        if reported_configs and config_file not in reported_configs:
+            raise HTTPException(
+                status_code=400,
+                detail=t("errors.config_not_available"),
+            )
+
     # Serialize reservation creation so capacity, rate-limit, and single-active
     # checks stay accurate under concurrent API requests.
     async with _reservation_creation_lock:
@@ -332,6 +370,9 @@ async def create_reservation_endpoint(
             duration_hours=res_settings["max_duration_hours"],
             first_map=request.first_map,
             enable_direct_connect=request.enable_direct_connect,
+            config_file=config_file,
+            enable_logs_tf_upload=request.enable_logs_tf_upload,
+            enable_demos_tf_upload=request.enable_demos_tf_upload,
             db=db,
         )
 
@@ -347,18 +388,29 @@ async def create_reservation_endpoint(
 
 @router.get("/configs")
 async def get_competitive_configs():
-    """(Deprecated) List competitive configs if any agent has reported them."""
+    """List competitive configs reported by connected agents."""
     from app.routers.internal import competitive_configs as cfg_cache
     from app.services.competitive_configs import group_for_ui
 
-    # Pick an arbitrary instance's list for backwards compatibility.
-    for item in cfg_cache.values():
-        return {
-            "available": True,
-            "configs": group_for_ui(item.get("cfg_files") or []),
-            "updated_at": item.get("updated_at"),
-            "container_image": item.get("container_image"),
-        }
+    # Aggregate reported lists so the creation form is not tied to whichever
+    # connected agent happens to be visited first.
+    if cfg_cache:
+        cfg_files = sorted({
+            cfg
+            for item in cfg_cache.values()
+            for cfg in (item.get("cfg_files") or [])
+        })
+        latest = max(
+            cfg_cache.values(),
+            key=lambda item: item.get("updated_at") or "",
+        )
+        grouped = group_for_ui(cfg_files)
+        if grouped:
+            return {
+                "available": True,
+                "configs": grouped,
+                "updated_at": latest.get("updated_at"),
+            }
     return {
         "available": False,
         "configs": {},
@@ -622,6 +674,9 @@ async def restart_reservation_endpoint(
         "password": reservation.password,
         "rcon_password": reservation.rcon_password,
         "tv_password": reservation.tv_password,
+        "config_file": reservation.config_file or "",
+        "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
+        "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
     }):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
     await db.commit()
@@ -698,6 +753,9 @@ async def exec_competitive_config(
     if not await send_rcon_command(cloud_instance.instance_id, f"sm_config {cfg_file}"):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
+    reservation.config_file = None if cfg_file == "summon_reset" else cfg_file
+    await db.commit()
+
     logger.info(
         f"Executed config {cfg_file} on reservation #{reservation.reservation_number}"
     )
@@ -760,6 +818,58 @@ async def change_level(
         f"Changelevel to {map_name} on reservation #{reservation.reservation_number}"
     )
     return {"message": f"Changing map to {map_name}", "map_name": map_name}
+
+
+class UploadSettingsRequest(BaseModel):
+    enable_logs_tf_upload: bool
+    enable_demos_tf_upload: bool
+
+
+@router.patch("/{reservation_id}/upload-settings")
+async def update_upload_settings(
+    reservation_id: int,
+    body: UploadSettingsRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update logs.tf and demos.tf uploads on a running reservation."""
+    reservation = await get_reservation_by_id(reservation_id, db)
+    if not reservation:
+        raise HTTPException(status_code=404, detail=t("errors.reservation_not_found"))
+
+    _require_reservation_access_or_404(user, reservation)
+
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
+
+    if not reservation.instance_id:
+        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
+
+    from app.models.instance import CloudInstance
+    instance_result = await db.execute(
+        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
+    )
+    cloud_instance = instance_result.scalar_one_or_none()
+    if not cloud_instance:
+        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
+
+    from app.routers.internal import send_upload_settings
+    if not await send_upload_settings(
+        cloud_instance.instance_id,
+        logs_tf=body.enable_logs_tf_upload,
+        demos_tf=body.enable_demos_tf_upload,
+    ):
+        raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
+
+    reservation.enable_logs_tf_upload = body.enable_logs_tf_upload
+    reservation.enable_demos_tf_upload = body.enable_demos_tf_upload
+    await db.commit()
+
+    return {
+        "message": "Upload settings updated",
+        "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
+        "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
+    }
 
 
 @router.get("/{reservation_id}/maps")

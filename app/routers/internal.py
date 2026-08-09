@@ -570,6 +570,15 @@ async def send_rcon_command(instance_id: str, command: str) -> bool:
     })
 
 
+async def send_upload_settings(instance_id: str, *, logs_tf: bool, demos_tf: bool) -> bool:
+    """Tell an agent to update external match upload settings."""
+    return await send_to_agent(instance_id, {
+        "type": "uploads.configure",
+        "logs_tf": logs_tf,
+        "demos_tf": demos_tf,
+    })
+
+
 async def send_reconfigure_command(instance_id: str, config: dict) -> bool:
     """Send reconfigure command to agent for warm pool reuse.
     
@@ -783,6 +792,19 @@ async def report_upload_link(
 
         if not reservation:
             raise HTTPException(status_code=404, detail="Reservation not found")
+
+        upload_enabled = (
+            reservation.enable_logs_tf_upload
+            if body.type == "log"
+            else reservation.enable_demos_tf_upload
+        )
+        if not upload_enabled:
+            logger.info(
+                "Ignoring disabled %s upload callback for reservation #%s",
+                body.type,
+                reservation_number,
+            )
+            return UploadLinkResponse(success=True)
 
         # Deduplicate by external_id and type
         existing = await db.execute(

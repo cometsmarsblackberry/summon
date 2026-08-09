@@ -47,7 +47,73 @@
     modalOpen: false,
     loc: null,
     firstMap: '',
+    mapMenuOpen: false,
+    mapSearch: '',
+    get homeMaps() {
+        return typeof _homeMaps !== 'undefined' ? _homeMaps : [];
+    },
+    get filteredHomeMaps() {
+        const query = this.mapSearch.trim().toLowerCase();
+        if (!query) return this.homeMaps;
+        return this.homeMaps.filter(map =>
+            map.name.toLowerCase().includes(query)
+            || (map.display || '').toLowerCase().includes(query)
+        );
+    },
+    get selectedHomeMapLabel() {
+        const map = this.homeMaps.find(map => map.name === this.firstMap);
+        return map ? (map.display || map.name) : '';
+    },
+    toggleHomeMapMenu() {
+        if (!this.homeMaps.length) return;
+        this.mapMenuOpen = !this.mapMenuOpen;
+        if (this.mapMenuOpen) {
+            this.mapSearch = '';
+            this.$nextTick(() => this.$refs.homeMapSearch?.focus());
+        }
+    },
+    selectHomeMap(map) {
+        this.firstMap = map.name;
+        this.mapMenuOpen = false;
+        this.mapSearch = '';
+    },
+    configs: {},
+    configsAvailable: false,
+    configsLoaded: false,
+    configsHint: '',
+    selectedLeague: '',
+    selectedFormat: '',
+    selectedConfig: '',
+    get leagueOptions() {
+        return Object.keys(this.configs);
+    },
+    get formatOptions() {
+        if (!this.selectedLeague || !this.configs[this.selectedLeague]) return [];
+        return Object.keys(this.configs[this.selectedLeague]);
+    },
+    get configOptions() {
+        if (!this.selectedLeague || !this.selectedFormat) return [];
+        return this.configs[this.selectedLeague][this.selectedFormat] || [];
+    },
+    async loadConfigs() {
+        if (this.configsLoaded && this.configsAvailable) return;
+        try {
+            const resp = await fetch('/api/reservations/configs');
+            if (resp.ok) {
+                const data = await resp.json();
+                this.configs = data.configs || {};
+                this.configsAvailable = !!data.available && Object.keys(this.configs).length > 0;
+                this.configsHint = data.message || '';
+            }
+        } catch (e) {
+            console.error('Failed to load configs:', e);
+            this.configsHint = '';
+        }
+        this.configsLoaded = true;
+    },
     enableDirectConnect: false,
+    enableLogsTFUpload: true,
+    enableDemosTFUpload: true,
     submitting: false,
     error: null,
     captchaRequired: false,
@@ -163,12 +229,20 @@
         if (!loc.enabled || loc.available <= 0) return;
         this.loc = { code, ...loc };
         this.enableDirectConnect = !loc.recommended;
+        this.enableLogsTFUpload = true;
+        this.enableDemosTFUpload = true;
+        this.mapMenuOpen = false;
+        this.mapSearch = '';
+        this.selectedLeague = '';
+        this.selectedFormat = '';
+        this.selectedConfig = '';
         this.error = null;
         this.submitting = false;
         this.captchaToken = null;
         this.captchaRequired = false;
         this.captchaWidgetId = null;
         this.modalOpen = true;
+        this.loadConfigs();
         try {
             const resp = await fetch('/api/captcha/check');
             if (resp.ok) {
@@ -197,7 +271,10 @@
             const body = {
                 location: this.loc.code,
                 first_map: this.firstMap,
+                config_file: this.selectedConfig || null,
                 enable_direct_connect: this.enableDirectConnect,
+                enable_logs_tf_upload: this.enableLogsTFUpload,
+                enable_demos_tf_upload: this.enableDemosTFUpload,
             };
             if (this.captchaToken) body.captcha_token = this.captchaToken;
             const resp = await fetch('/api/reservations', {
@@ -414,7 +491,7 @@
     <div x-show="modalOpen" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
         @keydown.escape.window="modalOpen = false">
         <div class="absolute inset-0 bg-black/60" @click="!submitting && (modalOpen = false)"></div>
-        <div class="relative w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-2xl p-5">
+        <div class="relative w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl p-5">
             <div class="mb-4">
                 <h2 class="text-base font-semibold text-slate-900"
                     x-text="loc ? (loc.city || loc.name) + (loc.country ? ', ' + loc.country : '') : ''"></h2>
@@ -432,12 +509,74 @@
             <div class="space-y-3">
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">{{ _('home.first_map') }}</label>
-                    <select x-model="firstMap"
-                        class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm focus:ring-2 focus:ring-brand-500 focus:border-transparent">
-                        <template x-for="m in (typeof _homeMaps !== 'undefined' ? _homeMaps : [])" :key="m.name">
-                            <option :value="m.name" x-text="m.display"></option>
-                        </template>
-                    </select>
+                    <div class="relative" @click.outside="mapMenuOpen = false; mapSearch = ''"
+                        @keydown.escape="if (mapMenuOpen) { $event.stopPropagation(); mapMenuOpen = false; mapSearch = ''; }">
+                        <button type="button" role="combobox" aria-haspopup="listbox"
+                            :aria-expanded="mapMenuOpen" @click="toggleHomeMapMenu()"
+                            :disabled="homeMaps.length === 0"
+                            class="flex w-full items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm text-left focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50">
+                            <span x-show="firstMap" x-text="selectedHomeMapLabel" class="truncate"></span>
+                            <span x-show="!firstMap" class="text-slate-400">{{ _('status.select_map') }}</span>
+                            <svg class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
+                                :class="mapMenuOpen ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="mapMenuOpen" x-cloak x-transition.origin.top role="listbox"
+                            class="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                            <div class="border-b border-slate-200 p-2">
+                                <input type="search" x-ref="homeMapSearch" x-model="mapSearch"
+                                    placeholder="{{ _('home.search_maps') }}"
+                                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                            </div>
+                            <div class="max-h-48 overflow-y-auto p-1">
+                                <template x-for="m in filteredHomeMaps" :key="m.name">
+                                    <button type="button" role="option" :aria-selected="firstMap === m.name"
+                                        @click="selectHomeMap(m)"
+                                        :class="firstMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                        class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                        <span x-text="m.display || m.name" class="truncate"></span>
+                                        <span x-show="firstMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
+                                    </button>
+                                </template>
+                                <p x-show="filteredHomeMaps.length === 0" x-cloak
+                                    class="px-3 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_maps') }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">{{ _('home.competitive_config') }}</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <select x-model="selectedLeague" @change="selectedFormat = ''; selectedConfig = '';"
+                            :disabled="!configsAvailable"
+                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
+                            <option value="">{{ _('status.league') }}</option>
+                            <template x-for="league in leagueOptions" :key="league">
+                                <option :value="league" x-text="league"></option>
+                            </template>
+                        </select>
+                        <select x-model="selectedFormat" @change="selectedConfig = '';"
+                            :disabled="!configsAvailable || !selectedLeague"
+                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
+                            <option value="">{{ _('status.format') }}</option>
+                            <template x-for="format in formatOptions" :key="format">
+                                <option :value="format" x-text="format"></option>
+                            </template>
+                        </select>
+                        <select x-model="selectedConfig" :disabled="!configsAvailable || !selectedFormat"
+                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
+                            <option value="">{{ _('status.config') }}</option>
+                            <template x-for="config in configOptions" :key="config.cfg_file">
+                                <option :value="config.cfg_file" x-text="config.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <p x-show="configsLoaded && !configsAvailable" x-cloak class="mt-1 text-xs text-slate-400">
+                        <span x-show="configsHint" x-text="configsHint"></span>
+                        <span x-show="!configsHint">{{ _('home.config_unavailable') }}</span>
+                    </p>
+                    <p x-show="configsAvailable" x-cloak class="mt-1 text-xs text-slate-400">{{ _('home.config_optional') }}</p>
                 </div>
                 <div x-show="loc" class="flex items-center justify-between">
                     <div>
@@ -448,6 +587,32 @@
                         :class="enableDirectConnect ? 'bg-brand-600' : 'bg-slate-200'"
                         class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
                         <span :class="enableDirectConnect ? 'translate-x-4' : 'translate-x-0'"
+                            class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                    </button>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <label class="text-sm text-slate-700">{{ _('home.logs_tf_upload') }}</label>
+                        <p class="text-xs text-slate-400">{{ _('home.logs_tf_hint') }}</p>
+                    </div>
+                    <button type="button" role="switch" :aria-checked="enableLogsTFUpload"
+                        @click="enableLogsTFUpload = !enableLogsTFUpload"
+                        :class="enableLogsTFUpload ? 'bg-brand-600' : 'bg-slate-200'"
+                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
+                        <span :class="enableLogsTFUpload ? 'translate-x-4' : 'translate-x-0'"
+                            class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                    </button>
+                </div>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <label class="text-sm text-slate-700">{{ _('home.demos_tf_upload') }}</label>
+                        <p class="text-xs text-slate-400">{{ _('home.demos_tf_hint') }}</p>
+                    </div>
+                    <button type="button" role="switch" :aria-checked="enableDemosTFUpload"
+                        @click="enableDemosTFUpload = !enableDemosTFUpload"
+                        :class="enableDemosTFUpload ? 'bg-brand-600' : 'bg-slate-200'"
+                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
+                        <span :class="enableDemosTFUpload ? 'translate-x-4' : 'translate-x-0'"
                             class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
                     </button>
                 </div>
@@ -463,7 +628,7 @@
                     class="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors">
                     {{ _('home.cancel') }}
                 </button>
-                <button @click="submit()" :disabled="submitting"
+                <button @click="submit()" :disabled="submitting || !firstMap"
                     class="flex-1 px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-100 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors">
                     <span x-show="!submitting">{{ _('home.reserve') }}</span>
                     <span x-show="submitting" class="inline-flex items-center justify-center gap-1.5">
