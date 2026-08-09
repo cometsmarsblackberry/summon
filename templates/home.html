@@ -81,19 +81,52 @@
     configsAvailable: false,
     configsLoaded: false,
     configsHint: '',
-    selectedLeague: '',
-    selectedFormat: '',
+    configMenuOpen: false,
+    configSearch: '',
     selectedConfig: '',
-    get leagueOptions() {
-        return Object.keys(this.configs);
+    get filteredConfigGroups() {
+        const query = this.configSearch.trim().toLowerCase();
+        return Object.entries(this.configs)
+            .map(([league, formats]) => {
+                const options = [];
+                for (const [format, configs] of Object.entries(formats || {})) {
+                    for (const config of configs || []) {
+                        const option = { ...config, format };
+                        const haystack = `${league} ${format} ${config.name || ''} ${config.cfg_file || ''}`.toLowerCase();
+                        if (!query || haystack.includes(query)) options.push(option);
+                    }
+                }
+                options.sort((a, b) =>
+                    a.format.localeCompare(b.format)
+                    || (a.name || a.cfg_file).localeCompare(b.name || b.cfg_file)
+                );
+                return { league, options };
+            })
+            .filter(group => group.options.length > 0)
+            .sort((a, b) => a.league.localeCompare(b.league));
     },
-    get formatOptions() {
-        if (!this.selectedLeague || !this.configs[this.selectedLeague]) return [];
-        return Object.keys(this.configs[this.selectedLeague]);
+    get selectedConfigLabel() {
+        if (!this.selectedConfig) return '';
+        for (const formats of Object.values(this.configs)) {
+            for (const configs of Object.values(formats || {})) {
+                const config = (configs || []).find(item => item.cfg_file === this.selectedConfig);
+                if (config) return config.name || config.cfg_file;
+            }
+        }
+        return this.selectedConfig;
     },
-    get configOptions() {
-        if (!this.selectedLeague || !this.selectedFormat) return [];
-        return this.configs[this.selectedLeague][this.selectedFormat] || [];
+    toggleConfigMenu() {
+        if (!this.configsAvailable) return;
+        this.configMenuOpen = !this.configMenuOpen;
+        if (this.configMenuOpen) {
+            this.configSearch = '';
+            this.$nextTick(() => this.$refs.homeConfigSearch?.focus());
+        }
+    },
+    selectHomeConfig(config) {
+        this.selectedConfig = config ? config.cfg_file : '';
+        this.configMenuOpen = false;
+        this.configSearch = '';
     },
     async loadConfigs() {
         if (this.configsLoaded && this.configsAvailable) return;
@@ -233,8 +266,8 @@
         this.enableDemosTFUpload = true;
         this.mapMenuOpen = false;
         this.mapSearch = '';
-        this.selectedLeague = '';
-        this.selectedFormat = '';
+        this.configMenuOpen = false;
+        this.configSearch = '';
         this.selectedConfig = '';
         this.error = null;
         this.submitting = false;
@@ -547,36 +580,62 @@
                 </div>
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">{{ _('home.competitive_config') }}</label>
-                    <div class="grid grid-cols-3 gap-2">
-                        <select x-model="selectedLeague" @change="selectedFormat = ''; selectedConfig = '';"
+                    <div class="relative" @click.outside="configMenuOpen = false; configSearch = ''"
+                        @keydown.escape="if (configMenuOpen) { $event.stopPropagation(); configMenuOpen = false; configSearch = ''; }">
+                        <button type="button" role="combobox" aria-haspopup="listbox"
+                            :aria-expanded="configMenuOpen" @click="toggleConfigMenu()"
                             :disabled="!configsAvailable"
-                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
-                            <option value="">{{ _('status.league') }}</option>
-                            <template x-for="league in leagueOptions" :key="league">
-                                <option :value="league" x-text="league"></option>
-                            </template>
-                        </select>
-                        <select x-model="selectedFormat" @change="selectedConfig = '';"
-                            :disabled="!configsAvailable || !selectedLeague"
-                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
-                            <option value="">{{ _('status.format') }}</option>
-                            <template x-for="format in formatOptions" :key="format">
-                                <option :value="format" x-text="format"></option>
-                            </template>
-                        </select>
-                        <select x-model="selectedConfig" :disabled="!configsAvailable || !selectedFormat"
-                            class="min-w-0 px-2 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-xs disabled:opacity-50">
-                            <option value="">{{ _('status.config') }}</option>
-                            <template x-for="config in configOptions" :key="config.cfg_file">
-                                <option :value="config.cfg_file" x-text="config.name"></option>
-                            </template>
-                        </select>
+                            class="flex w-full items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm text-left focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50">
+                            <span x-show="!configsLoaded" class="text-slate-400">{{ _('home.loading_configs') }}</span>
+                            <span x-show="configsLoaded && selectedConfig" x-text="selectedConfigLabel" class="truncate"></span>
+                            <span x-show="configsLoaded && !selectedConfig" class="text-slate-500">{{ _('home.no_config') }}</span>
+                            <svg class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
+                                :class="configMenuOpen ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="configMenuOpen" x-cloak x-transition.origin.top role="listbox"
+                            class="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                            <div class="border-b border-slate-200 p-2">
+                                <input type="search" x-ref="homeConfigSearch" x-model="configSearch"
+                                    placeholder="{{ _('home.search_configs') }}"
+                                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                            </div>
+                            <div class="max-h-48 overflow-y-auto p-1">
+                                <button x-show="!configSearch.trim()" type="button" role="option"
+                                    :aria-selected="selectedConfig === ''" @click="selectHomeConfig(null)"
+                                    :class="selectedConfig === '' ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                    class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                    <span>{{ _('home.no_config') }}</span>
+                                    <span x-show="selectedConfig === ''" class="text-brand-600" aria-hidden="true">✓</span>
+                                </button>
+                                <template x-for="group in filteredConfigGroups" :key="group.league">
+                                    <div class="mt-1">
+                                        <div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400"
+                                            x-text="group.league"></div>
+                                        <template x-for="config in group.options" :key="config.cfg_file">
+                                            <button type="button" role="option" :aria-selected="selectedConfig === config.cfg_file"
+                                                @click="selectHomeConfig(config)"
+                                                :class="selectedConfig === config.cfg_file ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                                class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                                <span x-text="config.name || config.cfg_file" class="truncate"></span>
+                                                <span class="flex shrink-0 items-center gap-2">
+                                                    <span x-text="config.format" class="text-xs text-slate-400"></span>
+                                                    <span x-show="selectedConfig === config.cfg_file" class="text-brand-600" aria-hidden="true">✓</span>
+                                                </span>
+                                            </button>
+                                        </template>
+                                    </div>
+                                </template>
+                                <p x-show="filteredConfigGroups.length === 0" x-cloak
+                                    class="px-3 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_configs') }}</p>
+                            </div>
+                        </div>
                     </div>
                     <p x-show="configsLoaded && !configsAvailable" x-cloak class="mt-1 text-xs text-slate-400">
                         <span x-show="configsHint" x-text="configsHint"></span>
                         <span x-show="!configsHint">{{ _('home.config_unavailable') }}</span>
                     </p>
-                    <p x-show="configsAvailable" x-cloak class="mt-1 text-xs text-slate-400">{{ _('home.config_optional') }}</p>
                 </div>
                 <div x-show="loc" class="flex items-center justify-between">
                     <div>
@@ -590,31 +649,20 @@
                             class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
                     </button>
                 </div>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <label class="text-sm text-slate-700">{{ _('home.logs_tf_upload') }}</label>
-                        <p class="text-xs text-slate-400">{{ _('home.logs_tf_hint') }}</p>
+                <div class="flex items-center justify-between gap-3">
+                    <span id="reservation-upload-label" class="text-sm text-slate-700">{{ _('home.automatic_uploads') }}</span>
+                    <div role="group" aria-labelledby="reservation-upload-label" class="flex shrink-0 items-center gap-3">
+                        <label class="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                            <input type="checkbox" x-model="enableLogsTFUpload"
+                                class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                            <span>logs.tf</span>
+                        </label>
+                        <label class="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                            <input type="checkbox" x-model="enableDemosTFUpload"
+                                class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                            <span>demos.tf</span>
+                        </label>
                     </div>
-                    <button type="button" role="switch" :aria-checked="enableLogsTFUpload"
-                        @click="enableLogsTFUpload = !enableLogsTFUpload"
-                        :class="enableLogsTFUpload ? 'bg-brand-600' : 'bg-slate-200'"
-                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
-                        <span :class="enableLogsTFUpload ? 'translate-x-4' : 'translate-x-0'"
-                            class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
-                    </button>
-                </div>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <label class="text-sm text-slate-700">{{ _('home.demos_tf_upload') }}</label>
-                        <p class="text-xs text-slate-400">{{ _('home.demos_tf_hint') }}</p>
-                    </div>
-                    <button type="button" role="switch" :aria-checked="enableDemosTFUpload"
-                        @click="enableDemosTFUpload = !enableDemosTFUpload"
-                        :class="enableDemosTFUpload ? 'bg-brand-600' : 'bg-slate-200'"
-                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
-                        <span :class="enableDemosTFUpload ? 'translate-x-4' : 'translate-x-0'"
-                            class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
-                    </button>
                 </div>
                 <p class="text-xs text-slate-400">{{ _('home.reservation_duration', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) }}
                 </p>
