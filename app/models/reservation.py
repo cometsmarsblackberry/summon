@@ -59,8 +59,11 @@ class Reservation(Base):
     first_map: Mapped[str] = mapped_column(String(64), nullable=False, default="cp_badlands")
     server_config_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     whitelist_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    config_file: Mapped[str | None] = mapped_column(String(64), nullable=True)
     auto_end: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_direct_connect: Mapped[bool] = mapped_column(Boolean, default=False)
+    enable_logs_tf_upload: Mapped[bool] = mapped_column(Boolean, default=True)
+    enable_demos_tf_upload: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Per-reservation API key for plugin→backend communication
     plugin_api_key: Mapped[str] = mapped_column(String(64), nullable=False, default="")

@@ -32,6 +32,9 @@ async def create_reservation(
     db: AsyncSession,
     starts_at: Optional[datetime] = None,
     enable_direct_connect: bool = False,
+    config_file: str | None = None,
+    enable_logs_tf_upload: bool = True,
+    enable_demos_tf_upload: bool = True,
 ) -> Reservation:
     """Create a new reservation.
 
@@ -72,8 +75,11 @@ async def create_reservation(
         rcon_password=generate_password(12),
         tv_password=generate_password(8),
         first_map=first_map,
+        config_file=config_file,
         auto_end=True,
         enable_direct_connect=enable_direct_connect,
+        enable_logs_tf_upload=enable_logs_tf_upload,
+        enable_demos_tf_upload=enable_demos_tf_upload,
         motd_token=generate_motd_token(),
         logsecret=generate_logsecret(32),
         plugin_api_key=generate_logsecret(32),

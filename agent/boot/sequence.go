@@ -60,6 +60,7 @@ type ReservationConfig struct {
 	RCONPassword        string         `json:"rcon_password"`
 	TVPassword          string         `json:"tv_password"`
 	FirstMap            string         `json:"first_map"`
+	ConfigFile          string         `json:"config_file"`
 	LogSecret           string         `json:"logsecret"`
 	OwnerSteamID        string         `json:"owner_steam_id"`
 	OwnerName           string         `json:"owner_name"`
@@ -69,6 +70,8 @@ type ReservationConfig struct {
 	ContainerImage      string         `json:"container_image"`
 	DemosTFAPIKey       string         `json:"demos_tf_apikey"`
 	LogsTFAPIKey        string         `json:"logs_tf_apikey"`
+	EnableLogsTFUpload  bool           `json:"enable_logs_tf_upload"`
+	EnableDemosTFUpload bool           `json:"enable_demos_tf_upload"`
 	MOTDURL             string         `json:"motd_url"`
 	EnableDirectConnect bool           `json:"enable_direct_connect"`
 	ServerSettings      ServerSettings `json:"server_settings"`
@@ -93,6 +96,7 @@ var (
 	competitiveConfigsReported bool
 	competitiveConfigsImage    string
 	safeMapNameRE              = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	safeConfigNameRE           = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 )
 
 // NewSequence creates a new boot sequence
@@ -220,8 +224,8 @@ func (s *Sequence) Run() error {
 			TVPassword:        s.config.TVPassword,
 			FirstMap:          s.config.FirstMap,
 			LogSecret:         s.config.LogSecret,
-			DemosTFAPIKey:     s.config.DemosTFAPIKey,
-			LogsTFAPIKey:      s.config.LogsTFAPIKey,
+			DemosTFAPIKey:     enabledAPIKey(s.config.EnableDemosTFUpload, s.config.DemosTFAPIKey),
+			LogsTFAPIKey:      enabledAPIKey(s.config.EnableLogsTFUpload, s.config.LogsTFAPIKey),
 			MOTDURL:           s.config.MOTDURL,
 			FastDLURL:         s.config.ServerSettings.FastDLURL,
 			HostnameFormat:    s.config.ServerSettings.HostnameFormat,
@@ -283,6 +287,13 @@ func (s *Sequence) Run() error {
 	}
 
 	var rconCommands []string
+	if configFile := strings.TrimSpace(s.config.ConfigFile); configFile != "" {
+		if safeConfigNameRE.MatchString(configFile) {
+			rconCommands = append(rconCommands, fmt.Sprintf("sm_config %s", configFile))
+		} else {
+			log.Printf("Skipping unsafe config name during boot: %q", configFile)
+		}
+	}
 	if s.config.Password != "" {
 		rconCommands = append(rconCommands, formatRCONSetString("sv_password", s.config.Password))
 	} else {
@@ -386,8 +397,8 @@ func (s *Sequence) RunReconfigure() error {
 			TVPassword:        s.config.TVPassword,
 			FirstMap:          s.config.FirstMap,
 			LogSecret:         s.config.LogSecret,
-			DemosTFAPIKey:     s.config.DemosTFAPIKey,
-			LogsTFAPIKey:      s.config.LogsTFAPIKey,
+			DemosTFAPIKey:     enabledAPIKey(s.config.EnableDemosTFUpload, s.config.DemosTFAPIKey),
+			LogsTFAPIKey:      enabledAPIKey(s.config.EnableLogsTFUpload, s.config.LogsTFAPIKey),
 			MOTDURL:           s.config.MOTDURL,
 			FastDLURL:         s.config.ServerSettings.FastDLURL,
 			HostnameFormat:    s.config.ServerSettings.HostnameFormat,
@@ -447,6 +458,13 @@ func (s *Sequence) RunReconfigure() error {
 	}
 
 	var rconCommands []string
+	if configFile := strings.TrimSpace(s.config.ConfigFile); configFile != "" {
+		if safeConfigNameRE.MatchString(configFile) {
+			rconCommands = append(rconCommands, fmt.Sprintf("sm_config %s", configFile))
+		} else {
+			log.Printf("Skipping unsafe config name during reconfigure: %q", configFile)
+		}
+	}
 	if s.config.Password != "" {
 		rconCommands = append(rconCommands, formatRCONSetString("sv_password", s.config.Password))
 	}
@@ -513,6 +531,32 @@ func (s *Sequence) RunReconfigure() error {
 	}
 
 	log.Println("Reconfigure boot sequence complete!")
+	return nil
+}
+
+func enabledAPIKey(enabled bool, apiKey string) string {
+	if !enabled {
+		return ""
+	}
+	return apiKey
+}
+
+// ConfigureUploads updates logs.tf and demos.tf without restarting the server.
+func (s *Sequence) ConfigureUploads(ctx context.Context, logsTF, demosTF bool) error {
+	if s.config == nil || s.containerID == "" {
+		return fmt.Errorf("container or reservation config not available")
+	}
+
+	commands := []string{
+		formatRCONSetString("logstf_apikey", enabledAPIKey(logsTF, s.config.LogsTFAPIKey)),
+		formatRCONSetString("sm_demostf_apikey", enabledAPIKey(demosTF, s.config.DemosTFAPIKey)),
+	}
+	if err := s.execRCONCommands(ctx, commands); err != nil {
+		return err
+	}
+
+	s.config.EnableLogsTFUpload = logsTF
+	s.config.EnableDemosTFUpload = demosTF
 	return nil
 }
 

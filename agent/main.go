@@ -184,6 +184,9 @@ func handleMessages(client *websocket.Client) {
 		case "rcon":
 			log.Println("Received RCON command")
 			handleRconCommand(msg, client)
+		case "uploads.configure":
+			log.Println("Received uploads.configure command")
+			handleUploadSettings(msg)
 		case "reservation.end":
 			log.Println("Received reservation.end command")
 			handleReservationEnd()
@@ -297,9 +300,12 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 	cfg := bootSeq.GetConfig()
 	var restartMsg struct {
 		Config *struct {
-			Password     string `json:"password"`
-			RCONPassword string `json:"rcon_password"`
-			TVPassword   string `json:"tv_password"`
+			Password            string  `json:"password"`
+			RCONPassword        string  `json:"rcon_password"`
+			TVPassword          string  `json:"tv_password"`
+			ConfigFile          *string `json:"config_file"`
+			EnableLogsTFUpload  *bool   `json:"enable_logs_tf_upload"`
+			EnableDemosTFUpload *bool   `json:"enable_demos_tf_upload"`
 		} `json:"config"`
 	}
 	if err := json.Unmarshal(msg, &restartMsg); err == nil && restartMsg.Config != nil {
@@ -312,7 +318,16 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 		if restartMsg.Config.TVPassword != "" {
 			cfg.TVPassword = restartMsg.Config.TVPassword
 		}
-		log.Println("Applied updated passwords from restart config")
+		if restartMsg.Config.ConfigFile != nil {
+			cfg.ConfigFile = *restartMsg.Config.ConfigFile
+		}
+		if restartMsg.Config.EnableLogsTFUpload != nil {
+			cfg.EnableLogsTFUpload = *restartMsg.Config.EnableLogsTFUpload
+		}
+		if restartMsg.Config.EnableDemosTFUpload != nil {
+			cfg.EnableDemosTFUpload = *restartMsg.Config.EnableDemosTFUpload
+		}
+		log.Println("Applied updated reservation settings from restart config")
 	}
 
 	client.SendBootProgress("restarting", 30, "Starting TF2 server...")
@@ -324,6 +339,30 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 			client.SendBootProgress("boot_failed", 0, err.Error())
 		}
 	}()
+}
+
+func handleUploadSettings(msg json.RawMessage) {
+	if bootSeq == nil {
+		log.Println("Cannot configure uploads: boot sequence not available")
+		return
+	}
+
+	var settingsMsg struct {
+		LogsTF  bool `json:"logs_tf"`
+		DemosTF bool `json:"demos_tf"`
+	}
+	if err := json.Unmarshal(msg, &settingsMsg); err != nil {
+		log.Printf("Failed to parse upload settings: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := bootSeq.ConfigureUploads(ctx, settingsMsg.LogsTF, settingsMsg.DemosTF); err != nil {
+		log.Printf("Failed to configure external uploads: %v", err)
+		return
+	}
+	log.Printf("External uploads configured (logs.tf=%t, demos.tf=%t)", settingsMsg.LogsTF, settingsMsg.DemosTF)
 }
 
 func handleRconCommand(msg json.RawMessage, client *websocket.Client) {

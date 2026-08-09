@@ -267,6 +267,7 @@
         selectedLeague: '',
         selectedFormat: '',
         selectedConfig: '',
+        initialConfig: {{ (reservation.config_file or '') | tojson | forceescape }},
         configLoading: false,
         configMessage: '',
         configError: '',
@@ -281,6 +282,7 @@
                     this.configsHint = data.message || '';
                     this.configs = data.configs || {};
                     if (data.available) {
+                        this.selectConfig(this.initialConfig);
                         this.configsLoaded = true;
                     } else {
                         // Agent may not have reported configs yet; retry
@@ -322,6 +324,20 @@
             return league ? (league[this.selectedFormat] || []) : [];
         },
 
+        selectConfig(cfgFile) {
+            if (!cfgFile) return;
+            for (const [league, formats] of Object.entries(this.configs)) {
+                for (const [format, configs] of Object.entries(formats)) {
+                    if (configs.some(config => config.cfg_file === cfgFile)) {
+                        this.selectedLeague = league;
+                        this.selectedFormat = format;
+                        this.selectedConfig = cfgFile;
+                        return;
+                    }
+                }
+            }
+        },
+
         async execConfig(cfgFile) {
             this.configLoading = true;
             this.configMessage = '';
@@ -335,6 +351,12 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     this.configMessage = data.message;
+                    this.initialConfig = cfgFile === 'summon_reset' ? '' : cfgFile;
+                    if (cfgFile === 'summon_reset') {
+                        this.selectedLeague = '';
+                        this.selectedFormat = '';
+                        this.selectedConfig = '';
+                    }
                     setTimeout(() => this.configMessage = '', 5000);
                 } else {
                     this.configError = data.detail || 'Failed to load config.';
@@ -354,13 +376,52 @@
         // Map change
         mapChanging: false,
         mapChangeOpen: false,
+        mapMenuOpen: false,
         mapList: [],
         mapListLoaded: false,
+        mapSearch: '',
+        selectedMap: '',
         mapMessage: '',
         mapError: '',
+        get filteredMapList() {
+            const query = this.mapSearch.trim().toLowerCase();
+            if (!query) return this.mapList;
+            return this.mapList.filter(map =>
+                map.name.toLowerCase().includes(query)
+                || (map.display || '').toLowerCase().includes(query)
+            );
+        },
+        get selectedMapLabel() {
+            const map = this.mapList.find(map => map.name === this.selectedMap);
+            return map ? (map.display || map.name) : '';
+        },
+        syncMapSelection() {
+            if (!this.filteredMapList.some(map => map.name === this.selectedMap)) {
+                const current = this.mapList.find(map => map.name === this.currentMap);
+                this.selectedMap = current
+                    ? current.name
+                    : (this.filteredMapList.length ? this.filteredMapList[0].name : '');
+            }
+        },
+        toggleMapMenu() {
+            if (!this.mapListLoaded || this.mapChanging) return;
+            this.mapMenuOpen = !this.mapMenuOpen;
+            if (this.mapMenuOpen) {
+                this.mapSearch = '';
+                this.$nextTick(() => this.$refs.statusMapSearch?.focus());
+            }
+        },
+        selectMap(map) {
+            this.selectedMap = map.name;
+            this.mapMenuOpen = false;
+            this.mapSearch = '';
+        },
 
         async openMapChange() {
             this.mapChangeOpen = true;
+            this.mapMenuOpen = false;
+            this.mapSearch = '';
+            this.selectedMap = '';
             if (!this.mapListLoaded) {
                 try {
                     const resp = await fetch('/api/reservations/{{ reservation.id }}/maps');
@@ -368,10 +429,13 @@
                         const data = await resp.json();
                         this.mapList = data.maps || [];
                         this.mapListLoaded = true;
+                        this.syncMapSelection();
                     }
                 } catch (e) {
                     console.error('Failed to load maps:', e);
                 }
+            } else {
+                this.syncMapSelection();
             }
         },
 
@@ -390,6 +454,7 @@
                     this.currentMap = mapName;
                     this.mapMessage = data.message;
                     this.mapChangeOpen = false;
+                    this.mapMenuOpen = false;
                     setTimeout(() => this.mapMessage = '', 5000);
                 } else {
                     this.mapError = data.detail || 'Failed to change map.';
@@ -572,21 +637,50 @@
             <div x-show="mapChangeOpen" x-cloak x-transition class="mt-1">
                 <div x-show="mapError"
                     class="mb-2 p-2 bg-red-50 border border-red-200 rounded text-red-800 text-xs" x-text="mapError"></div>
-                <div class="flex gap-2">
-                    <select x-ref="mapSelect" :disabled="mapChanging || !mapListLoaded"
-                        class="flex-1 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
-                        <option value="">{{ _('status.select_map') }}</option>
-                        <template x-for="m in mapList" :key="m.name">
-                            <option :value="m.name" x-text="m.display || m.name"></option>
-                        </template>
-                    </select>
-                    <button @click="if ($refs.mapSelect.value) changeMap($refs.mapSelect.value)"
-                        :disabled="mapChanging"
+                <div class="flex items-start gap-2">
+                    <div class="relative min-w-0 flex-1"
+                        @click.outside="mapMenuOpen = false; mapSearch = ''"
+                        @keydown.escape="if (mapMenuOpen) { $event.stopPropagation(); mapMenuOpen = false; mapSearch = ''; }">
+                        <button type="button" role="combobox" aria-haspopup="listbox"
+                            :aria-expanded="mapMenuOpen" @click="toggleMapMenu()"
+                            :disabled="mapChanging || !mapListLoaded"
+                            class="flex w-full items-center justify-between gap-2 px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm text-left disabled:opacity-50">
+                            <span x-show="selectedMap" x-text="selectedMapLabel" class="truncate"></span>
+                            <span x-show="!selectedMap" class="text-slate-400">{{ _('status.select_map') }}</span>
+                            <svg class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
+                                :class="mapMenuOpen ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                        <div x-show="mapMenuOpen" x-cloak x-transition.origin.top role="listbox"
+                            class="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                            <div class="border-b border-slate-200 p-2">
+                                <input type="search" x-ref="statusMapSearch" x-model="mapSearch"
+                                    placeholder="{{ _('status.search_maps') }}"
+                                    class="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm placeholder:text-slate-400">
+                            </div>
+                            <div class="max-h-48 overflow-y-auto p-1">
+                                <template x-for="m in filteredMapList" :key="m.name">
+                                    <button type="button" role="option" :aria-selected="selectedMap === m.name"
+                                        @click="selectMap(m)"
+                                        :class="selectedMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                        class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm">
+                                        <span x-text="m.display || m.name" class="truncate"></span>
+                                        <span x-show="selectedMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
+                                    </button>
+                                </template>
+                                <p x-show="filteredMapList.length === 0" x-cloak
+                                    class="px-2 py-3 text-center text-xs text-slate-400">{{ _('status.no_matching_maps') }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <button @click="if (selectedMap) changeMap(selectedMap)"
+                        :disabled="mapChanging || !selectedMap"
                         class="px-3 py-1.5 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded text-brand-800 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                         <span x-show="!mapChanging">{{ _('status.change') }}</span>
                         <span x-show="mapChanging" x-cloak>...</span>
                     </button>
-                    <button @click="mapChangeOpen = false"
+                    <button @click="mapChangeOpen = false; mapMenuOpen = false; mapSearch = ''"
                         class="px-2 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-slate-500 text-xs transition-colors">
                         {{ _('home.cancel') }}
                     </button>
@@ -629,7 +723,7 @@
             <div x-show="connType === 'connect' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="'connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password"></code>
+                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
@@ -644,7 +738,7 @@
             <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="'connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password"></code>
+                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
@@ -659,7 +753,7 @@
             <div x-show="connType === 'direct' && connection && connection.ip_address" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="'connect ' + connection.ip_address + ':27015; password ' + connection.password"></code>
+                        x-text="connection ? 'connect ' + connection.ip_address + ':27015; password ' + connection.password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27015; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
@@ -674,7 +768,7 @@
             <div x-show="connType === 'direct_stv' && connection && connection.ip_address" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="'connect ' + connection.ip_address + ':27020; password ' + connection.tv_password"></code>
+                        x-text="connection ? 'connect ' + connection.ip_address + ':27020; password ' + connection.tv_password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27020; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
@@ -763,6 +857,12 @@
             x-data="{
                 uploads: [],
                 uploadsLoaded: false,
+                uploadPollInterval: null,
+                logsEnabled: {{ reservation.enable_logs_tf_upload | tojson }},
+                demosEnabled: {{ reservation.enable_demos_tf_upload | tojson }},
+                settingsSaving: false,
+                settingsMessage: '',
+                settingsError: '',
 
                 async fetchUploads() {
                     try {
@@ -777,12 +877,91 @@
                     this.uploadsLoaded = true;
                 },
 
+                startUploadPolling() {
+                    if (this.uploadPollInterval) return;
+                    this.uploadPollInterval = setInterval(() => this.fetchUploads(), 30000);
+                },
+
+                stopUploadPolling() {
+                    if (!this.uploadPollInterval) return;
+                    clearInterval(this.uploadPollInterval);
+                    this.uploadPollInterval = null;
+                },
+
                 get logs() { return this.uploads.filter(u => u.type === 'log'); },
                 get demos() { return this.uploads.filter(u => u.type === 'demo'); },
-            }"
-            x-init="fetchUploads(); if (status === 'active') { setInterval(() => fetchUploads(), 30000); }">
 
-            <div x-show="uploads.length > 0">
+                async toggleUploadSetting(kind) {
+                    if (this.settingsSaving) return;
+                    const previousLogs = this.logsEnabled;
+                    const previousDemos = this.demosEnabled;
+                    if (kind === 'logs') this.logsEnabled = !this.logsEnabled;
+                    if (kind === 'demos') this.demosEnabled = !this.demosEnabled;
+                    this.settingsSaving = true;
+                    this.settingsMessage = '';
+                    this.settingsError = '';
+                    try {
+                        const resp = await fetch('/api/reservations/{{ reservation.id }}/upload-settings', {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                enable_logs_tf_upload: this.logsEnabled,
+                                enable_demos_tf_upload: this.demosEnabled,
+                            }),
+                        });
+                        const data = await resp.json();
+                        if (!resp.ok) throw new Error(data.detail || '{{ _('status.upload_settings_failed') }}');
+                        this.logsEnabled = data.enable_logs_tf_upload;
+                        this.demosEnabled = data.enable_demos_tf_upload;
+                        this.settingsMessage = '{{ _('status.upload_settings_saved') }}';
+                        setTimeout(() => this.settingsMessage = '', 4000);
+                    } catch (error) {
+                        this.logsEnabled = previousLogs;
+                        this.demosEnabled = previousDemos;
+                        this.settingsError = error.message || '{{ _('status.upload_settings_failed') }}';
+                        setTimeout(() => this.settingsError = '', 5000);
+                    }
+                    this.settingsSaving = false;
+                },
+            }"
+            x-init="
+                fetchUploads();
+                if (status === 'active') startUploadPolling();
+                $watch('status', value => value === 'active' ? startUploadPolling() : stopUploadPolling());
+            ">
+
+            <div x-show="status === 'active'">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.upload_settings') }}</h2>
+                <div x-show="settingsMessage" x-cloak
+                    class="mb-3 p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs" x-text="settingsMessage"></div>
+                <div x-show="settingsError" x-cloak
+                    class="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-800 text-xs" x-text="settingsError"></div>
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-slate-700">logs.tf</span>
+                        <button type="button" role="switch" :aria-checked="logsEnabled"
+                            @click="toggleUploadSetting('logs')" :disabled="settingsSaving"
+                            :class="logsEnabled ? 'bg-brand-600' : 'bg-slate-200'"
+                            class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-wait disabled:opacity-60">
+                            <span :class="logsEnabled ? 'translate-x-4' : 'translate-x-0'"
+                                class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                        </button>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-slate-700">demos.tf</span>
+                        <button type="button" role="switch" :aria-checked="demosEnabled"
+                            @click="toggleUploadSetting('demos')" :disabled="settingsSaving"
+                            :class="demosEnabled ? 'bg-brand-600' : 'bg-slate-200'"
+                            class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-wait disabled:opacity-60">
+                            <span :class="demosEnabled ? 'translate-x-4' : 'translate-x-0'"
+                                class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
+                        </button>
+                    </div>
+                </div>
+                <p class="mt-2 text-xs text-slate-400">{{ _('status.upload_settings_hint') }}</p>
+            </div>
+
+            <div x-show="uploads.length > 0" :class="status === 'active' ? 'mt-5 pt-5 border-t border-slate-200' : ''">
                 <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.uploads') }}</h2>
                 <div class="space-y-2">
                     <template x-for="upload in uploads" :key="upload.type + upload.external_id">
