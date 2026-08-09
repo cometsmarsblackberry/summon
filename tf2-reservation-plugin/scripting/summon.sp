@@ -73,10 +73,12 @@ public void OnPluginStart()
 
     // Register chat commands
     RegConsoleCmd("sm_reservation", Command_Reservation, "Show reservation info");
+    RegConsoleCmd("sm_res", Command_Reservation, "Alias of sm_reservation");
     RegConsoleCmd("sm_end", Command_End, "End the reservation");
     RegConsoleCmd("sm_cancel", Command_Cancel, "Cancel pending reservation end");
     RegConsoleCmd("sm_changemap", Command_Map, "Change the map (owner only)");
     RegConsoleCmd("sm_config", Command_Config, "Load a competitive config (owner only)");
+    RegConsoleCmd("sm_cfg", Command_Config, "Alias of sm_config");
     RegConsoleCmd("sm_restart", Command_Restart, "Restart tournament/game/round (owner only)");
 
     // Register RCON commands (called by agent)
