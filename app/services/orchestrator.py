@@ -529,6 +529,7 @@ async def _create_new_instance(
     Raises CloudProviderError or Exception on failure (caller handles fallback).
     """
     label = f"{settings.site_name} #{reservation.reservation_number}"
+    provider_plan = provider_record.instance_plan if provider_record else None
 
     create_kwargs: dict = dict(
         region=loc_provider.provider_region,
@@ -544,7 +545,7 @@ async def _create_new_instance(
             fastdl_url=fastdl_url,
         ),
         hostname=f"tf2-{reservation.reservation_number}",
-        plan=loc_provider.instance_plan or None,
+        plan=loc_provider.instance_plan or provider_plan or None,
     )
 
     from app.services.gcore import GcoreClient
@@ -562,6 +563,7 @@ async def _create_new_instance(
         location=reservation.location,
         provider_code=loc_provider.provider_code,
         provider_region=loc_provider.provider_region,
+        shape=cloud_instance_data.plan,
         ip_address=cloud_instance_data.main_ip if cloud_instance_data.main_ip and cloud_instance_data.main_ip != "0.0.0.0" else None,
         status=cloud_instance_data.status,
         auth_token=auth_token,
