@@ -24,7 +24,7 @@ from app.services.reservation import (
     get_user_active_reservation,
     get_reservation_by_id,
 )
-from app.routers.status import _build_status
+from app.routers.status import get_status_snapshot
 
 
 # Static mapping: Vultr provider region → Looking Glass hostname slug
@@ -194,7 +194,7 @@ async def home(
     res_settings = await get_reservation_settings(db)
 
     # Pre-fetch status so the client doesn't need a separate /api/status call
-    initial_status = await _build_status(db)
+    initial_status = await get_status_snapshot(db)
 
     return templates.TemplateResponse(
         request,

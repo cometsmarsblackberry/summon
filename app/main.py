@@ -116,6 +116,10 @@ async def lifespan(app: FastAPI):
                 "BETA_ALLOWLIST_STEAM_IDS are empty. No one will be able to "
                 "reserve or access /admin until a SteamID is configured."
             )
+
+    # Warm account-wide capacity data in the background. Public requests use
+    # cached/local state and never wait for the cloud provider API.
+    status.schedule_vultr_account_refresh()
     
     # Start background task for instance cleanup and sync
     async def cleanup_loop():
@@ -206,6 +210,7 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+    await status.stop_vultr_account_refresh()
     logger.info("Shutting down %s...", settings.site_name)
 
 

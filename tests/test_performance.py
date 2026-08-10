@@ -61,6 +61,42 @@ class StatusCacheTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_homepage_uses_shared_status_snapshot(self):
+        request = SimpleNamespace()
+        db = SimpleNamespace(
+            execute=AsyncMock(
+                return_value=SimpleNamespace(
+                    scalars=lambda: SimpleNamespace(all=lambda: [])
+                )
+            )
+        )
+        snapshot = {"helsinki": {"available": 1}}
+
+        with (
+            patch.object(pages, "get_current_user", AsyncMock(return_value=None)),
+            patch.object(pages, "get_enabled_locations", AsyncMock(return_value=[])),
+            patch.object(pages, "has_beta_access", return_value=False),
+            patch(
+                "app.services.settings.get_reservation_settings",
+                AsyncMock(return_value={}),
+            ),
+            patch.object(
+                pages,
+                "get_status_snapshot",
+                AsyncMock(return_value=snapshot),
+            ) as get_snapshot,
+            patch.object(
+                pages.templates,
+                "TemplateResponse",
+                return_value="rendered",
+            ) as render,
+        ):
+            result = await pages.home(request, db)
+
+        self.assertEqual("rendered", result)
+        get_snapshot.assert_awaited_once_with(db)
+        self.assertEqual(snapshot, render.call_args.args[2]["initial_status"])
+
 
 class SQLitePerformanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_sqlite_connections_use_concurrency_pragmas(self):
