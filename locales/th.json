@@ -53,7 +53,21 @@
         "creating": "กำลังสร้าง...",
         "captcha_error": "กรุณาทำการยืนยัน captcha ให้เสร็จสิ้น",
         "create_failed": "ไม่สามารถสร้างการจองได้",
-        "network_error": "ข้อผิดพลาดเครือข่าย — ตรวจสอบการเชื่อมต่อและลองใหม่"
+        "network_error": "ข้อผิดพลาดเครือข่าย — ตรวจสอบการเชื่อมต่อและลองใหม่",
+        "search_maps": "ค้นหาแผนที่...",
+        "no_matching_maps": "ไม่พบแผนที่ที่ตรงกัน",
+        "competitive_config": "การตั้งค่าการแข่งขัน",
+        "loading_configs": "กำลังโหลดการตั้งค่า...",
+        "search_configs": "ค้นหาการตั้งค่า...",
+        "no_matching_configs": "ไม่พบการตั้งค่าที่ตรงกัน",
+        "no_config": "ไม่มีการตั้งค่า (โหลดภายหลัง)",
+        "config_optional": "ไม่บังคับ — คุณยังสามารถโหลดการตั้งค่าได้หลังเซิร์ฟเวอร์เริ่มทำงาน",
+        "config_unavailable": "รายการการตั้งค่าไม่พร้อมใช้งาน คุณยังเลือกได้หลังเซิร์ฟเวอร์เริ่มทำงาน",
+        "automatic_uploads": "การอัปโหลดอัตโนมัติ",
+        "logs_tf_upload": "อัปโหลดไปยัง logs.tf",
+        "logs_tf_hint": "อัปโหลดบันทึกการแข่งขันโดยอัตโนมัติ",
+        "demos_tf_upload": "อัปโหลดไปยัง demos.tf",
+        "demos_tf_hint": "อัปโหลดเดโม SourceTV โดยอัตโนมัติ"
     },
     "status": {
         "title": "การจอง #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "กลับหน้าหลัก",
         "download_map": "ดาวน์โหลดแผนที่",
         "change_map": "เปลี่ยนแผนที่",
-        "kick_player": "Kick ผู้เล่น"
+        "kick_player": "Kick ผู้เล่น",
+        "admin_viewing": "กำลังดูในฐานะผู้ดูแล — เจ้าของคือ {owner}",
+        "auto_end_explanation": "สิ้นสุดอัตโนมัติหลังว่าง 30 นาที",
+        "auto_ends_in": "สิ้นสุดอัตโนมัติใน",
+        "config_short": "การตั้งค่า",
+        "change_config": "เปลี่ยนการตั้งค่า",
+        "search_maps": "ค้นหาแผนที่...",
+        "no_matching_maps": "ไม่พบแผนที่ที่ตรงกัน",
+        "upload_settings": "การตั้งค่าการอัปโหลด",
+        "upload_settings_hint": "การเปลี่ยนแปลงจะมีผลกับการอัปโหลดครั้งต่อไปจากเซิร์ฟเวอร์นี้",
+        "upload_settings_saved": "อัปเดตการตั้งค่าการอัปโหลดแล้ว",
+        "upload_settings_failed": "อัปเดตการตั้งค่าการอัปโหลดไม่สำเร็จ"
     },
     "about": {
         "title": "เกี่ยวกับ - {site_name}",
@@ -338,14 +363,16 @@
         "label": "ภาษา"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "ยินดีต้อนรับสู่ {site_name}",
+        "reservation_label": "การจอง #{number}",
+        "copy_connect": "เชื่อมต่อ SDR",
+        "copy_direct_connect": "เชื่อมต่อโดยตรง",
+        "copied": "คัดลอกแล้ว!",
+        "map": "แผนที่",
+        "ends_at": "สิ้นสุดเวลา",
+        "did_you_know": "คุณรู้หรือไม่…",
+        "not_available": "การจองนี้ยังไม่เปิดใช้งานในขณะนี้",
+        "show_command": "แสดงคำสั่ง",
+        "hide_command": "ซ่อนคำสั่ง"
     }
 }

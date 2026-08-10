@@ -53,7 +53,21 @@
         "creating": "Luodaan...",
         "captcha_error": "Suorita captcha-vahvistus.",
         "create_failed": "Varauksen luominen epäonnistui",
-        "network_error": "Verkkovirhe — tarkista yhteytesi ja yritä uudelleen."
+        "network_error": "Verkkovirhe — tarkista yhteytesi ja yritä uudelleen.",
+        "search_maps": "Hae karttoja...",
+        "no_matching_maps": "Vastaavia karttoja ei löytynyt.",
+        "competitive_config": "Kilpailuasetukset",
+        "loading_configs": "Ladataan asetuksia...",
+        "search_configs": "Hae asetuksia...",
+        "no_matching_configs": "Vastaavia asetuksia ei löytynyt.",
+        "no_config": "Ei asetusta (lataa myöhemmin)",
+        "config_optional": "Valinnainen — voit ladata asetuksen myös palvelimen käynnistyttyä.",
+        "config_unavailable": "Asetusluettelo ei ole käytettävissä. Voit silti valita asetuksen palvelimen käynnistyttyä.",
+        "automatic_uploads": "Automaattiset lataukset",
+        "logs_tf_upload": "Lataa logs.tf-palveluun",
+        "logs_tf_hint": "Lataa ottelulokit automaattisesti",
+        "demos_tf_upload": "Lataa demos.tf-palveluun",
+        "demos_tf_hint": "Lataa SourceTV-demot automaattisesti"
     },
     "status": {
         "title": "Varaus #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Takaisin kotisivulle",
         "download_map": "Lataa kartta",
         "change_map": "Vaihda kartta",
-        "kick_player": "Potki pelaaja"
+        "kick_player": "Potki pelaaja",
+        "admin_viewing": "Katsotaan ylläpitäjänä — omistaja {owner}",
+        "auto_end_explanation": "Päättyy automaattisesti, kun tyhjänä 30 min",
+        "auto_ends_in": "Automaattinen päättyminen",
+        "config_short": "Asetus",
+        "change_config": "Vaihda asetusta",
+        "search_maps": "Hae karttoja...",
+        "no_matching_maps": "Vastaavia karttoja ei löytynyt.",
+        "upload_settings": "Latausasetukset",
+        "upload_settings_hint": "Muutokset koskevat tältä palvelimelta tulevia tulevia latauksia.",
+        "upload_settings_saved": "Latausasetukset päivitetty.",
+        "upload_settings_failed": "Latausasetusten päivitys epäonnistui."
     },
     "about": {
         "title": "Tietoa - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Kieli"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "Tervetuloa palveluun {site_name}",
+        "reservation_label": "Varaus #{number}",
+        "copy_connect": "SDR-yhteys",
+        "copy_direct_connect": "Suora yhteys",
+        "copied": "Kopioitu!",
+        "map": "Kartta",
+        "ends_at": "Päättyy",
+        "did_you_know": " tiesitkö…",
+        "not_available": "Tämä varaus ei ole tällä hetkellä aktiivinen.",
+        "show_command": "Näytä komento",
+        "hide_command": "Piilota komento"
     }
 }

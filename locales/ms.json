@@ -53,7 +53,21 @@
         "creating": "Mencipta...",
         "captcha_error": "Sila lengkapkan pengesahan captcha.",
         "create_failed": "Gagal mencipta tempahan",
-        "network_error": "Ralat rangkaian — periksa sambungan anda dan cuba lagi."
+        "network_error": "Ralat rangkaian — periksa sambungan anda dan cuba lagi.",
+        "search_maps": "Cari peta...",
+        "no_matching_maps": "Tiada peta sepadan.",
+        "competitive_config": "Konfigurasi kompetitif",
+        "loading_configs": "Memuatkan konfigurasi...",
+        "search_configs": "Cari konfigurasi...",
+        "no_matching_configs": "Tiada konfigurasi sepadan.",
+        "no_config": "Tiada konfigurasi (muat kemudian)",
+        "config_optional": "Pilihan — anda juga boleh memuatkan konfigurasi selepas pelayan dimulakan.",
+        "config_unavailable": "Senarai konfigurasi tidak tersedia. Anda masih boleh memilihnya selepas pelayan dimulakan.",
+        "automatic_uploads": "Muat naik automatik",
+        "logs_tf_upload": "Muat naik ke logs.tf",
+        "logs_tf_hint": "Muat naik log perlawanan secara automatik",
+        "demos_tf_upload": "Muat naik ke demos.tf",
+        "demos_tf_hint": "Muat naik demo SourceTV secara automatik"
     },
     "status": {
         "title": "Tempahan #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Kembali ke laman utama",
         "download_map": "Muat turun peta",
         "change_map": "Tukar peta",
-        "kick_player": "Buang pemain"
+        "kick_player": "Buang pemain",
+        "admin_viewing": "Melihat sebagai pentadbir — milik {owner}",
+        "auto_end_explanation": "Berakhir secara automatik selepas kosong selama 30 minit",
+        "auto_ends_in": "Berakhir secara automatik dalam",
+        "config_short": "Konfigurasi",
+        "change_config": "Tukar konfigurasi",
+        "search_maps": "Cari peta...",
+        "no_matching_maps": "Tiada peta sepadan.",
+        "upload_settings": "Tetapan muat naik",
+        "upload_settings_hint": "Perubahan digunakan pada muat naik akan datang daripada pelayan ini.",
+        "upload_settings_saved": "Tetapan muat naik dikemas kini.",
+        "upload_settings_failed": "Gagal mengemas kini tetapan muat naik."
     },
     "about": {
         "title": "Tentang - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Bahasa"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "Selamat datang ke {site_name}",
+        "reservation_label": "Tempahan #{number}",
+        "copy_connect": "Sambungan SDR",
+        "copy_direct_connect": "Sambungan terus",
+        "copied": "Disalin!",
+        "map": "Peta",
+        "ends_at": "Berakhir pada",
+        "did_you_know": "Tahukah anda…",
+        "not_available": "Tempahan ini tidak aktif pada masa ini.",
+        "show_command": "Tunjukkan arahan",
+        "hide_command": "Sembunyikan arahan"
     }
 }

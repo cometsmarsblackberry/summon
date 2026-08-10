@@ -53,7 +53,21 @@
         "creating": "Đang tạo...",
         "captcha_error": "Vui lòng hoàn thành xác minh captcha.",
         "create_failed": "Không thể tạo đặt chỗ",
-        "network_error": "Lỗi mạng — kiểm tra kết nối và thử lại."
+        "network_error": "Lỗi mạng — kiểm tra kết nối và thử lại.",
+        "search_maps": "Tìm bản đồ...",
+        "no_matching_maps": "Không có bản đồ phù hợp.",
+        "competitive_config": "Cấu hình thi đấu",
+        "loading_configs": "Đang tải cấu hình...",
+        "search_configs": "Tìm cấu hình...",
+        "no_matching_configs": "Không có cấu hình phù hợp.",
+        "no_config": "Không có cấu hình (tải sau)",
+        "config_optional": "Tùy chọn — bạn cũng có thể tải cấu hình sau khi máy chủ khởi động.",
+        "config_unavailable": "Danh sách cấu hình không khả dụng. Bạn vẫn có thể chọn cấu hình sau khi máy chủ khởi động.",
+        "automatic_uploads": "Tải lên tự động",
+        "logs_tf_upload": "Tải lên logs.tf",
+        "logs_tf_hint": "Tự động tải lên nhật ký trận đấu",
+        "demos_tf_upload": "Tải lên demos.tf",
+        "demos_tf_hint": "Tự động tải lên demo SourceTV"
     },
     "status": {
         "title": "Đặt chỗ #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Về trang chủ",
         "download_map": "Tải xuống bản đồ",
         "change_map": "Đổi bản đồ",
-        "kick_player": "Kick người chơi"
+        "kick_player": "Kick người chơi",
+        "admin_viewing": "Đang xem với tư cách quản trị viên — thuộc về {owner}",
+        "auto_end_explanation": "Tự động kết thúc sau 30 phút trống",
+        "auto_ends_in": "Tự động kết thúc sau",
+        "config_short": "Cấu hình",
+        "change_config": "Đổi cấu hình",
+        "search_maps": "Tìm bản đồ...",
+        "no_matching_maps": "Không có bản đồ phù hợp.",
+        "upload_settings": "Cài đặt tải lên",
+        "upload_settings_hint": "Các thay đổi áp dụng cho những lần tải lên sau từ máy chủ này.",
+        "upload_settings_saved": "Đã cập nhật cài đặt tải lên.",
+        "upload_settings_failed": "Không thể cập nhật cài đặt tải lên."
     },
     "about": {
         "title": "Giới thiệu - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Ngôn ngữ"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "Chào mừng đến với {site_name}",
+        "reservation_label": "Đặt chỗ #{number}",
+        "copy_connect": "Kết nối SDR",
+        "copy_direct_connect": "Kết nối trực tiếp",
+        "copied": "Đã sao chép!",
+        "map": "Bản đồ",
+        "ends_at": "Kết thúc lúc",
+        "did_you_know": "Bạn có biết…",
+        "not_available": "Đặt chỗ này hiện không hoạt động.",
+        "show_command": "Hiển thị lệnh",
+        "hide_command": "Ẩn lệnh"
     }
 }
