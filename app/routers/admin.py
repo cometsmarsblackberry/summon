@@ -14,7 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.user import User
 from app.models.reservation import Reservation, ReservationStatus
-from app.models.instance import CloudInstance, EnabledLocation, LocationProvider, Provider
+from app.models.instance import (
+    CloudInstance,
+    EnabledLocation,
+    GameMap,
+    LocationProvider,
+    Provider,
+)
 from app.models.cost import MonthlyCost
 from app.routers.auth import require_admin
 from app.services.orchestrator import get_enabled_locations
@@ -24,6 +30,43 @@ from app.utils.location_flags import normalize_subdivision
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
+
+
+async def _get_maps_data(db: AsyncSession) -> list[dict]:
+    """Return maps alphabetically with starting-map usage statistics."""
+    usage = (
+        select(
+            Reservation.first_map.label("map_name"),
+            func.count(Reservation.id).label("selection_count"),
+            func.count(Reservation.started_at).label("play_count"),
+            func.max(Reservation.started_at).label("last_used_at"),
+        )
+        .group_by(Reservation.first_map)
+        .subquery()
+    )
+    result = await db.execute(
+        select(
+            GameMap,
+            func.coalesce(usage.c.selection_count, 0),
+            func.coalesce(usage.c.play_count, 0),
+            usage.c.last_used_at,
+        )
+        .outerjoin(usage, usage.c.map_name == GameMap.name)
+        .order_by(func.lower(GameMap.name), GameMap.name)
+    )
+    return [
+        {
+            "id": game_map.id,
+            "name": game_map.name,
+            "display_name": game_map.display_name,
+            "enabled": game_map.enabled,
+            "is_default": game_map.is_default,
+            "selection_count": int(selection_count),
+            "play_count": int(play_count),
+            "last_used_at": last_used_at.isoformat() if last_used_at else None,
+        }
+        for game_map, selection_count, play_count, last_used_at in result.all()
+    ]
 
 
 class LocationToggleRequest(BaseModel):
@@ -203,21 +246,8 @@ async def admin_panel(
         for inst in instances
     ]
     
-    # Get maps
-    from app.models.instance import GameMap
-    result = await db.execute(
-        select(GameMap).order_by(GameMap.display_order)
-    )
-    maps_data = [
-        {
-            "id": m.id,
-            "name": m.name,
-            "display_name": m.display_name,
-            "enabled": m.enabled,
-            "is_default": m.is_default,
-        }
-        for m in result.scalars().all()
-    ]
+    # Get maps and usage statistics
+    maps_data = await _get_maps_data(db)
     
     # Get users list
     result = await db.execute(
@@ -842,6 +872,11 @@ class BulkImportMapsRequest(BaseModel):
     maps_text: str
 
 
+class BulkDeleteMapsRequest(BaseModel):
+    """Request to delete multiple maps."""
+    map_ids: list[int]
+
+
 @router.post("/maps/{map_id}/toggle")
 async def toggle_map(
     map_id: int,
@@ -850,8 +885,6 @@ async def toggle_map(
     db: AsyncSession = Depends(get_db),
 ):
     """Toggle a map's enabled status."""
-    from app.models.instance import GameMap
-    
     result = await db.execute(
         select(GameMap).where(GameMap.id == map_id)
     )
@@ -873,8 +906,6 @@ async def add_map(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a new map."""
-    from app.models.instance import GameMap
-
     name = request.name.strip()
     if not is_valid_map_name(name):
         raise HTTPException(status_code=400, detail="Invalid map name")
@@ -905,8 +936,6 @@ async def bulk_import_maps(
     db: AsyncSession = Depends(get_db),
 ):
     """Bulk-import maps from a newline-separated list of map names."""
-    from app.models.instance import GameMap
-
     lines = [line.strip() for line in request.maps_text.splitlines()]
     names = [n for n in lines if n]
     if not names:
@@ -943,6 +972,36 @@ async def bulk_import_maps(
     return {"added": added, "skipped": skipped}
 
 
+@router.post("/maps/bulk-delete")
+async def bulk_delete_maps(
+    request: BulkDeleteMapsRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete multiple maps in one transaction."""
+    map_ids = list(dict.fromkeys(request.map_ids))
+    if not map_ids:
+        raise HTTPException(status_code=400, detail="No maps selected")
+    if any(map_id <= 0 for map_id in map_ids):
+        raise HTTPException(status_code=400, detail="Invalid map ID")
+
+    result = await db.execute(select(GameMap).where(GameMap.id.in_(map_ids)))
+    game_maps = list(result.scalars().all())
+    found_ids = {game_map.id for game_map in game_maps}
+    missing_ids = [map_id for map_id in map_ids if map_id not in found_ids]
+    if missing_ids:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Map(s) not found: {', '.join(map(str, missing_ids))}",
+        )
+
+    for game_map in game_maps:
+        await db.delete(game_map)
+    await db.commit()
+
+    return {"deleted": True, "ids": map_ids}
+
+
 @router.delete("/maps/{map_id}")
 async def delete_map(
     map_id: int,
@@ -950,8 +1009,6 @@ async def delete_map(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a map."""
-    from app.models.instance import GameMap
-    
     result = await db.execute(
         select(GameMap).where(GameMap.id == map_id)
     )
