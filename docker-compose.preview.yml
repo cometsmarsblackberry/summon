@@ -1,0 +1,46 @@
+name: summon-preview
+
+services:
+  preview:
+    build: .
+    ports:
+      - "127.0.0.1:${SUMMON_PREVIEW_PORT:-8000}:8000"
+    environment:
+      SUMMON_PREVIEW: "1"
+      DATABASE_URL: sqlite+aiosqlite:////data/preview.db
+      SECRET_KEY: summon-local-preview-only
+      BASE_URL: http://127.0.0.1:${SUMMON_PREVIEW_PORT:-8000}
+      BETA_MODE: "false"
+      SITE_NAME: Summon Preview
+      LOG_DIR: /data/logs
+      PYTHONDONTWRITEBYTECODE: "1"
+      # Makes the creation form available without configuring a real provider.
+      # Preview locations use unconfigured Vultr fixtures, so no provider API is called.
+      ONIDEL_API_KEY: preview-not-a-real-key
+      ONIDEL_TEAM_ID: "1"
+    command:
+      - uvicorn
+      - app.preview:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - app
+      - --reload-dir
+      - templates
+      - --reload-dir
+      - locales
+      - --reload-include
+      - "*.html"
+      - --reload-include
+      - "*.json"
+    volumes:
+      - ./app:/app/app:ro
+      - ./templates:/app/templates:ro
+      - ./locales:/app/locales:ro
+      - ./static/css/styles.css:/app/static/css/styles.css:ro
+      - ./static/js/app.js:/app/static/js/app.js:ro
+    tmpfs:
+      - /data:uid=65532,gid=65532,mode=0750
