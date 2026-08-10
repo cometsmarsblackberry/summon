@@ -173,7 +173,7 @@
             </div>
             <div class="info-row">
                 <span class="info-label">{{ _('motd.ends_at') }}</span>
-                <span class="info-value">{{ reservation.ends_at.strftime('%b %d, %Y %H:%M') }} UTC</span>
+                <span class="info-value">{{ reservation.ends_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M') }} UTC</span>
             </div>
         </div>
 
