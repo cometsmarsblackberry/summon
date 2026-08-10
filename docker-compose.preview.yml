@@ -41,6 +41,7 @@ services:
       - ./templates:/app/templates:ro
       - ./locales:/app/locales:ro
       - ./static/css/styles.css:/app/static/css/styles.css:ro
+      - ./static/css/tailwind.css:/app/static/css/tailwind.css:ro
       - ./static/js/app.js:/app/static/js/app.js:ro
     tmpfs:
       - /data:uid=65532,gid=65532,mode=0750
