@@ -38,8 +38,8 @@
                     {{ user.display_name }}
                 </a>
                 <div class="mt-2 text-xs text-slate-500 space-y-0.5">
-                    <div>{{ _('profile.member_since', date=user.created_at.strftime('%b %d, %Y')) }}</div>
-                    <div>{{ _('profile.last_login', date=user.last_login_at.strftime('%b %d, %Y %H:%M')) }}</div>
+                    <div>{{ _('profile.member_since', date=user.created_at.strftime('%d/%m/%Y' if request.state.locale|default('en') == 'en' else '%b %d, %Y')) }}</div>
+                    <div>{{ _('profile.last_login', date=user.last_login_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M')) }}</div>
                 </div>
             </div>
         </div>
@@ -147,7 +147,7 @@
 
         {% if user.steam_data_updated_at %}
         <div class="mt-4 text-xs text-slate-400">
-            {{ _('profile.last_updated', date=user.steam_data_updated_at.strftime('%b %d, %Y %H:%M')) }}
+            {{ _('profile.last_updated', date=user.steam_data_updated_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M')) }}
         </div>
         {% endif %}
     </div>

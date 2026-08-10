@@ -625,7 +625,7 @@
                                     <span class="px-1.5 py-0.5 text-xs rounded" :class="statusClass(r.status)" x-text="r.status"></span>
                                 </td>
                                 <td class="py-2 px-1.5 font-mono text-xs text-slate-700" :title="r.sdr_ip ? 'SDR: ' + r.sdr_ip : ''" x-text="r.ip_address || '-'"></td>
-                                <td class="py-2 px-1.5 text-slate-400 text-xs" x-text="r.created_at ? r.created_at.substring(0,10) : '-'"></td>
+                                <td class="py-2 px-1.5 text-slate-400 text-xs" x-text="r.created_at ? r.created_at.substring(0, 10).split('-').reverse().join('/') : '-'"></td>
                                 <td class="py-2 px-1.5 text-center">
                                     <template x-if="r.status === 'active' || r.status === 'provisioning'">
                                         <button @click="if(confirm('End reservation #' + r.reservation_number + '?')) fetch('/api/reservations/' + r.id + '/end', {method:'POST'}).then(()=>location.reload())"

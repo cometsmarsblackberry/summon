@@ -12,6 +12,7 @@
 
     <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6" x-data="{
         status: '{{ reservation.status.value }}',
+        locale: '{{ request.state.locale|default('en') }}',
         currentMap: '{{ reservation.first_map }}',
         endsAt: '{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:00Z') }}',
         connection: null,
@@ -38,15 +39,26 @@
         formatLocal(value) {
             if (!value) return '';
             const date = new Date(this.normalizeIso(value));
-            return Number.isNaN(date.getTime())
-                ? ''
-                : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: false });
+            if (Number.isNaN(date.getTime())) return '';
+            if (this.locale === 'en') {
+                return date.toLocaleString('en-GB', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: false,
+                });
+            }
+            return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: false });
         },
 
         formatUtc(value) {
             if (!value) return '';
             const date = new Date(this.normalizeIso(value));
             if (Number.isNaN(date.getTime())) return '';
+            if (this.locale === 'en') {
+                return date.toLocaleString('en-GB', {
+                    timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', hour12: false,
+                }) + ' UTC';
+            }
             return date.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
         },
 
