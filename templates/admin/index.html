@@ -237,7 +237,9 @@
             allMaps: _adminMaps,
             mapSearch: '',
             mapPage: 1,
-            mapPerPage: 18,
+            mapPerPage: 20,
+            selectedMapIds: [],
+            deletingMaps: false,
             showAddMap: false,
             newMapName: '',
             showBulkImport: false,
@@ -246,12 +248,90 @@
             bulkResult: null,
             get filteredMaps() {
                 const q = this.mapSearch.toLowerCase();
-                return this.allMaps.filter(m => !q || m.name.toLowerCase().includes(q));
+                return this.allMaps
+                    .filter(m => !q || m.name.toLowerCase().includes(q))
+                    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
             },
             get mapTotalPages() { return Math.max(1, Math.ceil(this.filteredMaps.length / this.mapPerPage)); },
             get paginatedMaps() {
                 const p = Math.min(this.mapPage, this.mapTotalPages);
                 return this.filteredMaps.slice((p - 1) * this.mapPerPage, p * this.mapPerPage);
+            },
+            get selectedMapCount() { return this.selectedMapIds.length; },
+            get allPageMapsSelected() {
+                return this.paginatedMaps.length > 0
+                    && this.paginatedMaps.every(map => this.selectedMapIds.includes(map.id));
+            },
+            get somePageMapsSelected() {
+                return this.paginatedMaps.some(map => this.selectedMapIds.includes(map.id));
+            },
+            toggleMapSelection(mapId, selected) {
+                if (selected && !this.selectedMapIds.includes(mapId)) {
+                    this.selectedMapIds.push(mapId);
+                } else if (!selected) {
+                    this.selectedMapIds = this.selectedMapIds.filter(id => id !== mapId);
+                }
+            },
+            togglePageMaps(selected) {
+                const pageIds = this.paginatedMaps.map(map => map.id);
+                if (selected) {
+                    this.selectedMapIds = [...new Set([...this.selectedMapIds, ...pageIds])];
+                } else {
+                    this.selectedMapIds = this.selectedMapIds.filter(id => !pageIds.includes(id));
+                }
+            },
+            formatMapLastUsed(value) {
+                return value ? value.substring(0, 10) : 'Never';
+            },
+            async toggleMap(map, enabled) {
+                const previous = map.enabled;
+                map.enabled = enabled;
+                const res = await fetch('/admin/maps/' + map.id + '/toggle', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!res.ok) {
+                    map.enabled = previous;
+                    const err = await res.json().catch(() => ({}));
+                    alert(err.detail || 'Failed to update map');
+                }
+            },
+            async deleteMap(map) {
+                if (!confirm('Delete ' + map.name + '?')) return;
+                const res = await fetch('/admin/maps/' + map.id, { method: 'DELETE' });
+                if (res.ok) {
+                    this.allMaps = this.allMaps.filter(item => item.id !== map.id);
+                    this.selectedMapIds = this.selectedMapIds.filter(id => id !== map.id);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    alert(err.detail || 'Failed to delete map');
+                }
+            },
+            async deleteSelectedMaps() {
+                const mapIds = [...this.selectedMapIds];
+                if (!mapIds.length) return;
+                const label = mapIds.length === 1 ? 'map' : 'maps';
+                if (!confirm('Delete ' + mapIds.length + ' selected ' + label + '?')) return;
+
+                this.deletingMaps = true;
+                try {
+                    const res = await fetch('/admin/maps/bulk-delete', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ map_ids: mapIds })
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.detail || 'Failed to delete maps');
+                    }
+                    const deletedIds = new Set((await res.json()).ids);
+                    this.allMaps = this.allMaps.filter(map => !deletedIds.has(map.id));
+                    this.selectedMapIds = [];
+                    this.mapPage = Math.min(this.mapPage, this.mapTotalPages);
+                } catch (error) {
+                    alert(error.message || 'Failed to delete maps');
+                } finally {
+                    this.deletingMaps = false;
+                }
             },
             async addMap() {
                 if (!this.newMapName) return;
@@ -700,9 +780,18 @@
     <!-- ════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'maps'" x-cloak>
         <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
-            <div class="flex items-center justify-between mb-3">
-                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">Map Pool</h2>
-                <div class="flex items-center gap-2">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">
+                    Map Pool
+                    <span class="text-xs font-normal text-slate-400 ml-1" x-text="'(' + filteredMaps.length + ')'"></span>
+                </h2>
+                <div class="flex items-center gap-2 flex-wrap justify-end">
+                    <button x-show="selectedMapCount > 0" x-cloak
+                        @click="deleteSelectedMaps()" :disabled="deletingMaps"
+                        class="px-2 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!deletingMaps" x-text="'Delete selected (' + selectedMapCount + ')'"></span>
+                        <span x-show="deletingMaps" x-cloak>Deleting...</span>
+                    </button>
                     <input x-model="mapSearch" placeholder="Search maps..."
                         class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-40">
                     <button @click="showBulkImport = !showBulkImport; showAddMap = false"
@@ -749,28 +838,59 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-1">
-                <template x-for="map in paginatedMaps" :key="map.id">
-                    <div class="flex items-center justify-between py-1 px-2 bg-slate-50 rounded text-sm"
-                        :class="map.enabled ? '' : 'opacity-50'">
-                        <span class="text-slate-800 truncate">
-                            <span x-text="map.name"></span>
-                        </span>
-                        <div class="flex items-center gap-2">
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" class="sr-only peer" :checked="map.enabled" @change="
-                                    fetch('/admin/maps/' + map.id + '/toggle', {
-                                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ enabled: $event.target.checked })
-                                    }).then(()=>location.reload())
-                                ">
-                                <div class="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
-                            </label>
-                            <button @click="if(confirm('Delete?')) fetch('/admin/maps/' + map.id, {method:'DELETE'}).then(()=>location.reload())"
-                                class="text-xs text-red-500 hover:text-red-700">&times;</button>
-                        </div>
-                    </div>
-                </template>
+            <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                <table class="w-full text-sm">
+                    <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th class="text-center py-2 px-2">
+                                <input type="checkbox"
+                                    class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                    aria-label="Select all maps on this page"
+                                    :checked="allPageMapsSelected"
+                                    x-effect="$el.indeterminate = somePageMapsSelected && !allPageMapsSelected"
+                                    @change="togglePageMaps($event.target.checked)">
+                            </th>
+                            <th class="text-left py-2 px-2">Map</th>
+                            <th class="text-right py-2 px-2" title="Number of reservations where this map was selected as the starting map">Selected</th>
+                            <th class="text-right py-2 px-2" title="Number of those reservations that reached a running server">Played</th>
+                            <th class="text-left py-2 px-2">Last used</th>
+                            <th class="text-center py-2 px-2">Enabled</th>
+                            <th class="text-center py-2 px-2"><span class="sr-only">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <template x-for="map in paginatedMaps" :key="map.id">
+                            <tr class="hover:bg-slate-50" :class="map.enabled ? '' : 'opacity-50'">
+                                <td class="text-center py-2 px-2">
+                                    <input type="checkbox"
+                                        class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                                        :aria-label="'Select ' + map.name"
+                                        :checked="selectedMapIds.includes(map.id)"
+                                        @change="toggleMapSelection(map.id, $event.target.checked)">
+                                </td>
+                                <td class="py-2 px-2 text-slate-800" x-text="map.name"></td>
+                                <td class="py-2 px-2 text-right text-slate-700" x-text="map.selection_count.toLocaleString()"></td>
+                                <td class="py-2 px-2 text-right text-slate-700" x-text="map.play_count.toLocaleString()"></td>
+                                <td class="py-2 px-2 text-slate-500 whitespace-nowrap" x-text="formatMapLastUsed(map.last_used_at)"></td>
+                                <td class="text-center py-2 px-2">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" class="sr-only peer" :checked="map.enabled"
+                                            :aria-label="'Enable ' + map.name"
+                                            @change="toggleMap(map, $event.target.checked)">
+                                        <div class="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+                                    </label>
+                                </td>
+                                <td class="text-center py-2 px-2">
+                                    <button @click="deleteMap(map)" :aria-label="'Delete ' + map.name"
+                                        class="text-xs text-red-500 hover:text-red-700">&times;</button>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="paginatedMaps.length === 0" x-cloak>
+                            <td colspan="7" class="py-6 px-2 text-center text-slate-400">No maps found</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
             <!-- Pagination -->
             <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="mapTotalPages > 1" x-cloak>
