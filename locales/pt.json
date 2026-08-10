@@ -53,7 +53,21 @@
         "creating": "Criando...",
         "captcha_error": "Por favor complete a verificação do captcha.",
         "create_failed": "Falha ao criar a reserva",
-        "network_error": "Erro de rede — verifique sua conexão e tente novamente."
+        "network_error": "Erro de rede — verifique sua conexão e tente novamente.",
+        "search_maps": "Pesquisar mapas...",
+        "no_matching_maps": "Nenhum mapa correspondente.",
+        "competitive_config": "Configuração competitiva",
+        "loading_configs": "Carregando configurações...",
+        "search_configs": "Pesquisar configurações...",
+        "no_matching_configs": "Nenhuma configuração correspondente.",
+        "no_config": "Sem configuração (carregar depois)",
+        "config_optional": "Opcional — você também pode carregar uma configuração depois que o servidor iniciar.",
+        "config_unavailable": "A lista de configurações não está disponível. Você ainda pode escolher uma depois que o servidor iniciar.",
+        "automatic_uploads": "Uploads automáticos",
+        "logs_tf_upload": "Enviar para logs.tf",
+        "logs_tf_hint": "Enviar logs da partida automaticamente",
+        "demos_tf_upload": "Enviar para demos.tf",
+        "demos_tf_hint": "Enviar demos SourceTV automaticamente"
     },
     "status": {
         "title": "Reserva #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Voltar ao início",
         "download_map": "Baixar mapa",
         "change_map": "Mudar mapa",
-        "kick_player": "Expulsar jogador"
+        "kick_player": "Expulsar jogador",
+        "admin_viewing": "Visualizando como administrador — propriedade de {owner}",
+        "auto_end_explanation": "Termina automaticamente após 30 min vazio",
+        "auto_ends_in": "Termina automaticamente em",
+        "config_short": "Configuração",
+        "change_config": "Alterar configuração",
+        "search_maps": "Pesquisar mapas...",
+        "no_matching_maps": "Nenhum mapa correspondente.",
+        "upload_settings": "Configurações de upload",
+        "upload_settings_hint": "As alterações se aplicam a uploads futuros deste servidor.",
+        "upload_settings_saved": "Configurações de upload atualizadas.",
+        "upload_settings_failed": "Falha ao atualizar as configurações de upload."
     },
     "about": {
         "title": "Sobre - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Idioma"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "Bem-vindo ao {site_name}",
+        "reservation_label": "Reserva #{number}",
+        "copy_connect": "Conexão SDR",
+        "copy_direct_connect": "Conexão direta",
+        "copied": "Copiado!",
+        "map": "Mapa",
+        "ends_at": "Termina às",
+        "did_you_know": "Você sabia…",
+        "not_available": "Esta reserva não está ativa no momento.",
+        "show_command": "Mostrar comando",
+        "hide_command": "Ocultar comando"
     }
 }

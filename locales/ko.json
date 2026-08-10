@@ -53,7 +53,21 @@
         "creating": "생성 중...",
         "captcha_error": "캡차 인증을 완료해 주세요.",
         "create_failed": "예약 생성 실패",
-        "network_error": "네트워크 오류 — 연결을 확인하고 다시 시도하세요."
+        "network_error": "네트워크 오류 — 연결을 확인하고 다시 시도하세요.",
+        "search_maps": "맵 검색...",
+        "no_matching_maps": "일치하는 맵이 없습니다.",
+        "competitive_config": "경쟁 설정",
+        "loading_configs": "설정을 불러오는 중...",
+        "search_configs": "설정 검색...",
+        "no_matching_configs": "일치하는 설정이 없습니다.",
+        "no_config": "설정 없음 (나중에 불러오기)",
+        "config_optional": "선택 사항 — 서버가 시작된 후에도 설정을 불러올 수 있습니다.",
+        "config_unavailable": "설정 목록을 사용할 수 없습니다. 서버가 시작된 후에도 선택할 수 있습니다.",
+        "automatic_uploads": "자동 업로드",
+        "logs_tf_upload": "logs.tf에 업로드",
+        "logs_tf_hint": "경기 로그 자동 업로드",
+        "demos_tf_upload": "demos.tf에 업로드",
+        "demos_tf_hint": "SourceTV 데모 자동 업로드"
     },
     "status": {
         "title": "예약 #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "홈으로 돌아가기",
         "download_map": "맵 다운로드",
         "change_map": "맵 변경",
-        "kick_player": "플레이어 추방"
+        "kick_player": "플레이어 추방",
+        "admin_viewing": "관리자로 보는 중 — 소유자: {owner}",
+        "auto_end_explanation": "30분 동안 비어 있으면 자동 종료",
+        "auto_ends_in": "자동 종료까지",
+        "config_short": "설정",
+        "change_config": "설정 변경",
+        "search_maps": "맵 검색...",
+        "no_matching_maps": "일치하는 맵이 없습니다.",
+        "upload_settings": "업로드 설정",
+        "upload_settings_hint": "변경 사항은 이 서버에서 앞으로 업로드할 때 적용됩니다.",
+        "upload_settings_saved": "업로드 설정이 업데이트되었습니다.",
+        "upload_settings_failed": "업로드 설정을 업데이트하지 못했습니다."
     },
     "about": {
         "title": "소개 - {site_name}",
@@ -338,14 +363,16 @@
         "label": "언어"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "{site_name}에 오신 것을 환영합니다",
+        "reservation_label": "예약 #{number}",
+        "copy_connect": "SDR 연결",
+        "copy_direct_connect": "직접 연결",
+        "copied": "복사됨!",
+        "map": "맵",
+        "ends_at": "종료 시각",
+        "did_you_know": "알고 계셨나요…",
+        "not_available": "이 예약은 현재 활성 상태가 아닙니다.",
+        "show_command": "명령어 표시",
+        "hide_command": "명령어 숨기기"
     }
 }

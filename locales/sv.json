@@ -53,7 +53,21 @@
         "creating": "Skapar...",
         "captcha_error": "Slutför captcha-verifieringen.",
         "create_failed": "Det gick inte att skapa reservation",
-        "network_error": "Nätverksfel — kontrollera din anslutning och försök igen."
+        "network_error": "Nätverksfel — kontrollera din anslutning och försök igen.",
+        "search_maps": "Sök kartor...",
+        "no_matching_maps": "Inga matchande kartor.",
+        "competitive_config": "Tävlingskonfiguration",
+        "loading_configs": "Laddar konfigurationer...",
+        "search_configs": "Sök konfigurationer...",
+        "no_matching_configs": "Inga matchande konfigurationer.",
+        "no_config": "Ingen konfiguration (ladda senare)",
+        "config_optional": "Valfritt — du kan också ladda en konfiguration när servern har startat.",
+        "config_unavailable": "Konfigurationslistan är inte tillgänglig. Du kan fortfarande välja en när servern har startat.",
+        "automatic_uploads": "Automatiska uppladdningar",
+        "logs_tf_upload": "Ladda upp till logs.tf",
+        "logs_tf_hint": "Ladda upp matchloggar automatiskt",
+        "demos_tf_upload": "Ladda upp till demos.tf",
+        "demos_tf_hint": "Ladda upp SourceTV-demonstrationer automatiskt"
     },
     "status": {
         "title": "Reservation #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Tillbaka till startsidan",
         "download_map": "Ladda ner karta",
         "change_map": "Ändra karta",
-        "kick_player": "Sparka spelare"
+        "kick_player": "Sparka spelare",
+        "admin_viewing": "Visar som administratör — ägs av {owner}",
+        "auto_end_explanation": "Avslutas automatiskt efter 30 min tomtid",
+        "auto_ends_in": "Avslutas automatiskt om",
+        "config_short": "Konfiguration",
+        "change_config": "Byt konfiguration",
+        "search_maps": "Sök kartor...",
+        "no_matching_maps": "Inga matchande kartor.",
+        "upload_settings": "Uppladdningsinställningar",
+        "upload_settings_hint": "Ändringarna gäller framtida uppladdningar från den här servern.",
+        "upload_settings_saved": "Uppladdningsinställningar uppdaterade.",
+        "upload_settings_failed": "Det gick inte att uppdatera uppladdningsinställningarna."
     },
     "about": {
         "title": "Om - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Språk"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "Välkommen till {site_name}",
+        "reservation_label": "Bokning #{number}",
+        "copy_connect": "SDR-anslutning",
+        "copy_direct_connect": "Direktanslutning",
+        "copied": "Kopierat!",
+        "map": "Karta",
+        "ends_at": "Slutar",
+        "did_you_know": "Visste du…",
+        "not_available": "Den här bokningen är inte aktiv just nu.",
+        "show_command": "Visa kommando",
+        "hide_command": "Dölj kommando"
     }
 }

@@ -53,7 +53,21 @@
         "creating": "Nililikha...",
         "captcha_error": "Pakumpleto ang captcha verification.",
         "create_failed": "Nabigo ang paglikha ng reserbasyon",
-        "network_error": "Error sa network — suriin ang iyong koneksyon at subukang muli."
+        "network_error": "Error sa network — suriin ang iyong koneksyon at subukang muli.",
+        "search_maps": "Maghanap ng mga mapa...",
+        "no_matching_maps": "Walang tumugmang mapa.",
+        "competitive_config": "Competitive na config",
+        "loading_configs": "Nilo-load ang mga config...",
+        "search_configs": "Maghanap ng mga config...",
+        "no_matching_configs": "Walang tumugmang config.",
+        "no_config": "Walang config (i-load mamaya)",
+        "config_optional": "Opsyonal — maaari ka ring mag-load ng config pagkatapos magsimula ang server.",
+        "config_unavailable": "Hindi available ang listahan ng config. Maaari ka pa ring pumili pagkatapos magsimula ang server.",
+        "automatic_uploads": "Mga awtomatikong upload",
+        "logs_tf_upload": "Mag-upload sa logs.tf",
+        "logs_tf_hint": "Awtomatikong mag-upload ng mga match log",
+        "demos_tf_upload": "Mag-upload sa demos.tf",
+        "demos_tf_hint": "Awtomatikong mag-upload ng mga SourceTV demo"
     },
     "status": {
         "title": "Reserbasyon #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "Bumalik sa home",
         "download_map": "I-download ang mapa",
         "change_map": "Baguhin ang mapa",
-        "kick_player": "I-kick ang manlalaro"
+        "kick_player": "I-kick ang manlalaro",
+        "admin_viewing": "Tinitingnan bilang admin — pagmamay-ari ni {owner}",
+        "auto_end_explanation": "Awtomatikong magtatapos kapag walang laman nang 30 minuto",
+        "auto_ends_in": "Awtomatikong magtatapos sa",
+        "config_short": "Config",
+        "change_config": "Palitan ang config",
+        "search_maps": "Maghanap ng mga mapa...",
+        "no_matching_maps": "Walang tumugmang mapa.",
+        "upload_settings": "Mga setting ng upload",
+        "upload_settings_hint": "Malalapat ang mga pagbabago sa mga upload mula sa server na ito sa hinaharap.",
+        "upload_settings_saved": "Na-update ang mga setting ng upload.",
+        "upload_settings_failed": "Hindi na-update ang mga setting ng upload."
     },
     "about": {
         "title": "Tungkol - {site_name}",
@@ -338,14 +363,16 @@
         "label": "Wika"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
+        "welcome": "Maligayang pagdating sa {site_name}",
         "reservation_label": "Reservation #{number}",
         "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "copy_direct_connect": "Direktang koneksyon",
+        "copied": "Nakopya!",
+        "map": "Mapa",
+        "ends_at": "Magtatapos sa",
+        "did_you_know": "Alam mo ba…",
+        "not_available": "Hindi kasalukuyang aktibo ang reservation na ito.",
+        "show_command": "Ipakita ang command",
+        "hide_command": "Itago ang command"
     }
 }

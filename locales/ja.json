@@ -53,7 +53,21 @@
         "creating": "作成中...",
         "captcha_error": "キャプチャ認証を完了してください。",
         "create_failed": "予約の作成に失敗しました",
-        "network_error": "ネットワークエラー — 接続を確認して再試行してください。"
+        "network_error": "ネットワークエラー — 接続を確認して再試行してください。",
+        "search_maps": "マップを検索...",
+        "no_matching_maps": "一致するマップはありません。",
+        "competitive_config": "競技設定",
+        "loading_configs": "設定を読み込み中...",
+        "search_configs": "設定を検索...",
+        "no_matching_configs": "一致する設定はありません。",
+        "no_config": "設定なし（後で読み込む）",
+        "config_optional": "任意 — サーバー起動後に設定を読み込むこともできます。",
+        "config_unavailable": "設定リストを利用できません。サーバー起動後に選択できます。",
+        "automatic_uploads": "自動アップロード",
+        "logs_tf_upload": "logs.tfにアップロード",
+        "logs_tf_hint": "試合ログを自動的にアップロード",
+        "demos_tf_upload": "demos.tfにアップロード",
+        "demos_tf_hint": "SourceTVデモを自動的にアップロード"
     },
     "status": {
         "title": "予約 #{number} - {site_name}",
@@ -125,7 +139,18 @@
         "back_to_home": "ホームに戻る",
         "download_map": "マップをダウンロード",
         "change_map": "マップを変更",
-        "kick_player": "プレイヤーをキック"
+        "kick_player": "プレイヤーをキック",
+        "admin_viewing": "管理者として表示中 — 所有者: {owner}",
+        "auto_end_explanation": "空の状態が30分続くと自動終了",
+        "auto_ends_in": "自動終了まで",
+        "config_short": "設定",
+        "change_config": "設定を変更",
+        "search_maps": "マップを検索...",
+        "no_matching_maps": "一致するマップはありません。",
+        "upload_settings": "アップロード設定",
+        "upload_settings_hint": "変更はこのサーバーからの今後のアップロードに適用されます。",
+        "upload_settings_saved": "アップロード設定を更新しました。",
+        "upload_settings_failed": "アップロード設定の更新に失敗しました。"
     },
     "about": {
         "title": "概要 - {site_name}",
@@ -338,14 +363,16 @@
         "label": "言語"
     },
     "motd": {
-        "welcome": "Welcome to {site_name}",
-        "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "map": "Map",
-        "ends_at": "Ends at",
-        "did_you_know": "Did you know\u2026",
-        "not_available": "This reservation is not currently active."
+        "welcome": "{site_name}へようこそ",
+        "reservation_label": "予約 #{number}",
+        "copy_connect": "SDR接続",
+        "copy_direct_connect": "直接接続",
+        "copied": "コピーしました！",
+        "map": "マップ",
+        "ends_at": "終了時刻",
+        "did_you_know": "ご存じですか…",
+        "not_available": "この予約は現在アクティブではありません。",
+        "show_command": "コマンドを表示",
+        "hide_command": "コマンドを隠す"
     }
 }
