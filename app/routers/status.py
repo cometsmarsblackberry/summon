@@ -32,6 +32,18 @@ _STATUS_CACHE_TTL: float = 3.0  # seconds
 _STATUS_CACHE_CONTROL = "public, max-age=2, s-maxage=3, stale-while-revalidate=5"
 _status_cache_lock = asyncio.Lock()
 
+# Account-wide Vultr usage is needed for accurate capacity reporting, but it
+# must never make a user request wait on the provider API. Keep the last
+# successful snapshot in memory and refresh it asynchronously. Local instance
+# IDs are always merged into the snapshot so newly-created instances are
+# counted before Vultr's list endpoint becomes consistent.
+_vultr_account_instance_ids: frozenset[str] | None = None
+_vultr_account_refresh_after: float = 0
+_vultr_account_refresh_task: asyncio.Task[None] | None = None
+_VULTR_ACCOUNT_CACHE_TTL: float = 60.0
+_VULTR_ACCOUNT_RETRY_INTERVAL: float = 30.0
+_VULTR_ACCOUNT_REFRESH_TIMEOUT: float = 3.0
+
 _reservation_stream_lock = asyncio.Lock()
 _reservation_stream_counts: dict[int, int] = {}
 _reservation_stream_ip_counts: dict[tuple[int, str], int] = {}
@@ -40,31 +52,103 @@ _MAX_STREAMS_PER_IP_OWNER = 4
 _MAX_STREAMS_PER_IP_ANON = 2
 
 
-async def _get_vultr_account_instance_count(local_instance_ids: set[str]) -> int:
-    """Return quota-consuming Vultr instances visible to this API key.
+async def _refresh_vultr_account_instance_ids() -> None:
+    """Refresh account-wide Vultr usage without discarding stale data."""
+    global _vultr_account_instance_ids, _vultr_account_refresh_after
+
+    client = get_cloud_client("vultr")
+    if not client:
+        _vultr_account_instance_ids = frozenset()
+        _vultr_account_refresh_after = time.monotonic() + _VULTR_ACCOUNT_CACHE_TTL
+        return
+
+    try:
+        remote_instances = await asyncio.wait_for(
+            client.list_instances(),
+            timeout=_VULTR_ACCOUNT_REFRESH_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.warning(
+            "Timed out after %.1fs refreshing account-wide Vultr usage; "
+            "using cached or local state",
+            _VULTR_ACCOUNT_REFRESH_TIMEOUT,
+        )
+        return
+    except Exception as exc:
+        logger.warning(
+            "Failed to refresh account-wide Vultr usage; using cached or "
+            "local state: %s",
+            exc,
+        )
+        return
+
+    _vultr_account_instance_ids = frozenset(
+        instance.id for instance in remote_instances if instance.id
+    )
+    _vultr_account_refresh_after = time.monotonic() + _VULTR_ACCOUNT_CACHE_TTL
+
+
+async def _run_vultr_account_refresh() -> None:
+    """Run one refresh and release the in-flight task reference."""
+    global _vultr_account_refresh_task
+
+    try:
+        await _refresh_vultr_account_instance_ids()
+    finally:
+        if _vultr_account_refresh_task is asyncio.current_task():
+            _vultr_account_refresh_task = None
+
+
+def schedule_vultr_account_refresh() -> None:
+    """Schedule one stale account-usage refresh without blocking the caller."""
+    global _vultr_account_refresh_after, _vultr_account_refresh_task
+
+    now = time.monotonic()
+    if now < _vultr_account_refresh_after:
+        return
+    if (
+        _vultr_account_refresh_task is not None
+        and not _vultr_account_refresh_task.done()
+    ):
+        return
+
+    # Throttle failures as soon as the attempt is scheduled. A successful
+    # refresh extends this to the normal cache TTL.
+    _vultr_account_refresh_after = now + _VULTR_ACCOUNT_RETRY_INTERVAL
+    _vultr_account_refresh_task = asyncio.create_task(
+        _run_vultr_account_refresh(),
+        name="refresh-vultr-account-usage",
+    )
+
+
+async def stop_vultr_account_refresh() -> None:
+    """Cancel an in-flight refresh during application shutdown."""
+    global _vultr_account_refresh_task
+
+    task = _vultr_account_refresh_task
+    if task is None:
+        return
+
+    _vultr_account_refresh_task = None
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+def _get_vultr_account_instance_count(local_instance_ids: set[str]) -> int:
+    """Return cached quota-consuming Vultr usage immediately.
 
     CloudInstance only contains servers created by this deployment.  Multiple
     deployments (or manually-created servers) can share a Vultr account, so
     the provider API is the source of truth for the account-wide quota.  Keep
     local IDs in the union to cover the short interval before a newly-created
-    instance appears in Vultr's list response.
+    instance appears in Vultr's list response. On a cold start or provider
+    failure, local state is the safe non-blocking fallback.
     """
-    client = get_cloud_client("vultr")
-    if not client:
-        return len(local_instance_ids)
-
-    try:
-        remote_instances = await client.list_instances()
-    except Exception as exc:
-        # Status should remain available during a provider API outage.  The
-        # local count is the same conservative fallback used before account
-        # reconciliation was added.
-        logger.warning("Failed to load account-wide Vultr usage: %s", exc)
-        return len(local_instance_ids)
-
-    remote_instance_ids = {
-        instance.id for instance in remote_instances if instance.id
-    }
+    schedule_vultr_account_refresh()
+    remote_instance_ids = _vultr_account_instance_ids or frozenset()
     return len(local_instance_ids | remote_instance_ids)
 
 
@@ -161,7 +245,7 @@ async def _build_status(db: AsyncSession) -> dict:
         for provider_code, instance_ids in instance_ids_by_provider.items()
     }
     if "vultr" in providers:
-        provider_instance_counts["vultr"] = await _get_vultr_account_instance_count(
+        provider_instance_counts["vultr"] = _get_vultr_account_instance_count(
             instance_ids_by_provider.get("vultr", set())
         )
 
@@ -223,11 +307,9 @@ async def _build_status(db: AsyncSession) -> dict:
     return status
 
 
-@router.get("/api/status")
-async def get_status(response: Response, db: AsyncSession = Depends(get_db)):
-    """Return public status without stampeding the database on cache expiry."""
+async def get_status_snapshot(db: AsyncSession) -> dict:
+    """Return shared public status without stampeding on cache expiry."""
     global _status_cache, _status_cache_time
-    response.headers["Cache-Control"] = _STATUS_CACHE_CONTROL
 
     now = time.monotonic()
     if _status_cache is not None and (now - _status_cache_time) < _STATUS_CACHE_TTL:
@@ -244,6 +326,13 @@ async def get_status(response: Response, db: AsyncSession = Depends(get_db)):
         _status_cache = result
         _status_cache_time = time.monotonic()
         return result
+
+
+@router.get("/api/status")
+async def get_status(response: Response, db: AsyncSession = Depends(get_db)):
+    """Return the cached public status snapshot."""
+    response.headers["Cache-Control"] = _STATUS_CACHE_CONTROL
+    return await get_status_snapshot(db)
 
 
 @router.get("/api/banned_user.cfg")
