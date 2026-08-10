@@ -3,14 +3,16 @@
 {% block title %}{{ _('status.title', number=reservation.reservation_number) }}{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 py-8">
+{% set is_ended = reservation.status.value == 'ended' %}
+{% set uses_legacy_layout = reservation.status.value in ['pending', 'provisioning', 'ended'] %}
+<div class="{{ 'max-w-lg' if uses_legacy_layout else 'max-w-4xl' }} mx-auto px-4 py-8">
     {% if message %}
     <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
         {{ message }}
     </div>
     {% endif %}
 
-    <div x-data="{
+    <div class="{{ 'bg-white shadow-sm rounded-lg border border-slate-200 p-6' if uses_legacy_layout else '' }}" x-data="{
         status: '{{ reservation.status.value }}',
         locale: '{{ request.state.locale|default('en') }}',
         currentMap: '{{ reservation.first_map }}',
@@ -34,6 +36,10 @@
             if (!value) return value;
             if (/[zZ]|[+-]\d{2}:\d{2}$/.test(value)) return value;
             return value + 'Z';
+        },
+
+        usesLegacyLayout(value) {
+            return ['pending', 'provisioning', 'ended'].includes(value);
         },
 
         formatLocal(value) {
@@ -95,6 +101,11 @@
                     const data = await resp.json();
                     const prevStatus = this.status;
                     this.status = data.status;
+                    if ((this.status === 'ended' && prevStatus !== 'ended') ||
+                        this.usesLegacyLayout(this.status) !== this.usesLegacyLayout(prevStatus)) {
+                        window.location.reload();
+                        return;
+                    }
                     if (data.ends_at) {
                         this.endsAt = data.ends_at;
                     }
@@ -165,6 +176,11 @@
                 if (data.type === 'status_change') {
                     const prevStatus = this.status;
                     this.status = data.status;
+                    if ((this.status === 'ended' && prevStatus !== 'ended') ||
+                        this.usesLegacyLayout(this.status) !== this.usesLegacyLayout(prevStatus)) {
+                        window.location.reload();
+                        return;
+                    }
                     if (this.status !== prevStatus && (this.status === 'pending' || this.status === 'provisioning')) {
                         this.resetBootProgress();
                     }
@@ -210,7 +226,7 @@
             });
             
             if (response.ok) {
-                this.status = 'ended';
+                window.location.reload();
             }
         },
 
@@ -228,13 +244,7 @@
                 return;
             }
 
-            this.status = 'provisioning';
-            this.emptySince = null;
-            this.resetBootProgress();
-            this.setBootProgress({ progress: 5, message: 'Restarting server...' });
-            this.stopPolling();
-            this.connectSSE();
-            this.pollInterval = setInterval(() => this.fetchStatus(), 3000);
+            window.location.reload();
         },
 
         startPlayerPolling() {
@@ -565,8 +575,8 @@
             return s + 's';
         }
     }">
-        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div class="flex items-center justify-between mb-5">
+        <section class="{{ '' if uses_legacy_layout else 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6' }}">
+        <div class="flex items-center justify-between {{ 'mb-4' if uses_legacy_layout else 'mb-5' }}">
             <h1 class="text-lg font-semibold">{{ _('status.heading', number=reservation.reservation_number) }}</h1>
             <span class="px-2 py-1 text-xs font-medium rounded" :class="{
                     'bg-yellow-100 text-yellow-800': status === 'pending',
@@ -615,15 +625,15 @@
             class="mb-4 p-3 bg-red-100 border border-red-200 rounded text-red-800 text-sm" x-text="error"></div>
 
         <!-- Server details -->
-        <div class="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
-            <div class="min-w-0">
-                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.location') }}</span>
-                <span class="mt-1 block truncate text-sm text-slate-800">{{ location_display }}</span>
+        <div class="{{ 'space-y-3' if uses_legacy_layout else 'grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4' }}">
+            <div class="{{ 'flex justify-between text-sm' if uses_legacy_layout else 'min-w-0' }}">
+                <span class="{{ 'text-slate-500' if uses_legacy_layout else 'block text-xs font-medium uppercase tracking-wide text-slate-400' }}">{{ _('status.location') }}</span>
+                <span class="{{ 'text-slate-800' if uses_legacy_layout else 'mt-1 block truncate text-sm text-slate-800' }}">{{ location_display }}</span>
             </div>
-            <div class="min-w-0">
-                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.map') }}</span>
-                <span class="mt-1 flex min-w-0 items-center gap-1 text-sm text-slate-800">
-                    <span class="truncate" x-text="currentMap"></span>
+            <div class="{{ 'flex justify-between text-sm' if uses_legacy_layout else 'min-w-0' }}">
+                <span class="{{ 'text-slate-500' if uses_legacy_layout else 'block text-xs font-medium uppercase tracking-wide text-slate-400' }}">{{ _('status.map') }}</span>
+                <span class="{{ 'text-slate-800 flex items-center gap-1' if uses_legacy_layout else 'mt-1 flex min-w-0 items-center gap-1 text-sm text-slate-800' }}">
+                    <span class="{{ '' if uses_legacy_layout else 'truncate' }}" x-text="currentMap"></span>
                     {% if map_download_url %}
                     <a href="{{ map_download_url }}" title="{{ _('status.download_map') }}" class="text-slate-400 hover:text-brand-400 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -700,20 +710,20 @@
                 </div>
             </div>
             {% endif %}
-            <div class="min-w-0">
-                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.ends_at') }}</span>
-                <span class="mt-1 block text-sm text-slate-800" :title="formatUtc(endsAt)" x-text="formatLocal(endsAt)"></span>
+            <div class="{{ 'flex justify-between text-sm' if uses_legacy_layout else 'min-w-0' }}">
+                <span class="{{ 'text-slate-500' if uses_legacy_layout else 'block text-xs font-medium uppercase tracking-wide text-slate-400' }}">{{ _('status.ends_at') }}</span>
+                <span class="{{ 'text-slate-800' if uses_legacy_layout else 'mt-1 block text-sm text-slate-800' }}" :title="formatUtc(endsAt)" x-text="formatLocal(endsAt)"></span>
             </div>
-            <div class="min-w-0">
-                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.auto_end_when_empty') }}</span>
-                <span x-show="autoEndRemaining === null" class="mt-1 block text-sm text-slate-800">{{ _('status.auto_end_default') }}</span>
-                <span x-show="autoEndRemaining !== null" x-cloak class="mt-1 block text-sm text-slate-800"
+            <div class="{{ 'flex justify-between text-sm' if uses_legacy_layout else 'min-w-0' }}">
+                <span class="{{ 'text-slate-500' if uses_legacy_layout else 'block text-xs font-medium uppercase tracking-wide text-slate-400' }}">{{ _('status.auto_end_when_empty') }}</span>
+                <span x-show="autoEndRemaining === null" class="{{ 'text-slate-800' if uses_legacy_layout else 'mt-1 block text-sm text-slate-800' }}">{{ _('status.auto_end_default') }}</span>
+                <span x-show="autoEndRemaining !== null" x-cloak class="{{ 'text-slate-800' if uses_legacy_layout else 'mt-1 block text-sm text-slate-800' }}"
                     x-text="formatAutoEnd(autoEndRemaining)"></span>
             </div>
         </div>
         </section>
 
-        <div class="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div class="{{ '' if uses_legacy_layout else 'mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-3' }}">
 
         <!-- Connection details (owner only, when active) -->
         {% if is_owner %}
@@ -797,7 +807,7 @@
         </div>
 
         <!-- Actions -->
-        <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" x-show="status === 'active' || status === 'provisioning'" x-cloak>
+        <div class="{{ 'mt-6 space-y-2' if uses_legacy_layout else 'space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm' }}" x-show="status === 'active' || status === 'provisioning'" x-cloak>
             <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning'"
                 class="w-full px-4 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-amber-800 text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
                 {{ _('status.restart_server') }}
@@ -870,8 +880,7 @@
 
         <!-- Upload links (logs.tf / demos.tf) -->
         <div x-show="status === 'active' || status === 'ended'" x-cloak
-            class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-            :class="status === 'ended' ? 'lg:col-span-3' : ''"
+            class="{{ 'mt-6 pt-6 border-t border-slate-200' if is_ended else 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm' }}"
             x-data="{
                 uploads: [],
                 uploadsLoaded: false,
@@ -995,11 +1004,11 @@
                     <template x-for="upload in uploads" :key="upload.type + upload.external_id">
                         <div class="flex items-center justify-between text-sm">
                             <a :href="upload.url" :title="upload.url" target="_blank" rel="noopener"
-                                class="flex w-full min-w-0 items-center gap-1.5 text-brand-400 hover:text-brand-300 hover:underline">
-                                <span x-show="upload.type === 'log'" class="inline-flex shrink-0 px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">LOG</span>
-                                <span x-show="upload.type === 'demo'" class="inline-flex shrink-0 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">STV</span>
-                                <span class="min-w-0 flex-1 truncate" x-text="upload.url"></span>
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                                class="{{ 'text-brand-400 hover:text-brand-300 hover:underline flex items-center gap-1.5' if is_ended else 'flex w-full min-w-0 items-center gap-1.5 text-brand-400 hover:text-brand-300 hover:underline' }}">
+                                <span x-show="upload.type === 'log'" class="inline-flex {{ '' if is_ended else 'shrink-0' }} px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">LOG</span>
+                                <span x-show="upload.type === 'demo'" class="inline-flex {{ '' if is_ended else 'shrink-0' }} px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">STV</span>
+                                <span class="{{ '' if is_ended else 'min-w-0 flex-1 truncate' }}" x-text="upload.url"></span>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="{{ 'w-3.5 h-3.5' if is_ended else 'h-3.5 w-3.5 shrink-0' }}" viewBox="0 0 20 20" fill="currentColor">
                                     <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
                                     <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
                                 </svg>
@@ -1076,7 +1085,7 @@
 
 	        {% if is_owner %}
 	        <!-- Stats for nerds (collapsible, hidden by default) -->
-	        <div x-show="status === 'provisioning' || status === 'active'" x-cloak class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+	        <div x-show="status === 'provisioning' || status === 'active'" x-cloak class="{{ 'mt-6 pt-6 border-t border-slate-200' if uses_legacy_layout else 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm' }}"
 	            x-data="{
 	                open: false,
 	                stats: null,
