@@ -3,14 +3,14 @@
 {% block title %}{{ _('status.title', number=reservation.reservation_number) }}{% endblock %}
 
 {% block content %}
-<div class="max-w-lg mx-auto px-4 py-8">
+<div class="max-w-4xl mx-auto px-4 py-8">
     {% if message %}
     <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm">
         {{ message }}
     </div>
     {% endif %}
 
-    <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6" x-data="{
+    <div x-data="{
         status: '{{ reservation.status.value }}',
         locale: '{{ request.state.locale|default('en') }}',
         currentMap: '{{ reservation.first_map }}',
@@ -565,7 +565,8 @@
             return s + 's';
         }
     }">
-        <div class="flex items-center justify-between mb-4">
+        <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div class="flex items-center justify-between mb-5">
             <h1 class="text-lg font-semibold">{{ _('status.heading', number=reservation.reservation_number) }}</h1>
             <span class="px-2 py-1 text-xs font-medium rounded" :class="{
                     'bg-yellow-100 text-yellow-800': status === 'pending',
@@ -614,15 +615,15 @@
             class="mb-4 p-3 bg-red-100 border border-red-200 rounded text-red-800 text-sm" x-text="error"></div>
 
         <!-- Server details -->
-        <div class="space-y-3">
-            <div class="flex justify-between text-sm">
-                <span class="text-slate-500">{{ _('status.location') }}</span>
-                <span class="text-slate-800">{{ location_display }}</span>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
+            <div class="min-w-0">
+                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.location') }}</span>
+                <span class="mt-1 block truncate text-sm text-slate-800">{{ location_display }}</span>
             </div>
-            <div class="flex justify-between text-sm">
-                <span class="text-slate-500">{{ _('status.map') }}</span>
-                <span class="text-slate-800 flex items-center gap-1">
-                    <span x-text="currentMap"></span>
+            <div class="min-w-0">
+                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.map') }}</span>
+                <span class="mt-1 flex min-w-0 items-center gap-1 text-sm text-slate-800">
+                    <span class="truncate" x-text="currentMap"></span>
                     {% if map_download_url %}
                     <a href="{{ map_download_url }}" title="{{ _('status.download_map') }}" class="text-slate-400 hover:text-brand-400 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -644,9 +645,9 @@
             </div>
             {% if is_owner %}
             <div x-show="mapMessage && !mapChangeOpen" x-cloak
-                class="p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs" x-text="mapMessage"></div>
+                class="col-span-2 p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs lg:col-span-4" x-text="mapMessage"></div>
             <!-- Map change dropdown -->
-            <div x-show="mapChangeOpen" x-cloak x-transition class="mt-1">
+            <div x-show="mapChangeOpen" x-cloak x-transition class="col-span-2 lg:col-span-4">
                 <div x-show="mapError"
                     class="mb-2 p-2 bg-red-50 border border-red-200 rounded text-red-800 text-xs" x-text="mapError"></div>
                 <div class="flex items-start gap-2">
@@ -699,21 +700,24 @@
                 </div>
             </div>
             {% endif %}
-        <div class="flex justify-between text-sm">
-            <span class="text-slate-500">{{ _('status.ends_at') }}</span>
-            <span class="text-slate-800" :title="formatUtc(endsAt)" x-text="formatLocal(endsAt)"></span>
-        </div>
-            <div class="flex justify-between text-sm">
-                <span class="text-slate-500">{{ _('status.auto_end_when_empty') }}</span>
-                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default') }}</span>
-                <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800"
+            <div class="min-w-0">
+                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.ends_at') }}</span>
+                <span class="mt-1 block text-sm text-slate-800" :title="formatUtc(endsAt)" x-text="formatLocal(endsAt)"></span>
+            </div>
+            <div class="min-w-0">
+                <span class="block text-xs font-medium uppercase tracking-wide text-slate-400">{{ _('status.auto_end_when_empty') }}</span>
+                <span x-show="autoEndRemaining === null" class="mt-1 block text-sm text-slate-800">{{ _('status.auto_end_default') }}</span>
+                <span x-show="autoEndRemaining !== null" x-cloak class="mt-1 block text-sm text-slate-800"
                     x-text="formatAutoEnd(autoEndRemaining)"></span>
             </div>
         </div>
+        </section>
+
+        <div class="mt-4 grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
 
         <!-- Connection details (owner only, when active) -->
         {% if is_owner %}
-        <div x-show="status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+        <div x-show="status === 'active'" x-cloak class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2"
             x-data="{ connType: 'connect', connTypeInit: false }"
             x-effect="if (!connTypeInit && connection && connection.enable_direct_connect && connection.ip_address) { connType = 'direct'; connTypeInit = true; }">
             <div class="flex items-center justify-between mb-3">
@@ -734,7 +738,7 @@
             <!-- Connect (SDR) -->
             <div x-show="connType === 'connect' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
-                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                    <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-3 py-2 bg-slate-50 rounded text-sm font-mono"
                         x-text="connection ? 'connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
@@ -749,7 +753,7 @@
             <!-- SourceTV (SDR) -->
             <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
-                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                    <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-3 py-2 bg-slate-50 rounded text-sm font-mono"
                         x-text="connection ? 'connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
@@ -764,7 +768,7 @@
             <!-- Direct Connect -->
             <div x-show="connType === 'direct' && connection && connection.ip_address" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
-                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                    <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-3 py-2 bg-slate-50 rounded text-sm font-mono"
                         x-text="connection ? 'connect ' + connection.ip_address + ':27015; password ' + connection.password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27015; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
@@ -779,7 +783,7 @@
             <!-- Direct SourceTV -->
             <div x-show="connType === 'direct_stv' && connection && connection.ip_address" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
-                    <code class="flex-1 px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                    <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap px-3 py-2 bg-slate-50 rounded text-sm font-mono"
                         x-text="connection ? 'connect ' + connection.ip_address + ':27020; password ' + connection.tv_password : ''"></code>
                     <button
                         @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27020; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
@@ -793,7 +797,7 @@
         </div>
 
         <!-- Actions -->
-        <div class="mt-6 space-y-2" x-show="status === 'active' || status === 'provisioning'">
+        <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" x-show="status === 'active' || status === 'provisioning'" x-cloak>
             <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning'"
                 class="w-full px-4 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg text-amber-800 text-sm transition-colors disabled:opacity-60 disabled:cursor-not-allowed">
                 {{ _('status.restart_server') }}
@@ -806,7 +810,7 @@
 
         <!-- Competitive config (owner only, when active) -->
         <div x-show="status === 'active'" x-cloak
-            class="mt-6 pt-6 border-t border-slate-200">
+            class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
             <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.competitive_config') }}</h2>
 
             <div x-show="configMessage" x-cloak
@@ -817,7 +821,7 @@
                 class="mb-3 text-sm text-slate-500" x-text="configsHint"></p>
 
             <div class="space-y-2">
-                <div class="grid grid-cols-3 gap-2">
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
                     <select x-model="selectedLeague" @change="selectedFormat = ''; selectedConfig = '';"
                         :disabled="!configsAvailable"
                         class="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-sm disabled:opacity-50">
@@ -865,11 +869,14 @@
         {% endif %}
 
         <!-- Upload links (logs.tf / demos.tf) -->
-        <div x-show="status === 'active' || status === 'ended'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+        <div x-show="status === 'active' || status === 'ended'" x-cloak
+            class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+            :class="status === 'ended' ? 'lg:col-span-3' : ''"
             x-data="{
                 uploads: [],
                 uploadsLoaded: false,
                 uploadPollInterval: null,
+                settingsOpen: false,
                 logsEnabled: {{ reservation.enable_logs_tf_upload | tojson }},
                 demosEnabled: {{ reservation.enable_demos_tf_upload | tojson }},
                 settingsSaving: false,
@@ -943,7 +950,15 @@
             ">
 
             <div x-show="status === 'active'">
-                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide mb-3">{{ _('status.upload_settings') }}</h2>
+                <button type="button" @click="settingsOpen = !settingsOpen" :aria-expanded="settingsOpen"
+                    class="flex w-full items-center justify-between text-left text-sm font-medium uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-700">
+                    <span>{{ _('status.upload_settings') }}</span>
+                    <svg class="h-4 w-4 transition-transform" :class="settingsOpen ? 'rotate-180' : ''"
+                        viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+                <div x-show="settingsOpen" x-cloak x-transition class="mt-3">
                 <div x-show="settingsMessage" x-cloak
                     class="mb-3 p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs" x-text="settingsMessage"></div>
                 <div x-show="settingsError" x-cloak
@@ -971,6 +986,7 @@
                     </div>
                 </div>
                 <p class="mt-2 text-xs text-slate-400">{{ _('status.upload_settings_hint') }}</p>
+                </div>
             </div>
 
             <div x-show="uploads.length > 0" :class="status === 'active' ? 'mt-5 pt-5 border-t border-slate-200' : ''">
@@ -978,12 +994,12 @@
                 <div class="space-y-2">
                     <template x-for="upload in uploads" :key="upload.type + upload.external_id">
                         <div class="flex items-center justify-between text-sm">
-                            <a :href="upload.url" target="_blank" rel="noopener"
-                                class="text-brand-400 hover:text-brand-300 hover:underline flex items-center gap-1.5">
-                                <span x-show="upload.type === 'log'" class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">LOG</span>
-                                <span x-show="upload.type === 'demo'" class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">STV</span>
-                                <span x-text="upload.url"></span>
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <a :href="upload.url" :title="upload.url" target="_blank" rel="noopener"
+                                class="flex w-full min-w-0 items-center gap-1.5 text-brand-400 hover:text-brand-300 hover:underline">
+                                <span x-show="upload.type === 'log'" class="inline-flex shrink-0 px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">LOG</span>
+                                <span x-show="upload.type === 'demo'" class="inline-flex shrink-0 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">STV</span>
+                                <span class="min-w-0 flex-1 truncate" x-text="upload.url"></span>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                                     <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
                                     <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
                                 </svg>
@@ -996,7 +1012,7 @@
 
         {% if is_owner %}
         <!-- Player list -->
-        <div x-show="status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200">
+        <div x-show="status === 'active'" x-cloak class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">{{ _('status.players') }}</h2>
                 <span class="px-2 py-0.5 text-xs font-medium rounded-full"
@@ -1060,7 +1076,7 @@
 
 	        {% if is_owner %}
 	        <!-- Stats for nerds (collapsible, hidden by default) -->
-	        <div x-show="status === 'provisioning' || status === 'active'" x-cloak class="mt-6 pt-6 border-t border-slate-200"
+	        <div x-show="status === 'provisioning' || status === 'active'" x-cloak class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
 	            x-data="{
 	                open: false,
 	                stats: null,
@@ -1174,7 +1190,9 @@
                 </div>
             </div>
         </div>
-        {% endif %}
+	        {% endif %}
+
+        </div>
 
         <!-- Back link -->
         <div class="mt-6 text-center">
