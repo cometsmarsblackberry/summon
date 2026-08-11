@@ -226,9 +226,14 @@
             editingInstantHost: null,
             instantEditForm: {},
             instantHostForm: { name: '', location: '', public_ipv4: '', slot_count: 2, base_port: 27015, desired_image: '' },
+            get alphabetizedLocations() {
+                return [...this.allLocations].sort((a, b) =>
+                    (a.name || a.code).localeCompare(b.name || b.code, undefined, { sensitivity: 'base' })
+                );
+            },
             openAddInstantHost() {
                 this.instantHostForm = {
-                    name: '', location: this.allLocations[0]?.code || '', public_ipv4: '',
+                    name: '', location: this.alphabetizedLocations[0]?.code || '', public_ipv4: '',
                     slot_count: 2, base_port: 27015, desired_image: ''
                 };
                 this.enrollmentToken = '';
@@ -1597,7 +1602,7 @@
                         <div class="grid grid-cols-2 gap-2">
                             <input x-model="instantHostForm.name" placeholder="Host name" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <select x-model="instantHostForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                                <template x-for="loc in allLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
+                                <template x-for="loc in alphabetizedLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
                             </select>
                             <input x-model="instantHostForm.public_ipv4" placeholder="Static public IPv4" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <input x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
