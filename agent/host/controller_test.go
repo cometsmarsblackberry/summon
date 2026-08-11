@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +51,30 @@ func (f *fakeTransport) Send(value interface{}) error {
 func (f *fakeTransport) Messages() <-chan []byte      { return f.messages }
 func (f *fakeTransport) Connections() <-chan struct{} { return f.connections }
 func (f *fakeTransport) IsConnected() bool            { return true }
+
+func sentUpdateStatusCount(transport *fakeTransport, status string) int {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	count := 0
+	for _, message := range transport.sent {
+		if message["type"] == "host.update" && message["status"] == status {
+			count++
+		}
+	}
+	return count
+}
+
+func waitForUpdateStatus(t *testing.T, transport *fakeTransport, status string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if sentUpdateStatusCount(transport, status) >= count {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("did not receive %d host update status messages for %q", count, status)
+}
 
 type fakePodman struct {
 	pullErr     error
@@ -645,6 +671,61 @@ func TestUpdateDrainRejectsAConcurrentNewStart(t *testing.T) {
 	last := transport.sent[len(transport.sent)-1]
 	if last["type"] != "server.failed" || last["failure_code"] != "host_draining" {
 		t.Fatalf("unexpected drain response: %#v", last)
+	}
+}
+
+func TestDuplicateUpdateRequestReReportsCurrentPhase(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/manifest" {
+			http.NotFound(response, request)
+			return
+		}
+		_ = json.NewEncoder(response).Encode(agentManifest{
+			Version: "next", ProtocolMin: ProtocolMin, ProtocolMax: ProtocolMax,
+			DownloadURL: server.URL + "/agent", SHA256: strings.Repeat("0", 64),
+			RollbackTimeoutSeconds: 90,
+		})
+	}))
+	defer server.Close()
+
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(
+		t, []SlotDefinition{definition}, &sequenceHarness{}, &fakePodman{},
+	)
+	defer cleanup()
+	slot := controller.slots[definition.SlotID]
+	slot.mu.Lock()
+	slot.state = "ready"
+	slot.containerID = "active-container"
+	slot.mu.Unlock()
+	updateContext, cancelUpdate := context.WithCancel(context.Background())
+	controller.ctx = updateContext
+
+	firstDone := make(chan struct{})
+	go func() {
+		controller.requestUpdate(server.URL+"/manifest", "", false)
+		close(firstDone)
+	}()
+	waitForUpdateStatus(t, transport, "waiting_for_idle", 1)
+
+	duplicateDone := make(chan struct{})
+	go func() {
+		controller.requestUpdate(server.URL+"/manifest", "", true)
+		close(duplicateDone)
+	}()
+	select {
+	case <-duplicateDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("duplicate update request blocked behind the active updater")
+	}
+	waitForUpdateStatus(t, transport, "waiting_for_idle", 2)
+
+	cancelUpdate()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("active updater did not stop after cancellation")
 	}
 }
 

@@ -342,7 +342,10 @@
             },
             async updateAgent(host) {
                 const data = await this.hostAction(host, '/update');
-                if (data) { host.draining = true; host.update_status = data.update_status; }
+                if (data) { host.draining = data.draining; host.update_status = data.update_status; }
+            },
+            agentUpdatePending(status) {
+                return ['queued', 'checking', 'waiting_for_idle', 'downloading', 'activating'].includes(status);
             },
             async deregisterHost(host) {
                 if (!confirm('Deregister ' + host.name + '? This only revokes Summon access; it does not alter the VPS.')) return;
@@ -972,7 +975,9 @@
                                 <button @click="toggleInstantHost(host)" class="px-2 py-1 text-xs rounded bg-green-100 text-green-800" x-text="host.enabled ? 'Disable' : 'Enable'"></button>
                                 <button @click="toggleDrain(host)" class="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800" x-text="host.draining ? 'Undrain' : 'Drain'"></button>
                                 <button @click="prepareImage(host)" class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800">Prepare image</button>
-                                <button @click="updateAgent(host)" class="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800">Update agent</button>
+                                <button @click="updateAgent(host)" :disabled="agentUpdatePending(host.update_status)"
+                                    class="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    x-text="agentUpdatePending(host.update_status) ? 'Update pending' : 'Update agent'"></button>
                                 <button @click="renewEnrollment(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Re-enroll</button>
                                 <button @click="rotateCredential(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Rotate credential</button>
                                 <button @click="deregisterHost(host)" class="px-2 py-1 text-xs rounded bg-red-100 text-red-700">Deregister</button>

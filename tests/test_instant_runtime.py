@@ -48,7 +48,7 @@ from app.routers.internal import (
     pending_instant_rcon,
     send_instant_command,
 )
-from app.routers.admin import deregister_instant_host
+from app.routers.admin import deregister_instant_host, update_instant_host_agent
 from app.routers.status import _build_status
 from scripts.migrate import _export_instant_hosts, _import_instant_hosts
 
@@ -230,6 +230,59 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(host.deleted_at)
             self.assertIsNone(host.credential_hash)
             self.assertEqual("deleted", host.health_status)
+
+    async def test_repeated_agent_update_preserves_active_phase_and_auto_drain(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(
+                db, "203.0.113.30", "updating-host",
+            )
+            host.draining = True
+            host.update_auto_drained = True
+            host.update_status = "waiting_for_idle"
+            await db.commit()
+
+            with patch(
+                "app.routers.internal.send_instant_command",
+                new_callable=AsyncMock,
+            ) as send_command:
+                response = await update_instant_host_agent(
+                    host.id, user=None, db=db,
+                )
+
+            send_command.assert_not_awaited()
+            self.assertEqual("waiting_for_idle", response["update_status"])
+            self.assertTrue(response["draining"])
+            self.assertTrue(host.update_auto_drained)
+
+    async def test_agent_update_only_claims_drain_when_host_was_not_drained(self):
+        async with self.sessions() as db:
+            automatic = await self.add_ready_host(
+                db, "203.0.113.31", "automatic-update-host",
+            )
+            manual = await self.add_ready_host(
+                db, "203.0.113.32", "manual-drain-host",
+            )
+            manual.draining = True
+            manual.update_status = "failed"
+            await db.commit()
+
+            with patch(
+                "app.routers.internal.send_instant_command",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as send_command:
+                automatic_response = await update_instant_host_agent(
+                    automatic.id, user=None, db=db,
+                )
+                manual_response = await update_instant_host_agent(
+                    manual.id, user=None, db=db,
+                )
+
+            self.assertEqual(2, send_command.await_count)
+            self.assertEqual("queued", automatic_response["update_status"])
+            self.assertEqual("queued", manual_response["update_status"])
+            self.assertTrue(automatic.update_auto_drained)
+            self.assertFalse(manual.update_auto_drained)
 
     async def test_drained_capacity_shift_is_atomic_despite_old_unique_ports(self):
         async with self.sessions() as db:
