@@ -888,8 +888,9 @@
                 <div class="space-y-2">
                     <label class="flex items-center gap-2 text-xs text-slate-600">
                         <input type="checkbox" x-model="settingsForm.instant_hosts_enabled" class="rounded border-slate-300">
-                        Global Instant scheduling rollout
+                        Use Instant hosts for new reservations
                     </label>
+                    <p class="ml-5 text-xs text-slate-400">Uses an available Instant host first, then falls back to cloud capacity.</p>
                     <input x-model="settingsForm.instant_container_image" placeholder="Site-wide TF2 image"
                         class="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800">
                 </div>
