@@ -36,7 +36,7 @@ type Config struct {
 }
 
 // agentVersion is injected by release builds with -X main.agentVersion=...
-var agentVersion = "0.2.1"
+var agentVersion = "0.2.2"
 
 // Global state
 var (

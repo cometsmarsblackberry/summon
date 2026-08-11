@@ -331,12 +331,18 @@ class LocaleMiddleware(BaseHTTPMiddleware):
 class CacheControlMiddleware(BaseHTTPMiddleware):
     """Cache successful static assets, never dynamic responses or errors."""
 
+    _MUTABLE_BOOTSTRAP_ASSETS = {
+        "/static/install-instant-host.sh",
+        "/static/tf2-agent",
+    }
+
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         if "cache-control" not in response.headers:
             is_successful_static = (
                 request.url.path.startswith("/static/")
                 and 200 <= response.status_code < 300
+                and request.url.path not in self._MUTABLE_BOOTSTRAP_ASSETS
             )
             response.headers["Cache-Control"] = (
                 "public, max-age=2592000, immutable"

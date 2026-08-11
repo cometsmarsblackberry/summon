@@ -78,6 +78,13 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn("The agent service was not created.", script)
         self.assertIn("request a new enrollment token", script)
 
+    def test_instant_host_installer_requires_pasta_network_helper(self):
+        script = Path("static/install-instant-host.sh").read_text()
+
+        self.assertIn("podman passt uidmap", script)
+        self.assertIn("command -v pasta", script)
+        self.assertIn("requires the pasta executable", script)
+
     def test_instant_host_card_resolves_location_display_name(self):
         template = Path("templates/admin/index.html").read_text()
 

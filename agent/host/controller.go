@@ -35,6 +35,7 @@ type Transport interface {
 }
 
 type podmanRuntime interface {
+	CheckRootlessNetwork() error
 	PullImage(context.Context, string, podman.ProgressCallback) error
 	ImageDigest(context.Context, string) (string, error)
 	ListManagedContainers(context.Context) ([]podman.ManagedContainer, error)
@@ -1252,6 +1253,15 @@ func (c *Controller) runPreflight() {
 	}
 	ok := runtime.GOOS == "linux" && runtime.GOARCH == "amd64" &&
 		os.Geteuid() != 0 && osID == "ubuntu" && osVersion == "26.04"
+	rootlessNetworkError := ""
+	if err := c.podman.CheckRootlessNetwork(); err != nil {
+		rootlessNetworkError = err.Error()
+		report["rootless_network"] = "failed"
+		report["rootless_network_error"] = rootlessNetworkError
+		ok = false
+	} else {
+		report["rootless_network"] = "ready"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	_, err := c.podman.ListManagedContainers(ctx)
 	cancel()
@@ -1266,6 +1276,9 @@ func (c *Controller) runPreflight() {
 	c.preflight = report
 	c.basePreflightOK = ok
 	c.preflightOK = ok
+	if rootlessNetworkError != "" {
+		c.healthError = rootlessNetworkError
+	}
 	c.configurationMu.Unlock()
 }
 

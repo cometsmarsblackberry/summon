@@ -25,6 +25,14 @@ class CacheControlTests(unittest.TestCase):
         self.assertEqual(404, response.status_code)
         self.assertEqual("no-store", response.headers["cache-control"])
 
+    def test_mutable_bootstrap_assets_are_not_cacheable(self):
+        for path in ("/static/install-instant-host.sh", "/static/tf2-agent"):
+            with self.subTest(path=path):
+                response = self.client.head(path)
+
+                self.assertEqual(200, response.status_code)
+                self.assertEqual("no-store", response.headers["cache-control"])
+
 
 if __name__ == "__main__":
     unittest.main()
