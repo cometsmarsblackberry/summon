@@ -333,7 +333,7 @@
             async deregisterHost(host) {
                 if (!confirm('Deregister ' + host.name + '? This only revokes Summon access; it does not alter the VPS.')) return;
                 const res = await fetch('/admin/instant-hosts/' + host.id, {method:'DELETE'});
-                const data = await res.json();
+                const data = await res.json().catch(() => ({}));
                 if (!res.ok) { alert(data.detail || 'Could not deregister host'); return; }
                 this.instantHosts = this.instantHosts.filter(item => item.id !== host.id);
             },

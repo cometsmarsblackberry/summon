@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.database import get_db
@@ -168,7 +169,6 @@ async def admin_panel(
     total_count = result.scalar_one()
     
     # Get recent reservations with user and cloud instance info
-    from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Reservation)
         .options(

@@ -44,6 +44,7 @@ from app.routers.internal import (
     connected_instant_hosts,
     send_instant_command,
 )
+from app.routers.admin import deregister_instant_host
 from app.routers.status import _build_status
 from scripts.migrate import _export_instant_hosts, _import_instant_hosts
 
@@ -167,6 +168,21 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             generate_slot_ports(2, 27015, stride=5, tv_offset=5)
         with self.assertRaises(InstantHostError):
             generate_slot_ports(2, 65525)
+
+    async def test_admin_can_deregister_idle_instant_host(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(
+                db, "203.0.113.26", "retired-host", slots=2
+            )
+
+            response = await deregister_instant_host(host.id, user=None, db=db)
+
+            self.assertEqual({"id": host.id, "deleted": True}, response)
+            self.assertFalse(host.enabled)
+            self.assertTrue(host.draining)
+            self.assertIsNotNone(host.deleted_at)
+            self.assertIsNone(host.credential_hash)
+            self.assertEqual("deleted", host.health_status)
 
     async def test_drained_capacity_shift_is_atomic_despite_old_unique_ports(self):
         async with self.sessions() as db:
