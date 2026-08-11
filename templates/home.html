@@ -510,12 +510,9 @@
                                         class="text-slate-400 text-sm" x-show="item.entry[1].country"
                                         x-text="', ' + item.entry[1].country"></span>
                                 </div>
-                                <span x-show="item.entry[1].instant"
+                                <span x-show="item.entry[1].instant || item.entry[1].instant_available"
                                     class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded cursor-help"
                                     title="{{ _('home.instant_tooltip') }}">⚡ {{ _('home.instant') }}</span>
-                                <span x-show="item.entry[1].instant_available"
-                                    class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded cursor-help"
-                                    title="Available on an operator-owned persistent host">Host</span>
                                 <span x-show="item.entry[1].recommended"
                                     class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded cursor-help"
                                     title="{{ _('home.sdr_tooltip') }}">🛡️ {{ _('home.sdr') }}</span>
@@ -588,10 +585,8 @@
                 <h2 class="text-base font-semibold text-slate-900"
                     x-text="loc ? (loc.city || loc.name) + (loc.country ? ', ' + loc.country : '') : ''"></h2>
                 <div class="flex gap-1.5 mt-1">
-                    <span x-show="loc && loc.instant"
+                    <span x-show="loc && (loc.instant || loc.instant_available)"
                         class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded">⚡ {{ _('home.instant') }}</span>
-                    <span x-show="loc && loc.instant_available"
-                        class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">Host</span>
                     <span x-show="loc && loc.recommended"
                         class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">🛡️ {{ _('home.sdr') }}</span>
                 </div>
