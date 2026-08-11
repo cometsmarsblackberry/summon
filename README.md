@@ -24,6 +24,11 @@ redirecting to the home page. Its database lives in an in-memory container
 filesystem and is discarded when the script stops. It is intended for UI work
 and does not provision real game servers.
 
+To test the running-server controls, open
+<http://127.0.0.1:8000/__dev/active-reservation>. This creates an active local
+reservation backed by a harmless fake agent, so menus such as map and config
+changes can be exercised without sending commands to a game server.
+
 Application, template, locale, and tracked static-file changes are mounted into
 the preview container. Rebuild it after introducing new Tailwind utility
 classes so the generated stylesheet includes them. Set `SUMMON_PREVIEW_PORT`

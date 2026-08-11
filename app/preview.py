@@ -8,7 +8,7 @@ the preview fixtures below.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 
@@ -70,14 +70,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 from app.database import async_session_maker
-from app.models.instance import EnabledLocation, GameMap, LocationProvider, Provider
+from app.models.instance import (
+    CloudInstance,
+    EnabledLocation,
+    GameMap,
+    LocationProvider,
+    Provider,
+)
+from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import User
 from app.routers.auth import _session_serializer
-from app.routers.internal import competitive_configs
+from app.routers.internal import competitive_configs, connected_agents
 from app.services.competitive_configs import filter_user_selectable
 
 
 _PREVIEW_STEAM_ID = "76561198000000000"
+_PREVIEW_AGENT_ID = "preview-agent"
+_PREVIEW_INSTANCE_ID = "preview-cloud-instance"
+
+
+class _PreviewAgent:
+    """Accept agent commands without contacting a real game server."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict] = []
+
+    async def send_json(self, message: dict) -> None:
+        self.messages.append(message)
+
+
+_preview_agent = _PreviewAgent()
 
 _PREVIEW_LOCATIONS = (
     {
@@ -226,7 +248,7 @@ async def _seed_preview_data(db: AsyncSession) -> User:
     await db.refresh(user)
 
     cfg_files = sorted(_PREVIEW_CONFIGS)
-    competitive_configs["preview-agent"] = {
+    competitive_configs[_PREVIEW_AGENT_ID] = {
         "cfg_files": cfg_files,
         "exec_cfg_files": sorted(
             set(filter_user_selectable(cfg_files) + ["summon_reset"])
@@ -237,16 +259,88 @@ async def _seed_preview_data(db: AsyncSession) -> User:
     return user
 
 
-@app.get("/__dev/login", include_in_schema=False)
-async def preview_login():
-    """Seed the disposable preview database and sign in the fixture user."""
-    async with async_session_maker() as db:
-        user = await _seed_preview_data(db)
+async def _seed_active_reservation(db: AsyncSession, user: User) -> Reservation:
+    """Create or refresh an active reservation backed by the fake preview agent."""
+    active_result = await db.execute(
+        select(Reservation)
+        .where(Reservation.user_id == user.id)
+        .where(
+            Reservation.status.in_(
+                (
+                    ReservationStatus.PENDING,
+                    ReservationStatus.PROVISIONING,
+                    ReservationStatus.ACTIVE,
+                )
+            )
+        )
+        .order_by(Reservation.created_at.desc())
+        .limit(1)
+    )
+    reservation = active_result.scalar_one_or_none()
+    if reservation is None:
+        from app.services.reservation import create_reservation
 
+        reservation = await create_reservation(
+            user=user,
+            location="helsinki",
+            duration_hours=4,
+            first_map="cp_process_f12",
+            config_file="etf2l_6v6_5cp",
+            enable_logs_tf_upload=True,
+            enable_demos_tf_upload=True,
+            db=db,
+        )
+
+    now = datetime.now(timezone.utc)
+    reservation.location = "helsinki"
+    reservation.status = ReservationStatus.ACTIVE
+    reservation.started_at = now
+    reservation.ends_at = now + timedelta(hours=3, minutes=45)
+    reservation.first_map = "cp_process_f12"
+    reservation.current_map = "cp_process_f12"
+    reservation.config_file = reservation.config_file or "etf2l_6v6_5cp"
+    reservation.sdr_ip = "203.0.113.42"
+    reservation.sdr_port = 27015
+    reservation.sdr_tv_port = 27020
+    reservation.player_joined = True
+    reservation.empty_since = None
+
+    instance = await db.get(CloudInstance, _PREVIEW_INSTANCE_ID)
+    if instance is None:
+        instance = CloudInstance(
+            id=_PREVIEW_INSTANCE_ID,
+            instance_id=_PREVIEW_AGENT_ID,
+            location="helsinki",
+            shape="preview",
+            ip_address="203.0.113.42",
+            provider_code="vultr",
+            provider_region="preview-helsinki",
+            auth_token="preview-not-a-real-agent-token",
+            status="active",
+            is_available=False,
+        )
+        db.add(instance)
+
+    instance.location = "helsinki"
+    instance.status = "active"
+    instance.is_available = False
+    instance.available_since = None
+    instance.current_reservation_id = reservation.id
+    reservation.instance_id = instance.id
+
+    await db.commit()
+    await db.refresh(reservation)
+
+    _preview_agent.messages.clear()
+    connected_agents[_PREVIEW_AGENT_ID] = _preview_agent
+    return reservation
+
+
+def _signed_in_redirect(user: User, url: str) -> RedirectResponse:
     token = _session_serializer().dumps(
         {"user_id": user.id, "steam_id": user.steam_id}
     )
-    response = RedirectResponse(url="/", status_code=302)
+    response = RedirectResponse(url=url, status_code=302)
     response.set_cookie(
         key="session",
         value=token,
@@ -256,3 +350,22 @@ async def preview_login():
         samesite="lax",
     )
     return response
+
+
+@app.get("/__dev/login", include_in_schema=False)
+async def preview_login():
+    """Seed the disposable preview database and sign in the fixture user."""
+    async with async_session_maker() as db:
+        user = await _seed_preview_data(db)
+
+    return _signed_in_redirect(user, "/")
+
+
+@app.get("/__dev/active-reservation", include_in_schema=False)
+async def preview_active_reservation():
+    """Sign in and open an active reservation backed by a fake local agent."""
+    async with async_session_maker() as db:
+        user = await _seed_preview_data(db)
+        reservation = await _seed_active_reservation(db, user)
+
+    return _signed_in_redirect(user, f"/reservations/{reservation.id}")
