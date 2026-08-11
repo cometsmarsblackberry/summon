@@ -80,7 +80,12 @@ from app.models.instance import (
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.user import User
 from app.routers.auth import _session_serializer
-from app.routers.internal import competitive_configs, connected_agents
+from app.routers.internal import (
+    competitive_configs,
+    connected_agents,
+    handle_agent_message,
+)
+from app.services.owner_commands import OWNER_COMMAND_RESULT_MARKER
 from app.services.competitive_configs import filter_user_selectable
 
 
@@ -97,6 +102,19 @@ class _PreviewAgent:
 
     async def send_json(self, message: dict) -> None:
         self.messages.append(message)
+        command_id = message.get("command_id")
+        if message.get("type") == "rcon" and command_id:
+            wrapped = str(message.get("command") or "")
+            parts = wrapped.split(" ", 2)
+            submitted = parts[2] if len(parts) == 3 else wrapped
+            await handle_agent_message(_PREVIEW_AGENT_ID, {
+                "type": "rcon_result",
+                "command_id": command_id,
+                "output": (
+                    f"{OWNER_COMMAND_RESULT_MARKER} OK\n"
+                    f"Preview executed: {submitted}"
+                ),
+            })
 
 
 _preview_agent = _PreviewAgent()

@@ -28,6 +28,7 @@ from app.services.instant_hosts import (
 )
 from app.services.runtime import (
     _cloud_capacity,
+    awaited_rcon_reservation_runtime,
     claim_instant_slot,
     configure_uploads_runtime,
     count_available_instant_slots,
@@ -43,6 +44,8 @@ from app.routers.internal import (
     _handle_instant_ready,
     _reconcile_host_inventory,
     connected_instant_hosts,
+    handle_instant_host_message,
+    pending_instant_rcon,
     send_instant_command,
 )
 from app.routers.admin import deregister_instant_host
@@ -482,6 +485,61 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stats["host_shared"])
             self.assertEqual({"cpu": "1%"}, stats["container"])
             self.assertEqual(assignment.slot.host.system_stats, stats["host"])
+
+    async def test_instant_rcon_awaits_only_valid_correlated_result(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.messages = []
+
+            async def send_json(self, message):
+                self.messages.append(message)
+
+        async with self.sessions() as db:
+            host = await self.add_ready_host(
+                db, "203.0.113.30", "correlated-host"
+            )
+            reservation = self.reservation(251)
+            reservation.status = ReservationStatus.ACTIVE
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            reservation.status = ReservationStatus.ACTIVE
+            await db.commit()
+
+            websocket = FakeWebSocket()
+            connected_instant_hosts[host.id] = websocket
+            try:
+                task = asyncio.create_task(awaited_rcon_reservation_runtime(
+                    reservation, db, "status", timeout=1
+                ))
+                while not websocket.messages:
+                    await asyncio.sleep(0)
+                envelope = websocket.messages[0]
+
+                stale = dict(envelope)
+                stale.update({
+                    "type": "server.rcon.result",
+                    "command_id": "stale-command-id",
+                    "output": "stale",
+                })
+                with patch("app.routers.internal.async_session_maker", self.sessions):
+                    await handle_instant_host_message(host.id, stale)
+                    self.assertFalse(task.done())
+
+                    result_event = dict(envelope)
+                    result_event.update({
+                        "type": "server.rcon.result",
+                        "output": "correlated",
+                    })
+                    await handle_instant_host_message(host.id, result_event)
+                self.assertEqual(
+                    {"output": "correlated", "error": None}, await task
+                )
+                self.assertFalse(pending_instant_rcon)
+                self.assertEqual(assignment.id, envelope["assignment_id"])
+            finally:
+                connected_instant_hosts.pop(host.id, None)
+                pending_instant_rcon.clear()
 
     async def test_retry_uses_different_host_and_terminal_error_does_not_retry(self):
         async with self.sessions() as db:

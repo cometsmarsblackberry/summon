@@ -29,6 +29,7 @@ from app.services.orchestrator import (
 )
 from app.services.runtime import (
     LocationCapacityError,
+    awaited_rcon_reservation_runtime,
     configure_uploads_runtime,
     claim_instant_slot,
     end_reservation_runtime,
@@ -58,7 +59,10 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _CFG_FILE_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+_STEAM_ID64_RE = re.compile(r"^[0-9]{17}$")
 _reservation_creation_lock = asyncio.Lock()
+_owner_command_state_lock = asyncio.Lock()
+_owner_command_reservations: set[int] = set()
 
 
 @captcha_router.get("/check")
@@ -84,6 +88,10 @@ class CreateReservationRequest(BaseModel):
     enable_logs_tf_upload: bool = Field(True, description="Upload match logs to logs.tf")
     enable_demos_tf_upload: bool = Field(True, description="Upload SourceTV demos to demos.tf")
     captcha_token: str | None = Field(None, description="hCaptcha response token")
+
+
+class OwnerCommandRequest(BaseModel):
+    command: str
 
 
 class ReservationResponse(BaseModel):
@@ -564,6 +572,196 @@ async def get_reservation_players(
         "updated_at": data["updated_at"] if data else None,
         "empty_since": reservation.empty_since.isoformat() if reservation.empty_since else None,
     }
+
+
+def _active_command_reservation_or_error(
+    user: User, reservation: Reservation | None
+) -> Reservation:
+    if reservation is None:
+        raise HTTPException(status_code=404, detail=t("errors.reservation_not_found"))
+    _require_reservation_access_or_404(user, reservation)
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
+    return reservation
+
+
+@router.get("/{reservation_id}/commands")
+async def get_reservation_commands(
+    reservation_id: int,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the shared owner command allowlist for one active server."""
+    reservation = _active_command_reservation_or_error(
+        user, await get_reservation_by_id(reservation_id, db)
+    )
+    try:
+        from app.services.owner_commands import get_owner_commands
+        commands = get_owner_commands()
+    except Exception:
+        logger.exception(
+            "Owner command interface unavailable reservation=%s actor=%s",
+            reservation.id,
+            user.steam_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=t("errors.command_interface_unavailable"),
+        )
+    return {"commands": list(commands)}
+
+
+@router.post("/{reservation_id}/commands")
+async def run_reservation_command(
+    reservation_id: int,
+    body: OwnerCommandRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run one allowlisted command through the updated SourceMod plugin."""
+    reservation = _active_command_reservation_or_error(
+        user, await get_reservation_by_id(reservation_id, db)
+    )
+    from app.services.owner_commands import (
+        OwnerCommandAllowlistError,
+        OwnerCommandValidationError,
+        get_owner_commands,
+        parse_plugin_command_result,
+        truncate_command_output,
+        validate_owner_command_line,
+    )
+
+    try:
+        commands = get_owner_commands()
+        command = validate_owner_command_line(body.command, commands)
+    except OwnerCommandValidationError as exc:
+        validation_key = {
+            "empty_command": "errors.command_empty",
+            "command_too_long": "errors.command_too_long",
+            "unsafe_command": "errors.command_unsafe",
+            "invalid_command_name": "errors.command_invalid_name",
+            "invalid_command": "errors.command_invalid_name",
+            "command_not_allowed": "errors.command_not_allowed",
+        }.get(exc.code, "errors.command_failed")
+        logger.warning(
+            "Owner command rejected reservation=%s actor=%s command=%r outcome=%s",
+            reservation.id,
+            user.steam_id,
+            body.command,
+            exc.code,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "message": t(validation_key)},
+        )
+    except OwnerCommandAllowlistError:
+        logger.exception(
+            "Owner command unavailable reservation=%s actor=%s command=%r outcome=allowlist_unavailable",
+            reservation.id,
+            user.steam_id,
+            body.command,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=t("errors.command_interface_unavailable"),
+        )
+
+    actor_steam_id = str(user.steam_id or "")
+    if _STEAM_ID64_RE.fullmatch(actor_steam_id) is None:
+        logger.error(
+            "Owner command unavailable reservation=%s actor=%r command=%r outcome=invalid_actor",
+            reservation.id,
+            actor_steam_id,
+            command,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=t("errors.command_interface_unavailable"),
+        )
+
+    async with _owner_command_state_lock:
+        if reservation.id in _owner_command_reservations:
+            logger.warning(
+                "Owner command rejected reservation=%s actor=%s command=%r outcome=in_progress",
+                reservation.id,
+                actor_steam_id,
+                command,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=t("errors.command_in_progress"),
+            )
+        _owner_command_reservations.add(reservation.id)
+
+    outcome = "unknown"
+    try:
+        wrapped = f"sm_summon_owner_command {actor_steam_id} {command}"
+        transport = await awaited_rcon_reservation_runtime(
+            reservation, db, wrapped, timeout=12.0
+        )
+        if transport.get("error"):
+            outcome = "agent_error"
+            logger.error(
+                "Owner command agent failure reservation=%s actor=%s command=%r error=%r",
+                reservation.id,
+                actor_steam_id,
+                command,
+                truncate_command_output(transport.get("error")),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=t("errors.command_transport_failed"),
+            )
+
+        plugin_result = parse_plugin_command_result(transport.get("output"))
+        if plugin_result is None:
+            outcome = "interface_unavailable"
+            raise HTTPException(
+                status_code=503,
+                detail=t("errors.command_interface_unavailable"),
+            )
+
+        outcome = "ok" if plugin_result.ok else (plugin_result.error_code or "error")
+        return {
+            "command": command,
+            "ok": plugin_result.ok,
+            "output": plugin_result.output,
+            "error_code": plugin_result.error_code,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from app.routers.internal import RconRequestTimeout, RconRequestUnavailable
+        if isinstance(exc, RconRequestTimeout):
+            outcome = "timeout"
+            raise HTTPException(
+                status_code=504, detail=t("errors.command_timed_out")
+            ) from exc
+        if isinstance(exc, RconRequestUnavailable):
+            outcome = "transport_unavailable"
+            raise HTTPException(
+                status_code=503, detail=t("errors.agent_not_connected")
+            ) from exc
+        outcome = "backend_error"
+        logger.exception(
+            "Owner command failed reservation=%s actor=%s command=%r",
+            reservation.id,
+            actor_steam_id,
+            command,
+        )
+        raise HTTPException(
+            status_code=500, detail=t("errors.command_failed")
+        ) from exc
+    finally:
+        async with _owner_command_state_lock:
+            _owner_command_reservations.discard(reservation.id)
+        logger.info(
+            "Owner command reservation=%s actor=%s command=%r outcome=%s",
+            reservation.id,
+            actor_steam_id,
+            command,
+            outcome,
+        )
 
 
 @router.get("/{reservation_id}/configs")

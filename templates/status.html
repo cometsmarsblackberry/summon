@@ -107,6 +107,7 @@
             if (this.status === 'active') {
                 this.startPlayerPolling();
                 this.loadConfigs();
+                this.loadServerCommands();
             }
 
             // Watch for status changes to start/stop player polling
@@ -114,6 +115,7 @@
                 if (newStatus === 'active' && oldStatus !== 'active') {
                     this.startPlayerPolling();
                     this.loadConfigs();
+                    this.loadServerCommands();
                 } else if (newStatus !== 'active' && oldStatus === 'active') {
                     this.stopPlayerPolling();
                 }
@@ -616,6 +618,136 @@
             this.mapChanging = false;
         },
 
+        // Restricted server command console
+        serverCommands: [],
+        serverCommandsLoaded: false,
+        serverCommandsAvailable: false,
+        commandInput: '',
+        commandRunning: false,
+        commandResult: null,
+        commandSuggestionIndex: -1,
+        commandSuggestionsOpen: false,
+
+        async loadServerCommands() {
+            if (this.serverCommandsLoaded || this.status !== 'active') return;
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/commands');
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) {
+                    throw new Error(typeof data.detail === 'string'
+                        ? data.detail
+                        : {{ _('status.command_interface_unavailable') | tojson | forceescape }});
+                }
+                this.serverCommands = Array.isArray(data.commands) ? data.commands : [];
+                this.serverCommandsAvailable = this.serverCommands.length > 0;
+                this.serverCommandsLoaded = true;
+            } catch (error) {
+                this.serverCommands = [];
+                this.serverCommandsAvailable = false;
+                this.serverCommandsLoaded = true;
+                this.commandResult = {
+                    command: '', ok: false,
+                    output: error.message || {{ _('status.command_interface_unavailable') | tojson | forceescape }},
+                    error_code: 'interface_unavailable',
+                };
+            }
+        },
+
+        get commandSuggestions() {
+            const value = this.commandInput;
+            if (!this.commandSuggestionsOpen || !value || value.includes(' ')) return [];
+            const prefix = value.toLowerCase();
+            return this.serverCommands
+                .filter(command => command.toLowerCase().startsWith(prefix))
+                .slice(0, 8);
+        },
+
+        updateCommandSuggestions() {
+            this.commandSuggestionIndex = -1;
+            this.commandSuggestionsOpen = Boolean(
+                this.commandInput && !this.commandInput.includes(' ')
+            );
+        },
+
+        selectCommandSuggestion(command) {
+            if (!command) return;
+            this.commandInput = command + ' ';
+            this.commandSuggestionIndex = -1;
+            this.commandSuggestionsOpen = false;
+            this.$nextTick(() => this.$refs.serverCommandInput?.focus());
+        },
+
+        handleCommandKeydown(event) {
+            const suggestions = this.commandSuggestions;
+            if (event.key === 'Escape') {
+                this.commandSuggestionsOpen = false;
+                this.commandSuggestionIndex = -1;
+                return;
+            }
+            if (event.key === 'ArrowDown' && suggestions.length) {
+                event.preventDefault();
+                this.commandSuggestionIndex =
+                    (this.commandSuggestionIndex + 1) % suggestions.length;
+                return;
+            }
+            if (event.key === 'ArrowUp' && suggestions.length) {
+                event.preventDefault();
+                this.commandSuggestionIndex = this.commandSuggestionIndex <= 0
+                    ? suggestions.length - 1
+                    : this.commandSuggestionIndex - 1;
+                return;
+            }
+            if ((event.key === 'Tab' || event.key === 'Enter')
+                && this.commandSuggestionIndex >= 0
+                && suggestions[this.commandSuggestionIndex]) {
+                event.preventDefault();
+                this.selectCommandSuggestion(suggestions[this.commandSuggestionIndex]);
+                return;
+            }
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                this.runServerCommand();
+            }
+        },
+
+        async runServerCommand() {
+            const command = this.commandInput.trim();
+            if (!command || this.commandRunning || !this.serverCommandsAvailable
+                || (this.runtimeKind === 'instant' && this.controlDegraded)) return;
+            this.commandSuggestionsOpen = false;
+            this.commandSuggestionIndex = -1;
+            this.commandRunning = true;
+            this.commandResult = null;
+            try {
+                const resp = await fetch('/api/reservations/{{ reservation.id }}/commands', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command}),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok) {
+                    this.commandResult = data;
+                } else {
+                    const detail = data.detail;
+                    const message = typeof detail === 'string'
+                        ? detail
+                        : (detail?.message || {{ _('status.command_failed') | tojson | forceescape }});
+                    this.commandResult = {
+                        command, ok: false, output: message,
+                        error_code: detail?.code || 'request_failed',
+                    };
+                }
+            } catch (error) {
+                this.commandResult = {
+                    command, ok: false,
+                    output: error.message || {{ _('status.command_failed') | tojson | forceescape }},
+                    error_code: 'request_failed',
+                };
+            } finally {
+                this.commandRunning = false;
+            }
+        },
+
         kickedIds: {},
 
         async kickPlayer(steamId, playerName) {
@@ -1082,6 +1214,59 @@
                         <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
                     </button>
                 </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Restricted server command console -->
+        {% if is_owner %}
+        <div x-show="status === 'active'" x-cloak class="border-t border-slate-200 pt-5">
+            <h2 class="mb-1 text-sm font-medium text-slate-500">{{ _('status.server_commands') }}</h2>
+            <p class="mb-3 text-xs text-slate-400">{{ _('status.command_hint') }}</p>
+            <div class="flex items-start gap-2">
+                <div class="relative min-w-0 flex-1" @click.outside="commandSuggestionsOpen = false">
+                    <input type="text" x-ref="serverCommandInput" x-model="commandInput"
+                        maxlength="511" autocomplete="off" spellcheck="false"
+                        @input="updateCommandSuggestions()"
+                        @focus="updateCommandSuggestions()"
+                        @keydown="handleCommandKeydown($event)"
+                        :disabled="commandRunning || !serverCommandsAvailable || (runtimeKind === 'instant' && controlDegraded)"
+                        placeholder="{{ _('status.command_placeholder') }}"
+                        class="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-800 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        role="combobox" :aria-expanded="commandSuggestions.length > 0"
+                        aria-autocomplete="list" aria-controls="server-command-suggestions">
+                    <div id="server-command-suggestions"
+                        x-show="commandSuggestions.length > 0" x-cloak
+                        class="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded border border-slate-200 bg-white py-1 shadow-lg"
+                        role="listbox">
+                        <template x-for="(suggestion, index) in commandSuggestions" :key="suggestion">
+                            <button type="button" role="option"
+                                @mousedown.prevent="selectCommandSuggestion(suggestion)"
+                                :aria-selected="index === commandSuggestionIndex"
+                                :class="index === commandSuggestionIndex ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'"
+                                class="block w-full px-3 py-1.5 text-left font-mono text-sm"
+                                x-text="suggestion"></button>
+                        </template>
+                    </div>
+                </div>
+                <button type="button" @click="runServerCommand()"
+                    :disabled="!commandInput.trim() || commandRunning || !serverCommandsAvailable || (runtimeKind === 'instant' && controlDegraded)"
+                    class="shrink-0 rounded bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50">
+                    <span x-show="!commandRunning">{{ _('status.run_command') }}</span>
+                    <span x-show="commandRunning" x-cloak>{{ _('status.command_running') }}</span>
+                </button>
+            </div>
+
+            <div x-show="commandResult" x-cloak class="mt-3 rounded border px-3 py-2 text-sm"
+                :class="commandResult?.ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="font-medium"
+                        :class="commandResult?.ok ? 'text-green-800' : 'text-red-800'"
+                        x-text="commandResult?.ok ? {{ _('status.command_succeeded') | tojson | forceescape }} : {{ _('status.command_failed') | tojson | forceescape }}"></span>
+                    <code class="min-w-0 truncate text-xs text-slate-500" x-text="commandResult?.command || ''"></code>
+                </div>
+                <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-700"
+                    x-text="commandResult?.output || {{ _('status.command_no_output') | tojson | forceescape }}"></pre>
             </div>
         </div>
         {% endif %}

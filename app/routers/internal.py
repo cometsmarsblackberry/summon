@@ -53,6 +53,39 @@ instant_boot_progress: dict[int, dict] = {}
 instant_container_stats: dict[int, dict] = {}
 instant_fallback_tasks: set[asyncio.Task] = set()
 
+# Correlated RCON requests are used only by the reservation command console.
+# Existing operational RCON controls remain fire-and-forget.  Keys include the
+# authenticated route and lease identity so stale or mismatched results cannot
+# resolve a newer request.
+pending_cloud_rcon: dict[tuple[str, str], asyncio.Future] = {}
+pending_instant_rcon: dict[
+    tuple[int, str, int, int, int, int], asyncio.Future
+] = {}
+
+
+class RconRequestUnavailable(RuntimeError):
+    """The selected agent cannot accept a correlated RCON request."""
+
+
+class RconRequestTimeout(TimeoutError):
+    """A correlated RCON request did not complete before its deadline."""
+
+
+def _fail_cloud_rcon_for_instance(instance_id: str, message: str) -> None:
+    for key, future in list(pending_cloud_rcon.items()):
+        if key[0] == instance_id:
+            pending_cloud_rcon.pop(key, None)
+            if not future.done():
+                future.set_exception(RconRequestUnavailable(message))
+
+
+def _fail_instant_rcon_for_host(host_id: int, message: str) -> None:
+    for key, future in list(pending_instant_rcon.items()):
+        if key[0] == host_id:
+            pending_instant_rcon.pop(key, None)
+            if not future.done():
+                future.set_exception(RconRequestUnavailable(message))
+
 
 def _extract_agent_token(websocket: WebSocket) -> str | None:
     """Extract an agent auth token from the WebSocket handshake.
@@ -124,6 +157,9 @@ async def _send_instant_message(
         logger.warning("Failed to send command to Instant host %s: %s", host_id, exc)
         if connected_instant_hosts.get(host_id) is websocket:
             connected_instant_hosts.pop(host_id, None)
+            _fail_instant_rcon_for_host(
+                host_id, "Instant host disconnected during RCON request"
+            )
         return False
 
 
@@ -153,6 +189,10 @@ def reassign_agent_instance_id(old_instance_id: str, new_instance_id: str) -> bo
     websocket = connected_agents.get(old_instance_id)
     if not websocket:
         return False
+
+    _fail_cloud_rcon_for_instance(
+        old_instance_id, "Cloud agent was reassigned during RCON request"
+    )
     
     # Move the WebSocket to the new instance_id in connected_agents
     del connected_agents[old_instance_id]
@@ -226,7 +266,11 @@ async def agent_websocket(
     finally:
         # Clean up using effective instance_id
         effective_id = agent_instance_ids.pop(ws_id, instance_id)
-        connected_agents.pop(effective_id, None)
+        if connected_agents.get(effective_id) is websocket:
+            connected_agents.pop(effective_id, None)
+            _fail_cloud_rcon_for_instance(
+                effective_id, "Cloud agent disconnected during RCON request"
+            )
         boot_progress.pop(effective_id, None)
         agent_stats.pop(effective_id, None)
 
@@ -340,6 +384,9 @@ async def instant_host_websocket(websocket: WebSocket, host_id: int):
     finally:
         if connected_instant_hosts.get(host_id) is websocket:
             connected_instant_hosts.pop(host_id, None)
+            _fail_instant_rcon_for_host(
+                host_id, "Instant host disconnected during RCON request"
+            )
 
 
 def _parse_protocol_range(data: dict) -> tuple[int | None, int | None, int | None]:
@@ -453,6 +500,20 @@ async def handle_instant_host_message(
             }
             return
         if message_type == "server.rcon.result":
+            key = (
+                host_id,
+                str(data.get("command_id")),
+                reservation_id,
+                assignment_id,
+                slot_id,
+                generation,
+            )
+            future = pending_instant_rcon.pop(key, None)
+            if future is not None and not future.done():
+                future.set_result({
+                    "output": data.get("output"),
+                    "error": data.get("error"),
+                })
             logger.debug(
                 "Instant assignment %s RCON result for command %s: %s",
                 assignment.id, data.get("command_id"), data.get("output"),
@@ -1051,6 +1112,14 @@ async def handle_agent_message(instance_id: str, data: dict):
         logger.info("Agent %s reported %d competitive configs", instance_id, len(cfg_files))
             
     elif message_type == "rcon_result":
+        command_id = data.get("command_id")
+        if isinstance(command_id, str) and command_id:
+            future = pending_cloud_rcon.pop((instance_id, command_id), None)
+            if future is not None and not future.done():
+                future.set_result({
+                    "output": data.get("output"),
+                    "error": data.get("error"),
+                })
         logger.debug(f"Agent {instance_id} RCON result: {data}")
         
     else:
@@ -1291,6 +1360,11 @@ async def send_to_agent(instance_id: str, message: dict) -> bool:
         return True
     except Exception as e:
         logger.error(f"Failed to send to agent {instance_id}: {e}")
+        if connected_agents.get(instance_id) is websocket:
+            connected_agents.pop(instance_id, None)
+            _fail_cloud_rcon_for_instance(
+                instance_id, "Cloud agent disconnected during RCON request"
+            )
         return False
 
 
@@ -1315,6 +1389,69 @@ async def send_rcon_command(instance_id: str, command: str) -> bool:
         "type": "rcon",
         "command": command,
     })
+
+
+async def send_correlated_rcon_command(
+    instance_id: str,
+    command: str,
+    *,
+    timeout: float = 12.0,
+) -> dict:
+    """Send cloud RCON and await the matching result event."""
+    command_id = str(uuid.uuid4())
+    key = (instance_id, command_id)
+    future = asyncio.get_running_loop().create_future()
+    pending_cloud_rcon[key] = future
+    try:
+        sent = await send_to_agent(instance_id, {
+            "type": "rcon",
+            "command_id": command_id,
+            "command": command,
+        })
+        if not sent:
+            if future.done() and not future.cancelled():
+                future.exception()
+            raise RconRequestUnavailable("Cloud agent is not connected")
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError as exc:
+            raise RconRequestTimeout("Cloud RCON request timed out") from exc
+    finally:
+        pending_cloud_rcon.pop(key, None)
+        if not future.done():
+            future.cancel()
+
+
+async def send_correlated_instant_rcon(
+    host_id: int,
+    message: dict,
+    *,
+    timeout: float = 12.0,
+) -> dict:
+    """Send assignment-scoped RCON and await its validated result event."""
+    key = (
+        host_id,
+        str(message["command_id"]),
+        int(message["reservation_id"]),
+        int(message["assignment_id"]),
+        int(message["slot_id"]),
+        int(message["generation"]),
+    )
+    future = asyncio.get_running_loop().create_future()
+    pending_instant_rcon[key] = future
+    try:
+        if not await send_instant_command(host_id, message):
+            if future.done() and not future.cancelled():
+                future.exception()
+            raise RconRequestUnavailable("Instant host agent is not connected")
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError as exc:
+            raise RconRequestTimeout("Instant RCON request timed out") from exc
+    finally:
+        pending_instant_rcon.pop(key, None)
+        if not future.done():
+            future.cancel()
 
 
 async def send_upload_settings(instance_id: str, *, logs_tf: bool, demos_tf: bool) -> bool:

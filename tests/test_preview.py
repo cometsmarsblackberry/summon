@@ -225,6 +225,92 @@ class PreviewEnvironmentTests(unittest.TestCase):
             payload["agent_command"],
         )
 
+    def test_preview_active_reservation_supports_server_commands(self):
+        script = textwrap.dedent(
+            """
+            import json
+            from fastapi.testclient import TestClient
+            from app.preview import app, _preview_agent
+
+            with TestClient(app) as client:
+                active = client.get(
+                    '/__dev/active-reservation', follow_redirects=False
+                )
+                cookies = {'session': active.cookies.get('session')}
+                location = active.headers['location']
+                reservation_id = int(location.rsplit('/', 1)[-1])
+                page = client.get(location, cookies=cookies)
+                commands = client.get(
+                    f'/api/reservations/{reservation_id}/commands',
+                    cookies=cookies,
+                )
+                executed = client.post(
+                    f'/api/reservations/{reservation_id}/commands',
+                    cookies=cookies,
+                    json={'command': 'mp_timelimit 30'},
+                )
+                payload = executed.json()
+                message = _preview_agent.messages[-1]
+                html = page.text
+                print('PREVIEW_COMMAND_RESULT=' + json.dumps({
+                    'page_status': page.status_code,
+                    'commands_status': commands.status_code,
+                    'has_command': 'mp_timelimit' in commands.json().get('commands', []),
+                    'execute_status': executed.status_code,
+                    'execute_payload': payload,
+                    'correlated': bool(message.get('command_id')),
+                    'wrapped': message.get('command'),
+                    'section_order': (
+                        html.index('<!-- Restricted server command console -->')
+                        > html.index('<!-- Connection details')
+                        and html.index('<!-- Restricted server command console -->')
+                        < html.index('<!-- Player list -->')
+                    ),
+                    'autocomplete_present': (
+                        'commandSuggestions' in html
+                        and 'handleCommandKeydown' in html
+                    ),
+                    'safe_result_binding': 'x-text="commandResult?.output' in html,
+                }, sort_keys=True))
+            """
+        )
+
+        with tempfile.TemporaryDirectory(prefix="summon-preview-command-test-") as tmp:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=PROJECT_ROOT,
+                env=self._environment(Path(tmp)),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        marker = next(
+            line.removeprefix("PREVIEW_COMMAND_RESULT=")
+            for line in result.stdout.splitlines()
+            if line.startswith("PREVIEW_COMMAND_RESULT=")
+        )
+        payload = json.loads(marker)
+        self.assertEqual(200, payload["page_status"])
+        self.assertEqual(200, payload["commands_status"])
+        self.assertTrue(payload["has_command"])
+        self.assertEqual(200, payload["execute_status"])
+        self.assertEqual({
+            "command": "mp_timelimit 30",
+            "ok": True,
+            "output": "Preview executed: mp_timelimit 30",
+            "error_code": None,
+        }, payload["execute_payload"])
+        self.assertTrue(payload["correlated"])
+        self.assertEqual(
+            "sm_summon_owner_command 76561198000000000 mp_timelimit 30",
+            payload["wrapped"],
+        )
+        self.assertTrue(payload["section_order"])
+        self.assertTrue(payload["autocomplete_present"])
+        self.assertTrue(payload["safe_result_binding"])
+
     def test_preview_active_reservation_clears_warm_pool_state(self):
         script = textwrap.dedent(
             """

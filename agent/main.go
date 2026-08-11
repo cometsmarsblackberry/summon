@@ -36,7 +36,7 @@ type Config struct {
 }
 
 // agentVersion is injected by release builds with -X main.agentVersion=...
-var agentVersion = "0.2.3"
+var agentVersion = "0.2.4"
 
 // Global state
 var (
@@ -465,10 +465,17 @@ func handleUploadSettings(msg json.RawMessage) {
 
 func handleRconCommand(msg json.RawMessage, client *websocket.Client) {
 	var rconMsg struct {
-		Command string `json:"command"`
+		CommandID string `json:"command_id"`
+		Command   string `json:"command"`
 	}
-	if err := json.Unmarshal(msg, &rconMsg); err != nil || rconMsg.Command == "" {
+	if err := json.Unmarshal(msg, &rconMsg); err != nil || strings.TrimSpace(rconMsg.Command) == "" {
 		log.Println("Invalid or empty RCON command")
+		if rconMsg.CommandID != "" {
+			_ = client.Send(map[string]interface{}{
+				"type": "rcon_result", "command_id": rconMsg.CommandID,
+				"error": "invalid or empty RCON command",
+			})
+		}
 		return
 	}
 
@@ -483,6 +490,12 @@ func handleRconCommand(msg json.RawMessage, client *websocket.Client) {
 
 	if containerID == "" || rconPassword == "" {
 		log.Println("Cannot execute RCON: container or config not available")
+		if rconMsg.CommandID != "" {
+			_ = client.Send(map[string]interface{}{
+				"type": "rcon_result", "command_id": rconMsg.CommandID,
+				"error": "container or configuration unavailable",
+			})
+		}
 		return
 	}
 
@@ -500,6 +513,18 @@ func handleRconCommand(msg json.RawMessage, client *websocket.Client) {
 		log.Printf("RCON command failed: %v", err)
 	} else {
 		log.Printf("RCON command executed: %s", output)
+	}
+	if rconMsg.CommandID != "" {
+		result := map[string]interface{}{
+			"type": "rcon_result", "command_id": rconMsg.CommandID,
+			"output": output,
+		}
+		if err != nil {
+			result["error"] = err.Error()
+		}
+		if sendErr := client.Send(result); sendErr != nil {
+			log.Printf("Failed to send correlated RCON result: %v", sendErr)
+		}
 	}
 }
 

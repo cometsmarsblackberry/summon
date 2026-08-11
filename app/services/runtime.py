@@ -806,6 +806,44 @@ async def rcon_reservation_runtime(
     return await send_rcon_command(cloud.instance_id, command)
 
 
+async def awaited_rcon_reservation_runtime(
+    reservation: Reservation,
+    db: AsyncSession,
+    command: str,
+    *,
+    timeout: float = 12.0,
+) -> dict:
+    """Run RCON and return only the correlated agent result."""
+    if is_instant_reservation(reservation):
+        assignment = await get_open_assignment(reservation.id, db)
+        if assignment is None:
+            from app.routers.internal import RconRequestUnavailable
+            raise RconRequestUnavailable("Instant reservation has no open assignment")
+        from app.routers.internal import send_correlated_instant_rcon
+        command_id = str(uuid.uuid4())
+        assignment.last_command_id = command_id
+        await db.commit()
+        envelope = _command_envelope(
+            "server.rcon",
+            reservation,
+            assignment,
+            command_id=command_id,
+            command=command,
+        )
+        return await send_correlated_instant_rcon(
+            assignment.slot.host_id, envelope, timeout=timeout
+        )
+
+    cloud = await _get_cloud_instance(reservation, db)
+    if cloud is None:
+        from app.routers.internal import RconRequestUnavailable
+        raise RconRequestUnavailable("Cloud reservation has no instance")
+    from app.routers.internal import send_correlated_rcon_command
+    return await send_correlated_rcon_command(
+        cloud.instance_id, command, timeout=timeout
+    )
+
+
 async def configure_uploads_runtime(
     reservation: Reservation,
     db: AsyncSession,

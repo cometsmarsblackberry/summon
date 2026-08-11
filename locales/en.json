@@ -151,6 +151,15 @@
         "back_to_home": "Back to home",
         "download_map": "Download map",
         "change_map": "Change map",
+        "server_commands": "Server Commands",
+        "command_hint": "Run an allowlisted command or CVAR. Only the latest result is shown.",
+        "command_placeholder": "e.g. mp_timelimit 30",
+        "run_command": "Run",
+        "command_running": "Running…",
+        "command_succeeded": "Command completed",
+        "command_failed": "Command failed",
+        "command_no_output": "No output.",
+        "command_interface_unavailable": "The server command interface is unavailable.",
         "kick_player": "Kick player"
     },
     "about": {
@@ -358,6 +367,16 @@
         "tf2_ownership_private": "We couldn't verify TF2 ownership from Steam (often due to private game details). Make your Steam profile and game details public, then try again.",
         "tf2_ownership_required": "You must own Team Fortress 2 to create reservations.",
         "vac_banned": "Users with VAC bans cannot create reservations.",
+        "command_interface_unavailable": "The restricted server command interface is unavailable.",
+        "command_in_progress": "Another server command is already running for this reservation.",
+        "command_transport_failed": "The game server could not execute the command.",
+        "command_timed_out": "The server command timed out.",
+        "command_failed": "The server command failed.",
+        "command_empty": "Enter a server command.",
+        "command_too_long": "The command must be at most 511 bytes.",
+        "command_unsafe": "Command separators and control characters are not allowed.",
+        "command_invalid_name": "The server command name is invalid.",
+        "command_not_allowed": "That server command is not allowed.",
         "profile_not_public": "Your Steam profile must be public to create reservations."
     },
     "language": {
