@@ -126,12 +126,24 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             host, token = await create_host(
                 db,
-                name="Helsinki edge",
                 location="instant-only",
-                public_ipv4="8.8.4.10",
                 slot_count=2,
             )
-            enrolled, credential = await exchange_enrollment_token(db, token)
+            self.assertIsNone(host.public_ipv4)
+            self.assertEqual(f"instant-only-instant-{host.id}", host.name)
+
+            with self.assertRaisesRegex(InstantHostError, "globally routable"):
+                await exchange_enrollment_token(
+                    db, token, public_ipv4="192.168.1.10"
+                )
+            enrolled, credential = await exchange_enrollment_token(
+                db,
+                token,
+                public_ipv4="8.8.4.10",
+                hostname="helsinki edge/01",
+            )
+            self.assertEqual("8.8.4.10", enrolled.public_ipv4)
+            self.assertEqual("instant-only-helsinki-edge-01", enrolled.name)
             self.assertTrue(verify_host_secret(credential, enrolled.credential_hash))
             host_id = enrolled.id
             with self.assertRaises(InstantHostError):
@@ -171,6 +183,29 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("credential", flattened_export)
         self.assertNotIn("enrollment", flattened_export)
         self.assertNotIn("assignment", flattened_export)
+
+    async def test_duplicate_observed_ipv4_does_not_consume_enrollment_token(self):
+        async with self.sessions() as db:
+            _, first_token = await create_host(
+                db, location="instant-only", slot_count=1
+            )
+            second, second_token = await create_host(
+                db, location="instant-only", slot_count=1
+            )
+            await exchange_enrollment_token(
+                db, first_token, public_ipv4="1.1.1.1"
+            )
+
+            with self.assertRaisesRegex(InstantHostError, "already uses"):
+                await exchange_enrollment_token(
+                    db, second_token, public_ipv4="1.1.1.1"
+                )
+
+            enrolled, _ = await exchange_enrollment_token(
+                db, second_token, public_ipv4="8.8.8.8"
+            )
+            self.assertEqual(second.id, enrolled.id)
+            self.assertEqual("8.8.8.8", enrolled.public_ipv4)
 
     async def test_generated_port_range_rejects_cross_slot_overlap_and_overflow(self):
         with self.assertRaises(InstantHostError):
@@ -872,6 +907,25 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
                         motd_token VARCHAR(64) DEFAULT ''
                     )
                 """))
+                await connection.execute(text("""
+                    CREATE TABLE instant_hosts (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR(64) NOT NULL,
+                        location VARCHAR(32) NOT NULL REFERENCES enabled_locations(code),
+                        public_ipv4 VARCHAR(15) NOT NULL,
+                        enabled BOOLEAN NOT NULL,
+                        draining BOOLEAN NOT NULL,
+                        health_status VARCHAR(32) NOT NULL,
+                        image_status VARCHAR(32) NOT NULL,
+                        update_status VARCHAR(32) NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                await connection.execute(text(
+                    "CREATE UNIQUE INDEX uq_instant_hosts_active_public_ipv4 "
+                    "ON instant_hosts(public_ipv4)"
+                ))
                 await connection.execute(text(
                     "INSERT INTO providers VALUES "
                     "('vultr','Vultr','hourly','plan','image',10,1,0)"
@@ -886,6 +940,11 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
                     "(id,reservation_number,location,status,created_at,motd_token) "
                     "VALUES (42,99,'legacy','ENDED',CURRENT_TIMESTAMP,'legacy-token')"
                 ))
+                await connection.execute(text(
+                    "INSERT INTO instant_hosts "
+                    "(id,name,location,public_ipv4,enabled,draining,health_status,image_status,update_status) "
+                    "VALUES (7,'legacy-host','legacy','8.8.4.4',0,0,'offline','ready','idle')"
+                ))
                 await _create_and_migrate(connection)
 
                 location_columns = {
@@ -897,6 +956,14 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
                     "SELECT id,reservation_number,location,runtime_kind "
                     "FROM reservations WHERE id=42"
                 ))).one()
+                instant_columns = {
+                    row[1]: row for row in (
+                        await connection.execute(text("PRAGMA table_info(instant_hosts)"))
+                    ).all()
+                }
+                instant_row = (await connection.execute(text(
+                    "SELECT id,name,location,public_ipv4 FROM instant_hosts WHERE id=7"
+                ))).one()
                 violations = (await connection.execute(text("PRAGMA foreign_key_check"))).all()
 
             await engine.dispose()
@@ -904,4 +971,8 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(0, location_columns["provider"][3])
             self.assertEqual(0, location_columns["provider_region"][3])
             self.assertIn("ping_url", location_columns)
+            self.assertEqual(0, instant_columns["public_ipv4"][3])
+            self.assertEqual(
+                (7, "legacy-host", "legacy", "8.8.4.4"), tuple(instant_row)
+            )
             self.assertEqual([], violations)

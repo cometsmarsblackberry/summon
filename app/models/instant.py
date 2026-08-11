@@ -44,7 +44,9 @@ class InstantHost(Base):
     location: Mapped[str] = mapped_column(
         String(32), ForeignKey("enabled_locations.code"), nullable=False, index=True
     )
-    public_ipv4: Mapped[str] = mapped_column(String(15), nullable=False)
+    # Pending hosts do not know their public address until the installer makes
+    # its first enrollment request. They remain disabled until that succeeds.
+    public_ipv4: Mapped[str | None] = mapped_column(String(15), nullable=True)
 
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     draining: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

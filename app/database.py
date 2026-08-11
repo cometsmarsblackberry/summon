@@ -1,7 +1,8 @@
 """Database setup and session management."""
 
 from pathlib import Path
-from sqlalchemy import event, text
+from sqlalchemy import MetaData, event, text
+from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -130,6 +131,7 @@ async def _create_and_migrate(conn) -> None:
         conn, "instant_hosts", "update_auto_drained", "BOOLEAN NOT NULL DEFAULT 0"
     )
     await _migrate_enabled_locations_nullable(conn)
+    await _migrate_instant_hosts_public_ipv4_nullable(conn)
     await _backfill_motd_tokens(conn)
     await _migrate_create_indexes(conn)
 
@@ -249,6 +251,52 @@ async def _migrate_enabled_locations_nullable(conn) -> None:
     await conn.execute(text(
         "ALTER TABLE enabled_locations__instant_migration RENAME TO enabled_locations"
     ))
+
+
+async def _migrate_instant_hosts_public_ipv4_nullable(conn) -> None:
+    """Allow pending Instant hosts to learn their IPv4 during enrollment."""
+    dialect = conn.dialect.name
+    if dialect == "postgresql":
+        await conn.execute(text(
+            "ALTER TABLE instant_hosts ALTER COLUMN public_ipv4 DROP NOT NULL"
+        ))
+        return
+    if dialect != "sqlite":
+        return
+
+    info = (await conn.execute(text("PRAGMA table_info(instant_hosts)"))).all()
+    by_name = {row[1]: row for row in info}
+    if not by_name or not by_name.get("public_ipv4", (None,) * 4)[3]:
+        return
+
+    from app.models.instance import EnabledLocation
+    from app.models.instant import InstantHost
+
+    temporary_name = "instant_hosts__ipv4_migration"
+    await conn.execute(text(f"DROP TABLE IF EXISTS {temporary_name}"))
+    migration_metadata = MetaData()
+    # Include the referenced table in the temporary metadata so SQLAlchemy can
+    # compile the foreign key without creating or modifying that table.
+    EnabledLocation.__table__.to_metadata(migration_metadata)
+    migration_table = InstantHost.__table__.to_metadata(
+        migration_metadata, name=temporary_name
+    )
+    create_sql = str(CreateTable(migration_table).compile(dialect=conn.dialect))
+    await conn.execute(text(create_sql))
+
+    target_columns = [column.name for column in InstantHost.__table__.columns]
+    copied_columns = [column for column in target_columns if column in by_name]
+    joined = ", ".join(copied_columns)
+    await conn.execute(text(
+        f"INSERT INTO {temporary_name} ({joined}) SELECT {joined} FROM instant_hosts"
+    ))
+    await conn.execute(text("DROP TABLE instant_hosts"))
+    await conn.execute(text(
+        f"ALTER TABLE {temporary_name} RENAME TO instant_hosts"
+    ))
+    for index in InstantHost.__table__.indexes:
+        create_index_sql = str(CreateIndex(index).compile(dialect=conn.dialect))
+        await conn.execute(text(create_index_sql))
 
 
 async def get_db() -> AsyncSession:

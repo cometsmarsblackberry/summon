@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import ipaddress
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -84,7 +86,9 @@ def generate_slot_ports(
     return ports
 
 
-def validate_public_ipv4(value: str) -> str:
+def validate_public_ipv4(value: str | None) -> str:
+    if not value:
+        raise InstantHostError("could not determine a public IPv4 address")
     try:
         address = ipaddress.ip_address(value.strip())
     except ValueError as exc:
@@ -94,6 +98,16 @@ def validate_public_ipv4(value: str) -> str:
     if not address.is_global:
         raise InstantHostError("public_ipv4 must be a globally routable static address")
     return str(address)
+
+
+def automatic_host_name(
+    location: str, host_id: int, reported_hostname: str | None = None
+) -> str:
+    """Build a bounded display name for a host without operator input."""
+    hostname = re.sub(r"[^A-Za-z0-9._-]+", "-", reported_hostname or "")
+    hostname = hostname.strip("-._") or f"instant-{host_id}"
+    prefix = f"{location}-"
+    return prefix + hostname[: max(1, 64 - len(prefix))]
 
 
 def validate_image_reference(value: str) -> str:
@@ -122,35 +136,36 @@ def new_stable_credential(host: InstantHost) -> str:
 async def create_host(
     db: AsyncSession,
     *,
-    name: str,
     location: str,
-    public_ipv4: str,
     slot_count: int,
     base_port: int = DEFAULT_BASE_PORT,
     desired_image: str | None = None,
+    name: str | None = None,
+    public_ipv4: str | None = None,
 ) -> tuple[InstantHost, str]:
-    """Create a disabled host, its stable slots, and a copy-once token."""
-    clean_name = name.strip()
-    if not clean_name or len(clean_name) > 64:
+    """Create a disabled pending host, stable slots, and a copy-once token."""
+    clean_name = name.strip() if name else ""
+    if name is not None and (not clean_name or len(clean_name) > 64):
         raise InstantHostError("name must be between 1 and 64 characters")
-    address = validate_public_ipv4(public_ipv4)
+    address = validate_public_ipv4(public_ipv4) if public_ipv4 else None
     ports = generate_slot_ports(slot_count, base_port)
 
     location_record = await db.get(EnabledLocation, location)
     if location_record is None:
         raise InstantHostError("location does not exist")
 
-    duplicate = await db.execute(
-        select(InstantHost.id).where(
-            InstantHost.public_ipv4 == address,
-            InstantHost.deleted_at.is_(None),
+    if address is not None:
+        duplicate = await db.execute(
+            select(InstantHost.id).where(
+                InstantHost.public_ipv4 == address,
+                InstantHost.deleted_at.is_(None),
+            )
         )
-    )
-    if duplicate.scalar_one_or_none() is not None:
-        raise InstantHostError("an Instant host already uses this IPv4 address")
+        if duplicate.scalar_one_or_none() is not None:
+            raise InstantHostError("an Instant host already uses this IPv4 address")
 
     host = InstantHost(
-        name=clean_name,
+        name=clean_name or "pending",
         location=location,
         public_ipv4=address,
         enabled=False,
@@ -163,6 +178,8 @@ async def create_host(
     token = new_enrollment_token(host)
     db.add(host)
     await db.flush()
+    if not clean_name:
+        host.name = automatic_host_name(location, host.id)
     for slot_index, game_port, tv_port in ports:
         db.add(InstantSlot(
             host_id=host.id,
@@ -188,34 +205,83 @@ async def renew_enrollment(db: AsyncSession, host: InstantHost) -> str:
 
 
 async def exchange_enrollment_token(
-    db: AsyncSession, token: str
+    db: AsyncSession,
+    token: str,
+    *,
+    public_ipv4: str | None = None,
+    hostname: str | None = None,
 ) -> tuple[InstantHost, str]:
     token_hash = hash_host_secret(token)
     now = utcnow()
     credential = secrets.token_urlsafe(48)
     credential_hash = hash_host_secret(credential)
-    # Consume and clear the one-use token in the same conditional UPDATE. This
-    # prevents two simultaneous installers from both receiving credentials;
-    # only the transaction that changes one row wins.
-    result = await db.execute(
-        update(InstantHost)
-        .where(
+
+    # Load the pending row first so a bad or duplicate observed address does
+    # not consume the one-use token. The conditional UPDATE below still makes
+    # the actual exchange atomic when two installers race.
+    pending_result = await db.execute(
+        select(InstantHost).where(
             InstantHost.enrollment_token_hash == token_hash,
             InstantHost.deleted_at.is_(None),
             InstantHost.enrollment_used_at.is_(None),
             InstantHost.enrollment_expires_at.is_not(None),
             InstantHost.enrollment_expires_at > now,
         )
-        .values(
-            credential_hash=credential_hash,
-            credential_rotated_at=now,
-            enrollment_used_at=now,
-            enrollment_token_hash=None,
-            enrollment_expires_at=None,
-            health_status="offline",
-        )
-        .execution_options(synchronize_session=False)
     )
+    pending_host = pending_result.scalar_one_or_none()
+    if pending_host is None:
+        await db.rollback()
+        raise InstantHostError("enrollment token is invalid, expired, or already used")
+
+    values: dict = {
+        "credential_hash": credential_hash,
+        "credential_rotated_at": now,
+        "enrollment_used_at": now,
+        "enrollment_token_hash": None,
+        "enrollment_expires_at": None,
+        "health_status": "offline",
+    }
+    if pending_host.public_ipv4 is None:
+        address = validate_public_ipv4(public_ipv4)
+        duplicate = await db.execute(
+            select(InstantHost.id).where(
+                InstantHost.public_ipv4 == address,
+                InstantHost.id != pending_host.id,
+                InstantHost.deleted_at.is_(None),
+            )
+        )
+        if duplicate.scalar_one_or_none() is not None:
+            await db.rollback()
+            raise InstantHostError("an Instant host already uses this IPv4 address")
+        values["public_ipv4"] = address
+        default_name = automatic_host_name(pending_host.location, pending_host.id)
+        if hostname and pending_host.name == default_name:
+            values["name"] = automatic_host_name(
+                pending_host.location, pending_host.id, hostname
+            )
+
+    # Consume and clear the one-use token in the same conditional UPDATE. This
+    # prevents two simultaneous installers from both receiving credentials;
+    # only the transaction that changes one row wins.
+    try:
+        result = await db.execute(
+            update(InstantHost)
+            .where(
+                InstantHost.id == pending_host.id,
+                InstantHost.enrollment_token_hash == token_hash,
+                InstantHost.deleted_at.is_(None),
+                InstantHost.enrollment_used_at.is_(None),
+                InstantHost.enrollment_expires_at.is_not(None),
+                InstantHost.enrollment_expires_at > now,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+    except IntegrityError as exc:
+        await db.rollback()
+        raise InstantHostError(
+            "an Instant host already uses this IPv4 address"
+        ) from exc
     if result.rowcount != 1:
         await db.rollback()
         raise InstantHostError("enrollment token is invalid, expired, or already used")

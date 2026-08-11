@@ -221,11 +221,12 @@
             instantMetrics: _adminInstantMetrics,
             showInstantHostModal: false,
             enrollmentToken: '',
+            enrollmentInstallCommand: '',
             copyOnceKind: 'enrollment',
             showInstantEditModal: false,
             editingInstantHost: null,
             instantEditForm: {},
-            instantHostForm: { name: '', location: '', public_ipv4: '', slot_count: 2, base_port: 27015, desired_image: '' },
+            instantHostForm: { location: '', slot_count: 2, base_port: 27015, desired_image: '' },
             get alphabetizedLocations() {
                 return [...this.allLocations].sort((a, b) =>
                     (a.name || a.code).localeCompare(b.name || b.code, undefined, { sensitivity: 'base' })
@@ -236,10 +237,11 @@
             },
             openAddInstantHost() {
                 this.instantHostForm = {
-                    name: '', location: this.alphabetizedLocations[0]?.code || '', public_ipv4: '',
+                    location: this.alphabetizedLocations[0]?.code || '',
                     slot_count: 2, base_port: 27015, desired_image: ''
                 };
                 this.enrollmentToken = '';
+                this.enrollmentInstallCommand = '';
                 this.copyOnceKind = 'enrollment';
                 this.showInstantHostModal = true;
             },
@@ -254,6 +256,7 @@
                 const data = await res.json();
                 if (!res.ok) { alert(data.detail || 'Could not create host'); return; }
                 this.enrollmentToken = data.enrollment_token;
+                this.enrollmentInstallCommand = data.install_command;
                 this.copyOnceKind = 'enrollment';
                 this.instantHosts.push(data);
             },
@@ -277,6 +280,7 @@
                 const data = await this.hostAction(host, '/enrollment-token');
                 if (data) {
                     this.enrollmentToken = data.enrollment_token;
+                    this.enrollmentInstallCommand = data.install_command;
                     this.copyOnceKind = 'enrollment';
                     this.showInstantHostModal = true;
                     host.enabled = false; host.connected = false; host.enrolled = false;
@@ -288,7 +292,7 @@
                 this.instantEditForm = {
                     name: host.name,
                     location: host.location,
-                    public_ipv4: host.public_ipv4,
+                    public_ipv4: host.public_ipv4 || '',
                     slot_count: enabledSlots.length,
                     base_port: enabledSlots.length ? Math.min(...enabledSlots.map(slot => slot.game_port)) : 27015,
                     desired_image: host.desired_image || '',
@@ -300,6 +304,12 @@
                 const payload = {...this.instantEditForm};
                 payload.slot_count = parseInt(payload.slot_count, 10);
                 payload.base_port = parseInt(payload.base_port, 10);
+                const enabledSlots = this.editingInstantHost.slots.filter(slot => slot.enabled);
+                const currentBasePort = enabledSlots.length ? Math.min(...enabledSlots.map(slot => slot.game_port)) : 27015;
+                if (payload.location === this.editingInstantHost.location) delete payload.location;
+                if (!payload.public_ipv4 || payload.public_ipv4 === this.editingInstantHost.public_ipv4) delete payload.public_ipv4;
+                if (payload.slot_count === enabledSlots.length) delete payload.slot_count;
+                if (payload.base_port === currentBasePort) delete payload.base_port;
                 payload.desired_image = payload.desired_image || null;
                 payload.version_pin = payload.version_pin || null;
                 const res = await fetch('/admin/instant-hosts/' + this.editingInstantHost.id, {
@@ -316,6 +326,7 @@
                 const data = await this.hostAction(host, '/credential');
                 if (data) {
                     this.enrollmentToken = data.credential;
+                    this.enrollmentInstallCommand = '';
                     this.copyOnceKind = 'credential';
                     this.showInstantHostModal = true;
                     host.enabled = false; host.connected = false;
@@ -939,7 +950,7 @@
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
                                     <span class="font-medium text-sm text-slate-800" x-text="host.name"></span>
-                                    <span class="font-mono text-xs text-slate-500" x-text="host.public_ipv4"></span>
+                                    <span class="font-mono text-xs text-slate-500" x-text="host.public_ipv4 || 'Awaiting enrollment'"></span>
                                     <span class="text-xs px-1.5 py-0.5 rounded"
                                         :class="host.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'"
                                         x-text="host.connected ? 'connected' : 'offline'"></span>
@@ -1604,11 +1615,9 @@
                     <div class="space-y-3">
                         <h3 class="text-sm font-semibold text-slate-900">Add Instant host</h3>
                         <div class="grid grid-cols-2 gap-2">
-                            <input x-model="instantHostForm.name" placeholder="Host name" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <select x-model="instantHostForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                                 <template x-for="loc in alphabetizedLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
                             </select>
-                            <input x-model="instantHostForm.public_ipv4" placeholder="Static public IPv4" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <input x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <input x-model.number="instantHostForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <input x-model="instantHostForm.desired_image" placeholder="Image override (optional)" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
@@ -1622,16 +1631,19 @@
                 </template>
                 <template x-if="enrollmentToken">
                     <div class="space-y-3">
-                        <h3 class="text-sm font-semibold text-slate-900" x-text="copyOnceKind === 'credential' ? 'Copy host credential now' : 'Copy enrollment token now'"></h3>
-                        <p class="text-xs text-amber-700" x-text="copyOnceKind === 'credential' ? 'Replace /var/lib/summon-agent/credential with this value (mode 0600), then restart the service. It will not be shown again.' : 'This one-use token expires in 15 minutes and will not be shown again.'"></p>
-                        <code class="block p-3 rounded bg-slate-900 text-green-300 break-all text-xs" x-text="enrollmentToken"></code>
-                        <button @click="navigator.clipboard.writeText(enrollmentToken)" class="px-3 py-1.5 text-xs bg-slate-200 rounded" x-text="copyOnceKind === 'credential' ? 'Copy credential' : 'Copy token'"></button>
+                        <h3 class="text-sm font-semibold text-slate-900" x-text="copyOnceKind === 'credential' ? 'Copy host credential now' : 'Install Instant host'"></h3>
+                        <p class="text-xs text-amber-700" x-text="copyOnceKind === 'credential' ? 'Replace /var/lib/summon-agent/credential with this value (mode 0600), then restart the service. It will not be shown again.' : 'This command contains a one-use enrollment token and expires in 15 minutes.'"></p>
+                        <div x-show="copyOnceKind === 'credential'">
+                            <code class="block p-3 rounded bg-slate-900 text-green-300 break-all text-xs" x-text="enrollmentToken"></code>
+                            <button @click="navigator.clipboard.writeText(enrollmentToken)" class="mt-2 px-3 py-1.5 text-xs bg-slate-200 rounded">Copy credential</button>
+                        </div>
                         <div x-show="copyOnceKind === 'enrollment'" class="text-xs text-slate-500 space-y-1">
                             <p>On Ubuntu 26.04 AMD64, run:</p>
-                            <code class="block p-2 rounded bg-slate-100 break-all">curl -fsSL {{ base_url }}/static/install-instant-host.sh | sudo bash</code>
-                            <p>The installer prompts invisibly for this token. It prints firewall rules but never modifies the firewall.</p>
+                            <code class="block p-3 rounded bg-slate-900 text-green-300 break-all text-xs" x-text="enrollmentInstallCommand"></code>
+                            <button @click="navigator.clipboard.writeText(enrollmentInstallCommand)" class="px-3 py-1.5 text-xs bg-slate-200 rounded">Copy install command</button>
+                            <p>The installer detects the host name and public IPv4 automatically. It prints firewall rules but never modifies the firewall.</p>
                         </div>
-                        <div class="flex justify-end"><button @click="showInstantHostModal=false; enrollmentToken=''" class="px-3 py-1.5 text-xs bg-brand-600 rounded">Done</button></div>
+                        <div class="flex justify-end"><button @click="showInstantHostModal=false; enrollmentToken=''; enrollmentInstallCommand=''" class="px-3 py-1.5 text-xs bg-brand-600 rounded">Done</button></div>
                     </div>
                 </template>
             </div>
