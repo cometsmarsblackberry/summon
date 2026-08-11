@@ -235,24 +235,15 @@ async def reservation_status_page(
     """Reservation status page."""
     user = await get_current_user(request, db)
     reservation = await get_reservation_by_id(reservation_id, db)
-    
+
     if not reservation:
         return templates.TemplateResponse(
             request,
-            "home.html",
-            {
-                "user": user,
-                "locations": [],
-                "maps": [],
-                "ping_urls": {},
-                "beta_locked": False,
-                "active_reservation": None,
-                "error": t("errors.reservation_does_not_exist"),
-                "cloud_configured": settings.cloud_configured,
-            },
+            "404.html",
+            {"user": user},
             status_code=404,
         )
-    
+
     # Check if user is owner (or admin)
     is_owner = user and (user.id == reservation.user_id or user.is_admin)
     if not is_owner:
