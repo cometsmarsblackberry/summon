@@ -2,7 +2,7 @@
  * Summon - SourceMod Reservation Plugin
  *
  * Provides in-game reservation management for TF2 servers
- * Commands: !reservation, !end, !cancel, !changemap, !restart, !command, !rcon
+ * Commands: !reservation, !end, !cancel, !changemap, !restart, !command, !cmd, !rcon
  */
 
 #include <sourcemod>
@@ -101,18 +101,27 @@ public void OnPluginStart()
     {
         // A shared Reg*Cmd name can execute multiple plugin callbacks. Do not
         // offer the fallback alias if another plugin already owns it.
-        LogError("[summon] sm_command is already registered; owner command fallback disabled");
+        LogError("[summon] sm_command is already registered; Summon's !command entry point disabled");
     }
     else
     {
         RegConsoleCmd("sm_command", Command_OwnerServerCommand, "Run an allowed server command (owner only)");
     }
 
+    if (CommandExists("sm_cmd"))
+    {
+        LogError("[summon] sm_cmd is already registered; owner command alias disabled");
+    }
+    else
+    {
+        RegConsoleCmd("sm_cmd", Command_OwnerServerCommand, "Alias of sm_command");
+    }
+
     // Preserve the familiar !rcon syntax without granting owners access to
     // SourceMod's unrestricted sm_rcon implementation.
     if (!AddCommandListener(Listener_OwnerRcon, "sm_rcon"))
     {
-        LogError("[summon] Failed to register sm_rcon command listener; owners can still use !command");
+        LogError("[summon] Failed to register sm_rcon command listener; owners can still use !command or !cmd");
     }
 
     // Register RCON commands (called by agent)
@@ -125,7 +134,7 @@ public void OnAllPluginsLoaded()
 {
     if (!CommandExists("sm_rcon"))
     {
-        LogError("[summon] sm_rcon is not registered; owners must use !command");
+        LogError("[summon] sm_rcon is not registered; owners must use !command or !cmd");
     }
 }
 
@@ -511,7 +520,7 @@ public Action Command_OwnerServerCommand(int client, int args)
 {
     if (client == 0)
     {
-        PrintToServer("[summon] sm_command is available to the reservation owner in-game");
+        PrintToServer("[summon] sm_command and sm_cmd are available to the reservation owner in-game");
         return Plugin_Stop;
     }
 
@@ -524,7 +533,16 @@ public Action Command_OwnerServerCommand(int client, int args)
         return Plugin_Stop;
     }
 
-    HandleOwnerServerCommand(client, args, "command");
+    char invokedCommand[16];
+    GetCmdArg(0, invokedCommand, sizeof(invokedCommand));
+    if (StrEqual(invokedCommand, "sm_cmd", false))
+    {
+        HandleOwnerServerCommand(client, args, "cmd");
+    }
+    else
+    {
+        HandleOwnerServerCommand(client, args, "command");
+    }
     return Plugin_Stop;
 }
 
