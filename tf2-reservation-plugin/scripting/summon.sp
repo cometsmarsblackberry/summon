@@ -11,6 +11,11 @@
 #pragma semicolon 1
 #pragma newdecls required
 
+#undef REQUIRE_PLUGIN
+#include <logstf>
+#include <demostf>
+#define REQUIRE_PLUGIN
+
 #define PLUGIN_VERSION "1.2.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
