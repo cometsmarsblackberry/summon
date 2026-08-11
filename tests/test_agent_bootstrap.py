@@ -78,6 +78,18 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn("The agent service was not created.", script)
         self.assertIn("request a new enrollment token", script)
 
+    def test_instant_host_installer_accepts_automatic_bootstrap_values(self):
+        script = Path("static/install-instant-host.sh").read_text()
+        template = Path("templates/admin/index.html").read_text()
+
+        self.assertIn('ENROLLMENT_TOKEN="${ENROLLMENT_TOKEN:-}"', script)
+        self.assertIn("curl --ipv4 --fail", script)
+        self.assertIn('"hostname":"%s"', script)
+        self.assertIn("data.install_command", template)
+        self.assertIn("Copy install command", template)
+        self.assertNotIn('x-model="instantHostForm.name"', template)
+        self.assertNotIn('x-model="instantHostForm.public_ipv4"', template)
+
     def test_instant_host_installer_requires_pasta_network_helper(self):
         script = Path("static/install-instant-host.sh").read_text()
 

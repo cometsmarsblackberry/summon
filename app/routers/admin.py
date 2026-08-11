@@ -3,6 +3,7 @@
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional
+import shlex
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -617,9 +618,7 @@ async def delete_location(
 # ==================== INSTANT HOSTS ====================
 
 class CreateInstantHostRequest(BaseModel):
-    name: str
     location: str
-    public_ipv4: str
     slot_count: int = 1
     base_port: int = 27015
     desired_image: str | None = None
@@ -645,6 +644,18 @@ class InstantHostDrainRequest(BaseModel):
 
 class PrepareInstantImageRequest(BaseModel):
     image: str | None = None
+
+
+def _instant_host_install_payload(token: str) -> dict[str, str]:
+    """Return a one-command installer handoff without putting secrets in URLs."""
+    base_url = get_settings().base_url.rstrip("/")
+    installer_url = f"{base_url}/static/install-instant-host.sh"
+    command = (
+        f"curl -fsSL {shlex.quote(installer_url)} | "
+        f"sudo env SUMMON_URL={shlex.quote(base_url)} "
+        f"ENROLLMENT_TOKEN={shlex.quote(token)} bash"
+    )
+    return {"installer_url": installer_url, "install_command": command}
 
 
 async def _load_host_or_404(
@@ -718,9 +729,7 @@ async def create_instant_host(
     try:
         host, token = await create_host(
             db,
-            name=request.name,
             location=request.location,
-            public_ipv4=request.public_ipv4,
             slot_count=request.slot_count,
             base_port=request.base_port,
             desired_image=request.desired_image,
@@ -733,7 +742,7 @@ async def create_instant_host(
     payload.update({
         "enrollment_token": token,
         "enrollment_expires_at": host.enrollment_expires_at,
-        "installer_url": f"{get_settings().base_url}/static/install-instant-host.sh",
+        **_instant_host_install_payload(token),
     })
     return payload
 
@@ -752,7 +761,7 @@ async def update_instant_host(
     host = await _load_host_or_404(host_id, db)
     capacity_change = request.slot_count is not None or request.base_port is not None
     identity_change = request.location is not None or request.public_ipv4 is not None
-    if (capacity_change or identity_change) and (
+    if host.enrolled and (capacity_change or identity_change) and (
         not host.draining or await host_has_open_assignments(db, host.id)
     ):
         raise HTTPException(
@@ -833,7 +842,12 @@ async def renew_instant_host_enrollment(
             await socket.close(code=4003, reason="Re-enrollment requested")
         except Exception:
             pass
-    return {"host_id": host.id, "enrollment_token": token, "expires_at": host.enrollment_expires_at}
+    return {
+        "host_id": host.id,
+        "enrollment_token": token,
+        "expires_at": host.enrollment_expires_at,
+        **_instant_host_install_payload(token),
+    }
 
 
 @router.post("/instant-hosts/{host_id}/state")

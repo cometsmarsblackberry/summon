@@ -35,12 +35,18 @@ if [[ "$SUMMON_URL" != https://* && "$SUMMON_URL" != http://localhost* && "$SUMM
   exit 1
 fi
 
-read -r -s -p "Enrollment token: " ENROLLMENT_TOKEN </dev/tty
-echo >/dev/tty
+ENROLLMENT_TOKEN="${ENROLLMENT_TOKEN:-}"
+if [[ -z "$ENROLLMENT_TOKEN" ]]; then
+  read -r -s -p "Enrollment token: " ENROLLMENT_TOKEN </dev/tty
+  echo >/dev/tty
+fi
 if [[ -z "$ENROLLMENT_TOKEN" ]]; then
   echo "Enrollment token is required." >&2
   exit 1
 fi
+# The copied command supplies this as an environment variable. Keep it out of
+# apt, user-management, and other child-process environments until enrollment.
+export -n ENROLLMENT_TOKEN
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -72,9 +78,12 @@ fi
 SERVICE_UID="$(id -u "$SERVICE_USER")"
 install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR" "$STATE_DIR/slots" "$STATE_DIR/bin"
 
+REPORTED_HOSTNAME="$(hostname -s 2>/dev/null || true)"
+REPORTED_HOSTNAME="$(printf '%s' "$REPORTED_HOSTNAME" | tr -cd '[:alnum:]._-')"
+REPORTED_HOSTNAME="${REPORTED_HOSTNAME:0:63}"
 ENROLL_RESPONSE="$(
-  printf '{"token":"%s"}' "$ENROLLMENT_TOKEN" |
-    curl --fail --silent --show-error \
+  printf '{"token":"%s","hostname":"%s"}' "$ENROLLMENT_TOKEN" "$REPORTED_HOSTNAME" |
+    curl --ipv4 --fail --silent --show-error \
       -H 'Content-Type: application/json' \
       --data-binary @- "$SUMMON_URL/internal/instant-hosts/enroll"
 )"

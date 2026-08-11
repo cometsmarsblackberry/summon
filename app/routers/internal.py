@@ -7,7 +7,7 @@ import uuid
 from typing import Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -845,15 +845,22 @@ async def _handle_instant_stopped(
 
 class InstantEnrollmentRequest(BaseModel):
     token: str
+    hostname: str | None = None
 
 
 @router.post("/instant-hosts/enroll")
-async def enroll_instant_host(request: InstantEnrollmentRequest):
+async def enroll_instant_host(payload: InstantEnrollmentRequest, request: Request):
     """Exchange one copy-once enrollment token for a stable agent credential."""
     from app.services.instant_hosts import InstantHostError, exchange_enrollment_token
+    client_ipv4 = request.client.host if request.client else None
     async with async_session_maker() as db:
         try:
-            host, credential = await exchange_enrollment_token(db, request.token)
+            host, credential = await exchange_enrollment_token(
+                db,
+                payload.token,
+                public_ipv4=client_ipv4,
+                hostname=payload.hostname,
+            )
         except InstantHostError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         from app.services.orchestrator import _agent_binary_sha256
