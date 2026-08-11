@@ -51,11 +51,13 @@ func (f *fakeTransport) Connections() <-chan struct{} { return f.connections }
 func (f *fakeTransport) IsConnected() bool            { return true }
 
 type fakePodman struct {
-	pullErr    error
-	networkErr error
-	digest     string
-	containers []podman.ManagedContainer
-	stopped    chan string
+	pullErr     error
+	networkErr  error
+	digest      string
+	containers  []podman.ManagedContainer
+	stopped     chan string
+	listStarted chan struct{}
+	listRelease chan struct{}
 }
 
 func (f *fakePodman) CheckRootlessNetwork() error { return f.networkErr }
@@ -72,7 +74,18 @@ func (f *fakePodman) ImageDigest(context.Context, string) (string, error) {
 	}
 	return f.digest, nil
 }
-func (f *fakePodman) ListManagedContainers(context.Context) ([]podman.ManagedContainer, error) {
+
+func (f *fakePodman) ListManagedContainers(ctx context.Context) ([]podman.ManagedContainer, error) {
+	if f.listStarted != nil {
+		f.listStarted <- struct{}{}
+	}
+	if f.listRelease != nil {
+		select {
+		case <-f.listRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	return f.containers, nil
 }
 func (f *fakePodman) ContainerStats(context.Context, string) (map[string]any, error) {
@@ -537,6 +550,82 @@ func TestMissingLiveContainerClearsStaleIdempotencyResponse(t *testing.T) {
 	controller.executeSlotCommand(slot, command)
 	if harness.created.Load() != 2 {
 		t.Fatalf("reissued idempotent start did not recreate container; sequences=%d", harness.created.Load())
+	}
+}
+
+func TestContainerInventoryDoesNotWaitForSlotOperation(t *testing.T) {
+	harness := &sequenceHarness{started: make(chan struct{}, 1), release: make(chan struct{})}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, _, cleanup := configuredController(t, []SlotDefinition{definition}, harness, &fakePodman{})
+	defer cleanup()
+	command := startCommand(definition, 71, 1, time.Now().Add(time.Hour))
+	startDone := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(controller.slotForCommand(command), command)
+		close(startDone)
+	}()
+	select {
+	case <-harness.started:
+	case <-time.After(time.Second):
+		t.Fatal("slot start did not reach the long-running operation")
+	}
+
+	inventoryDone := make(chan error, 1)
+	go func() {
+		_, err := controller.containerInventory(context.Background())
+		inventoryDone <- err
+	}()
+	select {
+	case err := <-inventoryDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("heartbeat inventory waited for the active slot operation")
+	}
+
+	close(harness.release)
+	select {
+	case <-startDone:
+	case <-time.After(time.Second):
+		t.Fatal("slot start did not finish after release")
+	}
+}
+
+func TestContainerInventoryPreservesContainerStartedDuringPodmanSnapshot(t *testing.T) {
+	harness := &sequenceHarness{}
+	runtime := &fakePodman{}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, _, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+	runtime.listStarted = make(chan struct{}, 1)
+	runtime.listRelease = make(chan struct{})
+
+	inventoryDone := make(chan error, 1)
+	go func() {
+		_, err := controller.containerInventory(context.Background())
+		inventoryDone <- err
+	}()
+	select {
+	case <-runtime.listStarted:
+	case <-time.After(time.Second):
+		t.Fatal("inventory did not begin its Podman snapshot")
+	}
+
+	command := startCommand(definition, 72, 1, time.Now().Add(time.Hour))
+	slot := controller.slotForCommand(command)
+	controller.executeSlotCommand(slot, command)
+	close(runtime.listRelease)
+	select {
+	case err := <-inventoryDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("inventory did not finish after Podman snapshot was released")
+	}
+	if snapshot := snapshotSlot(slot); snapshot.ContainerID == "" || snapshot.State != "ready" {
+		t.Fatalf("inventory cleared a container created during its snapshot: %#v", snapshot)
 	}
 }
 
