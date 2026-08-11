@@ -1100,6 +1100,11 @@ func (c *Controller) sendStatus(messageType string) {
 func (c *Controller) containerInventory(ctx context.Context) ([]map[string]any, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	slots := c.allSlots()
+	observedSlots := make(map[*slotRuntime]slotSnapshot, len(slots))
+	for _, slot := range slots {
+		observedSlots[slot] = snapshotSlot(slot)
+	}
 	containers, err := c.podman.ListManagedContainers(ctx)
 	if err != nil {
 		return nil, err
@@ -1132,9 +1137,18 @@ func (c *Controller) containerInventory(ctx context.Context) ([]map[string]any, 
 		statsCancel()
 		inventory = append(inventory, item)
 	}
-	for _, slot := range c.allSlots() {
-		slot.opMu.Lock()
+	for _, slot := range slots {
+		// Inventory is collected on the heartbeat goroutine, so it must never
+		// wait for a start, stop, or restart that can take several minutes.
+		if !slot.opMu.TryLock() {
+			continue
+		}
 		snapshot := snapshotSlot(slot)
+		observed := observedSlots[slot]
+		if !sameInventoryEpoch(observed, snapshot) {
+			slot.opMu.Unlock()
+			continue
+		}
 		present := snapshot.ContainerID == ""
 		for _, seenID := range seenContainerIDs {
 			if containerIDsMatch(snapshot.ContainerID, seenID) {
@@ -1162,6 +1176,15 @@ func (c *Controller) containerInventory(ctx context.Context) ([]map[string]any, 
 		slot.opMu.Unlock()
 	}
 	return inventory, nil
+}
+
+func sameInventoryEpoch(observed, current slotSnapshot) bool {
+	return observed.Generation == current.Generation &&
+		observed.ReservationID == current.ReservationID &&
+		observed.AssignmentID == current.AssignmentID &&
+		observed.State == current.State &&
+		observed.ContainerID == current.ContainerID &&
+		observed.LeaseExpires.Equal(current.LeaseExpires)
 }
 
 func containerIDsMatch(first, second string) bool {
