@@ -78,6 +78,13 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn("The agent service was not created.", script)
         self.assertIn("request a new enrollment token", script)
 
+    def test_instant_host_card_resolves_location_display_name(self):
+        template = Path("templates/admin/index.html").read_text()
+
+        self.assertIn("locationName(code)", template)
+        self.assertIn('x-text="locationName(host.location)"', template)
+        self.assertIn(':title="host.location"', template)
+
 
 if __name__ == "__main__":
     unittest.main()

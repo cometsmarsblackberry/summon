@@ -231,6 +231,9 @@
                     (a.name || a.code).localeCompare(b.name || b.code, undefined, { sensitivity: 'base' })
                 );
             },
+            locationName(code) {
+                return this.allLocations.find(location => location.code === code)?.name || code;
+            },
             openAddInstantHost() {
                 this.instantHostForm = {
                     name: '', location: this.alphabetizedLocations[0]?.code || '', public_ipv4: '',
@@ -941,7 +944,7 @@
                                         :class="host.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'"
                                         x-text="host.connected ? 'connected' : 'offline'"></span>
                                     <span x-show="host.draining" class="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">draining</span>
-                                    <span class="text-xs text-slate-400" x-text="host.location"></span>
+                                    <span class="text-xs text-slate-400" :title="host.location" x-text="locationName(host.location)"></span>
                                 </div>
                                 <div class="text-xs text-slate-400 mt-1">
                                     <span x-text="'agent ' + (host.agent_version || '-')"></span>
