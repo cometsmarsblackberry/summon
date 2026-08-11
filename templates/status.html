@@ -387,15 +387,26 @@
             return result;
         },
 
-        get filteredConfigList() {
+        get filteredConfigGroups() {
             const query = this.configSearch.trim().toLowerCase();
-            if (!query) return this.flatConfigs;
-            return this.flatConfigs.filter(config =>
-                config.name.toLowerCase().includes(query)
-                || config.cfg_file.toLowerCase().includes(query)
-                || config.league.toLowerCase().includes(query)
-                || config.format.toLowerCase().includes(query)
-            );
+            return Object.entries(this.configs)
+                .map(([league, formats]) => {
+                    const options = [];
+                    for (const [format, configs] of Object.entries(formats || {})) {
+                        for (const config of configs || []) {
+                            const option = { ...config, format };
+                            const haystack = `${league} ${format} ${config.name || ''} ${config.cfg_file || ''}`.toLowerCase();
+                            if (!query || haystack.includes(query)) options.push(option);
+                        }
+                    }
+                    options.sort((a, b) =>
+                        a.format.localeCompare(b.format)
+                        || (a.name || a.cfg_file).localeCompare(b.name || b.cfg_file)
+                    );
+                    return { league, options };
+                })
+                .filter(group => group.options.length > 0)
+                .sort((a, b) => a.league.localeCompare(b.league));
         },
 
         get resetMatchesConfigSearch() {
@@ -406,7 +417,7 @@
         get selectedConfigLabel() {
             if (this.selectedConfig === 'summon_reset') return this.configResetLabel;
             const config = this.flatConfigs.find(c => c.cfg_file === this.selectedConfig);
-            return config ? `${config.league} / ${config.format} / ${config.name}` : '';
+            return config ? (config.name || config.cfg_file) : '';
         },
 
         get currentConfigLabel() {
@@ -925,16 +936,25 @@
                                         <span>{{ _('status.reset') }}</span>
                                         <span x-show="selectedConfig === 'summon_reset'" class="text-brand-600" aria-hidden="true">✓</span>
                                     </button>
-                                    <template x-for="c in filteredConfigList" :key="c.cfg_file">
-                                        <button type="button" role="option" :aria-selected="selectedConfig === c.cfg_file"
-                                            @click="selectPendingConfig(c)"
-                                            :class="selectedConfig === c.cfg_file ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
-                                            class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm">
-                                            <span x-text="c.league + ' / ' + c.format + ' / ' + c.name" class="truncate"></span>
-                                            <span x-show="selectedConfig === c.cfg_file" class="text-brand-600" aria-hidden="true">✓</span>
-                                        </button>
+                                    <template x-for="group in filteredConfigGroups" :key="group.league">
+                                        <div class="mt-1">
+                                            <div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400"
+                                                x-text="group.league"></div>
+                                            <template x-for="config in group.options" :key="config.cfg_file">
+                                                <button type="button" role="option" :aria-selected="selectedConfig === config.cfg_file"
+                                                    @click="selectPendingConfig(config)"
+                                                    :class="selectedConfig === config.cfg_file ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                                    class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                                    <span x-text="config.name || config.cfg_file" class="truncate"></span>
+                                                    <span class="flex shrink-0 items-center gap-2">
+                                                        <span x-text="config.format" class="text-xs text-slate-400"></span>
+                                                        <span x-show="selectedConfig === config.cfg_file" class="text-brand-600" aria-hidden="true">✓</span>
+                                                    </span>
+                                                </button>
+                                            </template>
+                                        </div>
                                     </template>
-                                    <p x-show="filteredConfigList.length === 0 && !resetMatchesConfigSearch" x-cloak
+                                    <p x-show="filteredConfigGroups.length === 0 && !resetMatchesConfigSearch" x-cloak
                                         class="px-2 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_configs') }}</p>
                                 </div>
                             </div>

@@ -140,6 +140,163 @@ class PreviewEnvironmentTests(unittest.TestCase):
         self.assertIn("ETF2L", payload["config_leagues"])
         self.assertIn("RGL", payload["config_leagues"])
 
+    def test_preview_active_reservation_supports_config_changes(self):
+        script = textwrap.dedent(
+            """
+            import json
+            from fastapi.testclient import TestClient
+            from app.preview import app, _preview_agent
+
+            with TestClient(app) as client:
+                active = client.get(
+                    '/__dev/active-reservation', follow_redirects=False
+                )
+                session = active.cookies.get('session')
+                location = active.headers['location']
+                reservation_id = int(location.rsplit('/', 1)[-1])
+                cookies = {'session': session}
+                page = client.get(location, cookies=cookies)
+                configs = client.get(
+                    f'/api/reservations/{reservation_id}/configs',
+                    cookies=cookies,
+                ).json()
+                changed = client.post(
+                    f'/api/reservations/{reservation_id}/config',
+                    cookies=cookies,
+                    json={'cfg_file': 'rgl_6s_5cp_match_pro'},
+                )
+                reservation = client.get(
+                    f'/api/reservations/{reservation_id}', cookies=cookies
+                ).json()
+                print('PREVIEW_ACTIVE_RESULT=' + json.dumps({
+                    'active_status': active.status_code,
+                    'active_location': location,
+                    'page_status': page.status_code,
+                    'page_is_active': 'Reservation #1' in page.text,
+                    'picker_grouped': (
+                        'x-for="group in filteredConfigGroups"' in page.text
+                    ),
+                    'picker_separates_format': (
+                        'x-text="config.format"' in page.text
+                    ),
+                    'flat_picker_removed': (
+                        "c.league + ' / ' + c.format" not in page.text
+                    ),
+                    'configs_available': configs.get('available'),
+                    'change_status': changed.status_code,
+                    'changed_config': reservation.get('config_file'),
+                    'agent_command': _preview_agent.messages[-1],
+                }, sort_keys=True))
+            """
+        )
+
+        with tempfile.TemporaryDirectory(prefix="summon-preview-active-test-") as tmp:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=PROJECT_ROOT,
+                env=self._environment(Path(tmp)),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        marker = next(
+            line.removeprefix("PREVIEW_ACTIVE_RESULT=")
+            for line in result.stdout.splitlines()
+            if line.startswith("PREVIEW_ACTIVE_RESULT=")
+        )
+        payload = json.loads(marker)
+        self.assertEqual(302, payload["active_status"])
+        self.assertRegex(payload["active_location"], r"^/reservations/\d+$")
+        self.assertEqual(200, payload["page_status"])
+        self.assertTrue(payload["page_is_active"])
+        self.assertTrue(payload["picker_grouped"])
+        self.assertTrue(payload["picker_separates_format"])
+        self.assertTrue(payload["flat_picker_removed"])
+        self.assertTrue(payload["configs_available"])
+        self.assertEqual(200, payload["change_status"])
+        self.assertEqual("rgl_6s_5cp_match_pro", payload["changed_config"])
+        self.assertEqual(
+            {
+                "type": "rcon",
+                "command": "sm_config rgl_6s_5cp_match_pro",
+            },
+            payload["agent_command"],
+        )
+
+    def test_preview_active_reservation_clears_warm_pool_state(self):
+        script = textwrap.dedent(
+            """
+            import asyncio
+            import json
+            from fastapi.testclient import TestClient
+            from app.database import async_session_maker
+            from app.models.instance import CloudInstance
+            from app.preview import app, _PREVIEW_INSTANCE_ID
+
+            async def get_instance_state():
+                async with async_session_maker() as db:
+                    instance = await db.get(CloudInstance, _PREVIEW_INSTANCE_ID)
+                    return {
+                        'is_available': instance.is_available,
+                        'available_since': (
+                            instance.available_since.isoformat()
+                            if instance.available_since else None
+                        ),
+                        'current_reservation_id': instance.current_reservation_id,
+                        'status': instance.status,
+                    }
+
+            with TestClient(app) as client:
+                first = client.get(
+                    '/__dev/active-reservation', follow_redirects=False
+                )
+                cookies = {'session': first.cookies.get('session')}
+                first_id = int(first.headers['location'].rsplit('/', 1)[-1])
+                ended = client.post(
+                    f'/api/reservations/{first_id}/end', cookies=cookies
+                )
+                second = client.get(
+                    '/__dev/active-reservation', follow_redirects=False
+                )
+                second_id = int(second.headers['location'].rsplit('/', 1)[-1])
+                state = asyncio.run(get_instance_state())
+                print('PREVIEW_REUSE_RESULT=' + json.dumps({
+                    'end_status': ended.status_code,
+                    'second_status': second.status_code,
+                    'second_id': second_id,
+                    'instance': state,
+                }, sort_keys=True))
+            """
+        )
+
+        with tempfile.TemporaryDirectory(prefix="summon-preview-reuse-test-") as tmp:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=PROJECT_ROOT,
+                env=self._environment(Path(tmp)),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        marker = next(
+            line.removeprefix("PREVIEW_REUSE_RESULT=")
+            for line in result.stdout.splitlines()
+            if line.startswith("PREVIEW_REUSE_RESULT=")
+        )
+        payload = json.loads(marker)
+        self.assertEqual(200, payload["end_status"])
+        self.assertEqual(302, payload["second_status"])
+        self.assertFalse(payload["instance"]["is_available"])
+        self.assertIsNone(payload["instance"]["available_since"])
+        self.assertEqual(
+            payload["second_id"], payload["instance"]["current_reservation_id"]
+        )
+        self.assertEqual("active", payload["instance"]["status"])
+
 
 if __name__ == "__main__":
     unittest.main()
