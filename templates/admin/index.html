@@ -614,7 +614,9 @@
                     <tbody class="divide-y divide-slate-200">
                         <template x-for="r in paginatedReservations" :key="r.id">
                             <tr class="hover:bg-slate-50">
-                                <td class="py-2 px-1.5 text-slate-700" :title="r.instance_id ? 'Instance: ' + r.instance_id : ''" x-text="r.reservation_number"></td>
+                                <td class="py-2 px-1.5 text-slate-700" :title="r.instance_id ? 'Instance: ' + r.instance_id : ''">
+                                    <a :href="'/reservations/' + r.id" class="text-slate-700 no-underline" x-text="r.reservation_number"></a>
+                                </td>
                                 <td class="py-2 px-1.5 max-w-[7rem] truncate">
                                     <a :href="'https://steamcommunity.com/profiles/' + r.user_steam_id" target="_blank"
                                         class="text-brand-400 hover:underline" x-text="r.user_name"></a>
