@@ -45,7 +45,12 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-  ca-certificates curl jq podman uidmap slirp4netns fuse-overlayfs dbus-user-session iproute2
+  ca-certificates curl jq podman passt uidmap slirp4netns fuse-overlayfs dbus-user-session iproute2
+
+if ! command -v pasta >/dev/null 2>&1; then
+  echo "Podman rootless networking requires the pasta executable from the passt package." >&2
+  exit 1
+fi
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"

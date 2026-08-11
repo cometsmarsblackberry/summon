@@ -158,6 +158,18 @@ func NewClient(socketPath string) *Client {
 	}
 }
 
+// CheckRootlessNetwork verifies the helper used by Podman's default rootless
+// network mode is installed before the host is admitted into scheduling.
+func (c *Client) CheckRootlessNetwork() error {
+	if _, err := exec.LookPath("pasta"); err != nil {
+		return fmt.Errorf(
+			"Podman rootless networking requires the pasta executable; install the passt package: %w",
+			err,
+		)
+	}
+	return nil
+}
+
 // defaultSocketPath returns the default podman socket path for rootless mode.
 func defaultSocketPath() string {
 	runtimeDir := ensureXDGRuntimeDir()

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -51,10 +52,13 @@ func (f *fakeTransport) IsConnected() bool            { return true }
 
 type fakePodman struct {
 	pullErr    error
+	networkErr error
 	digest     string
 	containers []podman.ManagedContainer
 	stopped    chan string
 }
+
+func (f *fakePodman) CheckRootlessNetwork() error { return f.networkErr }
 
 func (f *fakePodman) PullImage(
 	_ context.Context, _ string, callback podman.ProgressCallback,
@@ -590,5 +594,27 @@ func TestConfiguredPreflightRecoversAfterPortIsReleased(t *testing.T) {
 	}
 	if controller.healthError != "" {
 		t.Fatalf("stale port health error was retained: %q", controller.healthError)
+	}
+}
+
+func TestPreflightRejectsMissingRootlessNetworkHelper(t *testing.T) {
+	controller := newController(
+		Config{HostID: 7, StateDir: t.TempDir()},
+		newFakeTransport(),
+		&fakePodman{networkErr: errors.New("pasta executable is missing")},
+		harnessFactory(&sequenceHarness{}),
+	)
+
+	controller.runPreflight()
+	controller.configurationMu.RLock()
+	defer controller.configurationMu.RUnlock()
+	if controller.basePreflightOK || controller.preflightOK {
+		t.Fatal("host without rootless network helper unexpectedly passed preflight")
+	}
+	if controller.preflight["rootless_network"] != "failed" {
+		t.Fatalf("missing helper was not reported: %#v", controller.preflight)
+	}
+	if !strings.Contains(controller.healthError, "pasta") {
+		t.Fatalf("missing helper health error was not actionable: %q", controller.healthError)
 	}
 }
