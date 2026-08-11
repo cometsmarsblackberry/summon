@@ -38,6 +38,11 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _datetime_iso(value: datetime | None) -> str | None:
+    normalized = _as_utc(value)
+    return normalized.isoformat() if normalized is not None else None
+
+
 def hash_host_secret(secret: str) -> str:
     """Hash a high-entropy agent secret with a deployment-specific key."""
     key = get_settings().secret_key.encode("utf-8")
@@ -366,7 +371,7 @@ def serialize_host(
         "capabilities": host.capabilities,
         "platform": host.platform,
         "architecture": host.architecture,
-        "last_heartbeat_at": host.last_heartbeat_at,
+        "last_heartbeat_at": _datetime_iso(host.last_heartbeat_at),
         "desired_image": host.desired_image,
         "ready_image_digest": host.ready_image_digest,
         "image_status": host.image_status,
@@ -384,8 +389,8 @@ def serialize_host(
                 "enabled": slot.enabled,
                 "error_code": slot.error_code,
                 "error_message": slot.error_message,
-                "quarantined_at": slot.quarantined_at,
-                "last_used_at": slot.last_used_at,
+                "quarantined_at": _datetime_iso(slot.quarantined_at),
+                "last_used_at": _datetime_iso(slot.last_used_at),
                 **({
                     "assignment": {
                         "id": assignments[slot.id].id,

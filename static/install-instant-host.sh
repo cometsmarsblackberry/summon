@@ -99,7 +99,16 @@ done
 
 curl --fail --location --retry 5 --retry-connrefused \
   --output "$STATE_DIR/bin/tf2-agent.download" "$AGENT_URL"
-printf '%s  %s\n' "$AGENT_SHA256" "$STATE_DIR/bin/tf2-agent.download" | sha256sum --check --status
+if ! printf '%s  %s\n' "$AGENT_SHA256" "$STATE_DIR/bin/tf2-agent.download" | sha256sum --check --status; then
+  DOWNLOADED_SHA256="$(sha256sum "$STATE_DIR/bin/tf2-agent.download" | awk '{print $1}')"
+  echo "Agent download failed integrity verification." >&2
+  echo "  Expected SHA-256:   $AGENT_SHA256" >&2
+  echo "  Downloaded SHA-256: $DOWNLOADED_SHA256" >&2
+  echo "  Downloaded file:    $STATE_DIR/bin/tf2-agent.download" >&2
+  echo "The agent service was not created. A stale proxy/CDN cache or a corrupted download may be responsible." >&2
+  echo "Purge the cached agent, request a new enrollment token, and run this installer again." >&2
+  exit 1
+fi
 chmod 0755 "$STATE_DIR/bin/tf2-agent.download"
 chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/bin/tf2-agent.download"
 mv "$STATE_DIR/bin/tf2-agent.download" "$STATE_DIR/bin/tf2-agent"

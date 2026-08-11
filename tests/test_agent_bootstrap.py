@@ -68,6 +68,16 @@ class AgentBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(CloudProviderError, "Agent download URL not found"):
             OnidelClient._ignition_to_startup_script(encoded)
 
+    def test_instant_host_installer_explains_checksum_failure(self):
+        script = Path("static/install-instant-host.sh").read_text()
+
+        self.assertIn("if ! printf '%s  %s\\n'", script)
+        self.assertIn("Agent download failed integrity verification.", script)
+        self.assertIn("Expected SHA-256:", script)
+        self.assertIn("Downloaded SHA-256:", script)
+        self.assertIn("The agent service was not created.", script)
+        self.assertIn("request a new enrollment token", script)
+
 
 if __name__ == "__main__":
     unittest.main()

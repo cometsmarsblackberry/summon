@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -142,11 +143,19 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 .where(InstantSlot.host_id == host_id)
                 .order_by(InstantSlot.slot_index)
             )).scalars().all())
+            observed_at = datetime(2026, 8, 12, tzinfo=timezone.utc)
+            enrolled.last_heartbeat_at = observed_at
+            rows[0].quarantined_at = observed_at
+            rows[1].last_used_at = observed_at
             payload = serialize_host(enrolled, slots=rows)
+            json.dumps(payload)
             flattened = repr(payload).lower()
             self.assertNotIn("credential_hash", flattened)
             self.assertNotIn("enrollment_token", flattened)
             self.assertNotIn(credential, flattened)
+            self.assertEqual("2026-08-12T00:00:00+00:00", payload["last_heartbeat_at"])
+            self.assertEqual("2026-08-12T00:00:00+00:00", payload["slots"][0]["quarantined_at"])
+            self.assertEqual("2026-08-12T00:00:00+00:00", payload["slots"][1]["last_used_at"])
             self.assertEqual([(27015, 27020), (27025, 27030)], [
                 (item["game_port"], item["tv_port"]) for item in payload["slots"]
             ])
