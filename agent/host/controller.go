@@ -78,15 +78,19 @@ type Controller struct {
 	slots    map[int]*slotRuntime
 	slotDefs map[int]SlotDefinition
 
-	imageMu          sync.Mutex
-	imagePrepareMu   sync.Mutex
-	desiredImage     string
-	readyImageDigest string
-	imageStatus      string
-	imageError       string
-	lastImageCheck   time.Time
-	updateMu         sync.Mutex
-	updateDraining   atomic.Bool
+	imageMu              sync.Mutex
+	imagePrepareMu       sync.Mutex
+	desiredImage         string
+	readyImageDigest     string
+	imageStatus          string
+	imageError           string
+	lastImageCheck       time.Time
+	updateMu             sync.Mutex
+	updateDraining       atomic.Bool
+	updateStatusMu       sync.Mutex
+	updateStatus         string
+	updateStatusDraining bool
+	updateStatusError    string
 
 	configurationMu sync.RWMutex
 	manifestURL     string

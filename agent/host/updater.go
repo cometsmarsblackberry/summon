@@ -50,23 +50,51 @@ func failedUpdatePath(stateDir string) string {
 }
 
 func (c *Controller) sendUpdateStatus(status string, draining bool, err error) {
+	errorMessage := ""
+	if err != nil {
+		errorMessage = err.Error()
+	}
+	c.updateStatusMu.Lock()
+	c.updateStatus = status
+	c.updateStatusDraining = draining
+	c.updateStatusError = errorMessage
+	c.updateStatusMu.Unlock()
+	c.emitUpdateStatus(status, draining, errorMessage)
+}
+
+func (c *Controller) emitUpdateStatus(status string, draining bool, errorMessage string) {
 	message := map[string]any{
 		"type": "host.update", "protocol": ProtocolVersion,
 		"status": status, "draining": draining, "agent_version": c.config.AgentVersion,
 	}
-	if err != nil {
-		message["error"] = err.Error()
+	if errorMessage != "" {
+		message["error"] = errorMessage
 	}
 	_ = c.transport.Send(message)
 }
 
+func (c *Controller) resendUpdateStatus() {
+	c.updateStatusMu.Lock()
+	status := c.updateStatus
+	draining := c.updateStatusDraining
+	errorMessage := c.updateStatusError
+	c.updateStatusMu.Unlock()
+	if status == "" {
+		status = "checking"
+	}
+	c.emitUpdateStatus(status, draining, errorMessage)
+}
+
 func (c *Controller) requestUpdate(manifestURL, versionPin string, forced bool) {
-	c.updateMu.Lock()
-	defer c.updateMu.Unlock()
 	manifestURL = strings.TrimSpace(manifestURL)
 	if manifestURL == "" {
 		return
 	}
+	if !c.updateMu.TryLock() {
+		c.resendUpdateStatus()
+		return
+	}
+	defer c.updateMu.Unlock()
 	c.sendUpdateStatus("checking", false, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	manifest, err := c.fetchManifest(ctx, manifestURL)

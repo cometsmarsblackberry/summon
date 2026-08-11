@@ -36,6 +36,10 @@ from app.utils.location_flags import normalize_subdivision
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 
+_INSTANT_AGENT_UPDATE_PENDING = frozenset({
+    "queued", "checking", "waiting_for_idle", "downloading", "activating",
+})
+
 
 async def _get_maps_data(db: AsyncSession) -> list[dict]:
     """Return maps alphabetically with starting-map usage statistics."""
@@ -889,10 +893,9 @@ async def set_instant_host_drain(
     db: AsyncSession = Depends(get_db),
 ):
     host = await _load_host_or_404(host_id, db)
-    if not request.draining and host.update_status in {
-        "queued", "queued_offline", "checking", "waiting_for_idle",
-        "downloading", "activating",
-    }:
+    if not request.draining and host.update_status in (
+        _INSTANT_AGENT_UPDATE_PENDING | {"queued_offline"}
+    ):
         raise HTTPException(
             status_code=409,
             detail="Host cannot be undrained while an agent update is pending",
@@ -968,7 +971,14 @@ async def update_instant_host_agent(
     db: AsyncSession = Depends(get_db),
 ):
     host = await _load_host_or_404(host_id, db)
-    host.update_auto_drained = not host.draining
+    if host.update_status in _INSTANT_AGENT_UPDATE_PENDING:
+        return {
+            "id": host.id,
+            "draining": host.draining,
+            "update_status": host.update_status,
+        }
+    if not host.draining:
+        host.update_auto_drained = True
     host.draining = True
     host.update_status = "queued"
     host.update_error = None
@@ -984,7 +994,11 @@ async def update_instant_host_agent(
     }):
         host.update_status = "queued_offline"
         await db.commit()
-    return {"id": host.id, "draining": True, "update_status": host.update_status}
+    return {
+        "id": host.id,
+        "draining": host.draining,
+        "update_status": host.update_status,
+    }
 
 
 @router.post("/instant-hosts/{host_id}/slots/{slot_id}/clear-error")
