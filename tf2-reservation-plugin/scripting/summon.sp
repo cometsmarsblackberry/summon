@@ -2,7 +2,7 @@
  * Summon - SourceMod Reservation Plugin
  *
  * Provides in-game reservation management for TF2 servers
- * Commands: !reservation, !end, !cancel, !changemap, !restart
+ * Commands: !reservation, !end, !cancel, !changemap, !restart, !command, !rcon
  */
 
 #include <sourcemod>
@@ -11,15 +11,15 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#undef REQUIRE_PLUGIN
-#include <logstf>
-#include <demostf>
-#define REQUIRE_PLUGIN
-
-#define PLUGIN_VERSION "1.1.1"
+#define PLUGIN_VERSION "1.2.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
+#define OWNER_COMMAND_COOLDOWN 1.0
+#define OWNER_COMMAND_CONFIG "configs/summon_owner_commands.cfg"
+#define MAX_OWNER_COMMAND_NAME 64
+#define MAX_OWNER_COMMAND_LINE 512
+#define MAX_OWNER_COMMAND_RESPONSE 4096
 
 // ConVars - set by agent RCON at boot
 ConVar g_cvOwnerSteamID;
@@ -39,6 +39,9 @@ Handle g_hPlayerUpdateTimer = INVALID_HANDLE;
 Handle g_hExpiryTimer = INVALID_HANDLE;
 int g_iEndCountdown = 0;
 bool g_bExpiryKickDone = false;
+float g_fLastOwnerCommand = 0.0;
+StringMap g_mOwnerCommandAllowlist;
+int g_iOwnerCommandCount = 0;
 
 public Plugin myinfo = {
     name = PLUGIN_NAME,
@@ -80,11 +83,45 @@ public void OnPluginStart()
     RegConsoleCmd("sm_config", Command_Config, "Load a competitive config (owner only)");
     RegConsoleCmd("sm_cfg", Command_Config, "Alias of sm_config");
     RegConsoleCmd("sm_restart", Command_Restart, "Restart tournament/game/round (owner only)");
+    RegAdminCmd(
+        "sm_summon_reload_owner_commands",
+        Command_ReloadOwnerCommands,
+        ADMFLAG_CONFIG,
+        "Reload Summon's reservation-owner command allowlist"
+    );
+
+    LoadOwnerCommandAllowlist();
+
+    if (CommandExists("sm_command"))
+    {
+        // A shared Reg*Cmd name can execute multiple plugin callbacks. Do not
+        // offer the fallback alias if another plugin already owns it.
+        LogError("[summon] sm_command is already registered; owner command fallback disabled");
+    }
+    else
+    {
+        RegConsoleCmd("sm_command", Command_OwnerServerCommand, "Run an allowed server command (owner only)");
+    }
+
+    // Preserve the familiar !rcon syntax without granting owners access to
+    // SourceMod's unrestricted sm_rcon implementation.
+    if (!AddCommandListener(Listener_OwnerRcon, "sm_rcon"))
+    {
+        LogError("[summon] Failed to register sm_rcon command listener; owners can still use !command");
+    }
 
     // Register RCON commands (called by agent)
     RegServerCmd("sm_reservation_warning", Command_ReservationWarning);
     RegServerCmd("sm_reservation_ending", Command_ReservationEnding);
     LogMessage("[summon] Plugin loaded v%s", PLUGIN_VERSION);
+}
+
+public void OnAllPluginsLoaded()
+{
+    if (!CommandExists("sm_rcon"))
+    {
+        LogError("[summon] sm_rcon is not registered; owners must use !command");
+    }
 }
 
 // ============================================================================
@@ -249,6 +286,9 @@ public void OnPlayerUpdateResponse(HTTPResponse response, any data, const char[]
 
 bool IsOwner(int client)
 {
+    if (client < 1 || client > MaxClients || !IsClientConnected(client) || !IsClientInGame(client) || IsFakeClient(client))
+        return false;
+
     char clientSteamID[32];
     char ownerSteamID[32];
 
@@ -259,7 +299,18 @@ bool IsOwner(int client)
 
     g_cvOwnerSteamID.GetString(ownerSteamID, sizeof(ownerSteamID));
 
+    if (ownerSteamID[0] == '\0')
+        return false;
+
     return StrEqual(clientSteamID, ownerSteamID, false);
+}
+
+bool CanUseOwnerServerCommands(int client)
+{
+    return IsOwner(client)
+        && g_cvReservationNumber.IntValue > 0
+        && !g_bExpiryKickDone
+        && GetTimeRemaining() > 0;
 }
 
 int GetTimeRemaining()
@@ -290,6 +341,288 @@ void FormatTimeRemaining(int seconds, char[] buffer, int bufferSize)
     {
         Format(buffer, bufferSize, "%d minute%s", minutes, minutes == 1 ? "" : "s");
     }
+}
+
+bool NormalizeOwnerCommandName(char[] command)
+{
+    int length = strlen(command);
+    if (length <= 0 || length >= MAX_OWNER_COMMAND_NAME)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = command[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        // Source/SourceMod command and CVAR identifiers use this character
+        // set. Keeping config keys to one token makes exact matching
+        // unambiguous and prevents the allowlist itself becoming a command
+        // line.
+        if (!isLetter && !isDigit && character != '_')
+            return false;
+
+        command[i] = CharToLower(character);
+    }
+
+    return true;
+}
+
+void ReplaceOwnerCommandAllowlist(StringMap replacement)
+{
+    delete g_mOwnerCommandAllowlist;
+    g_mOwnerCommandAllowlist = replacement;
+    g_iOwnerCommandCount = replacement.Size;
+}
+
+bool LoadOwnerCommandAllowlist()
+{
+    char path[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, path, sizeof(path), OWNER_COMMAND_CONFIG);
+
+    StringMap replacement = new StringMap();
+    KeyValues config = new KeyValues("SummonOwnerCommands");
+    if (!config.ImportFromFile(path))
+    {
+        delete config;
+        ReplaceOwnerCommandAllowlist(replacement);
+        LogError("[summon] Could not read owner command allowlist at %s; owner command access disabled", path);
+        return false;
+    }
+
+    char rootName[64];
+    config.GetSectionName(rootName, sizeof(rootName));
+    if (!StrEqual(rootName, "SummonOwnerCommands"))
+    {
+        delete config;
+        ReplaceOwnerCommandAllowlist(replacement);
+        LogError("[summon] Invalid root in %s; expected SummonOwnerCommands and disabled owner command access", path);
+        return false;
+    }
+
+    bool valid = true;
+    if (config.GotoFirstSubKey())
+    {
+        do
+        {
+            char command[256];
+            if (!config.GetSectionName(command, sizeof(command)) || !NormalizeOwnerCommandName(command))
+            {
+                valid = false;
+                LogError("[summon] Invalid command name in %s", path);
+                break;
+            }
+
+            if (!replacement.SetValue(command, 1, false))
+            {
+                valid = false;
+                LogError("[summon] Duplicate command name in %s: %s", path, command);
+                break;
+            }
+        }
+        while (config.GotoNextKey());
+    }
+
+    delete config;
+
+    if (!valid || replacement.Size == 0)
+    {
+        delete replacement;
+        replacement = new StringMap();
+        ReplaceOwnerCommandAllowlist(replacement);
+        LogError("[summon] Owner command allowlist is invalid or empty; owner command access disabled");
+        return false;
+    }
+
+    ReplaceOwnerCommandAllowlist(replacement);
+    LogMessage("[summon] Loaded %d reservation-owner commands from %s", g_iOwnerCommandCount, path);
+    return true;
+}
+
+public Action Command_ReloadOwnerCommands(int client, int args)
+{
+    if (LoadOwnerCommandAllowlist())
+    {
+        ReplyToCommand(client, "[SM] Loaded %d reservation-owner commands.", g_iOwnerCommandCount);
+    }
+    else
+    {
+        ReplyToCommand(client, "[SM] Owner command allowlist was not loaded; access is disabled. See the SourceMod log.");
+    }
+
+    return Plugin_Handled;
+}
+
+bool IsSafeOwnerCommandLine(const char[] commandLine)
+{
+    for (int i = 0; commandLine[i] != '\0'; i++)
+    {
+        int character = commandLine[i];
+
+        // The Source command buffer treats semicolons and line breaks as
+        // command separators. Reject all controls as well so one allowlisted
+        // command can never be used to append a second command or forge logs.
+        if (character == ';' || (character > 0 && character < 32) || character == 127)
+            return false;
+    }
+
+    return true;
+}
+
+bool TryConsumeOwnerCommandCooldown()
+{
+    float now = GetEngineTime();
+    float lastCommand = g_fLastOwnerCommand;
+
+    if (lastCommand > 0.0 && now - lastCommand < OWNER_COMMAND_COOLDOWN)
+        return false;
+
+    g_fLastOwnerCommand = now;
+    return true;
+}
+
+void LogOwnerCommand(int client, const char[] commandLine)
+{
+    char steamID[32];
+    if (!GetClientAuthId(client, AuthId_SteamID64, steamID, sizeof(steamID)))
+    {
+        strcopy(steamID, sizeof(steamID), "unknown");
+    }
+
+    LogMessage(
+        "[summon] Owner command reservation=%d actor=%s command=\"%s\" outcome=dispatched",
+        g_cvReservationNumber.IntValue,
+        steamID,
+        commandLine
+    );
+}
+
+// ============================================================================
+// Restricted Owner Server Commands
+// ============================================================================
+
+public Action Command_OwnerServerCommand(int client, int args)
+{
+    if (client == 0)
+    {
+        PrintToServer("[summon] sm_command is available to the reservation owner in-game");
+        return Plugin_Stop;
+    }
+
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Stop;
+
+    if (!CanUseOwnerServerCommands(client))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
+        return Plugin_Stop;
+    }
+
+    HandleOwnerServerCommand(client, args, "command");
+    return Plugin_Stop;
+}
+
+public Action Listener_OwnerRcon(int client, const char[] command, int args)
+{
+    // Server console and the agent's authenticated container-local RCON path
+    // must retain the normal unrestricted behavior.
+    if (client == 0)
+        return Plugin_Continue;
+
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Stop;
+
+    // Preserve stock sm_rcon for callers who already have its configured
+    // SourceMod access. This branch intentionally comes before IsOwner so a
+    // site admin who owns a reservation keeps their existing privileges.
+    if (CheckCommandAccess(client, command, ADMFLAG_RCON, false))
+        return Plugin_Continue;
+
+    if (!CanUseOwnerServerCommands(client))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
+        return Plugin_Stop;
+    }
+
+    // Every owner outcome is handled here so the raw argument string can
+    // never fall through to SourceMod's unrestricted sm_rcon callback.
+    HandleOwnerServerCommand(client, args, "rcon");
+    return Plugin_Stop;
+}
+
+Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
+{
+    if (args < 1)
+    {
+        PrintToChat(
+            client,
+            "\x01[\x07FF6600Reserve\x01] Usage: \x0799FF99!%s <command> [arguments...]\x01. Available commands are configured by the server.",
+            trigger
+        );
+        return Plugin_Handled;
+    }
+
+    // This larger read buffer lets NormalizeOwnerCommandName enforce the
+    // configured identifier limit without treating a valid boundary-length
+    // name as potentially truncated input.
+    char operation[256];
+    int operationLength = GetCmdArg(1, operation, sizeof(operation));
+    if (operationLength <= 0
+        || operationLength >= sizeof(operation) - 1
+        || !NormalizeOwnerCommandName(operation)
+        || g_mOwnerCommandAllowlist == null
+        || !g_mOwnerCommandAllowlist.ContainsKey(operation))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That server command is not allowed.");
+        return Plugin_Handled;
+    }
+
+    if (!CommandExists(operation))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That server command is unavailable.");
+        return Plugin_Handled;
+    }
+
+    char commandLine[MAX_OWNER_COMMAND_LINE];
+    int commandLength = GetCmdArgString(commandLine, sizeof(commandLine));
+    if (commandLength <= 0
+        || commandLength >= sizeof(commandLine) - 1
+        || !IsSafeOwnerCommandLine(commandLine))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That command line is not safe to run.");
+        return Plugin_Handled;
+    }
+
+    if (!TryConsumeOwnerCommandCooldown())
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Please wait before running another server command.");
+        return Plugin_Handled;
+    }
+
+    // Match stock sm_rcon's synchronous execution/output behavior, while the
+    // fixed format string prevents user input from becoming format directives.
+    // Capture the actor before execution because an allowlisted command may
+    // synchronously disconnect the caller or otherwise invalidate the client.
+    LogOwnerCommand(client, commandLine);
+
+    char response[MAX_OWNER_COMMAND_RESPONSE];
+    ServerCommandEx(response, sizeof(response), "%s", commandLine);
+    TrimString(response);
+
+    if (!IsClientConnected(client))
+        return Plugin_Handled;
+
+    if (response[0] != '\0')
+    {
+        ReplyToCommand(client, "%s", response);
+    }
+    else if (IsClientInGame(client))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Command \x0799FF99%s\x01 dispatched.", operation);
+    }
+
+    return Plugin_Handled;
 }
 
 // ============================================================================
