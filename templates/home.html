@@ -77,6 +77,15 @@
         this.mapMenuOpen = false;
         this.mapSearch = '';
     },
+    scrollMenu(event, list) {
+        if (!list) return;
+        const deltaScale = event.deltaMode === 1
+            ? 16
+            : event.deltaMode === 2
+                ? list.clientHeight
+                : 1;
+        list.scrollTop += event.deltaY * deltaScale;
+    },
     configs: {},
     configsAvailable: false,
     configsLoaded: false,
@@ -401,7 +410,7 @@
             this.submitting = false;
         }
     }
-}" x-init="
+}" x-effect="document.body.classList.toggle('overflow-hidden', modalOpen)" x-init="
     if (typeof _homeMaps !== 'undefined' && _homeMaps.length) {
         firstMap = _homeMaps[0].name;
     } else {
@@ -603,13 +612,14 @@
                             </svg>
                         </button>
                         <div x-show="mapMenuOpen" x-cloak x-transition.origin.top role="listbox"
+                            @wheel.prevent.stop="scrollMenu($event, $refs.homeMapList)"
                             class="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
                             <div class="border-b border-slate-200 p-2">
                                 <input type="search" x-ref="homeMapSearch" x-model="mapSearch"
                                     placeholder="{{ _('home.search_maps') }}"
                                     class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
                             </div>
-                            <div class="max-h-48 overflow-y-auto p-1">
+                            <div x-ref="homeMapList" class="max-h-48 overflow-y-auto p-1">
                                 <template x-for="m in filteredHomeMaps" :key="m.name">
                                     <button type="button" role="option" :aria-selected="firstMap === m.name"
                                         @click="selectHomeMap(m)"
@@ -644,6 +654,7 @@
                         <template x-teleport="body">
                             <div x-show="configMenuOpen" x-cloak x-transition.opacity role="listbox"
                                 @click.stop
+                                @wheel.prevent.stop="scrollMenu($event, $refs.homeConfigList)"
                                 @keydown.escape.stop="closeConfigMenu(); $refs.homeConfigTrigger?.focus()"
                                 :style="{ ...configMenuPosition, zIndex: 60 }"
                                 class="fixed flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
@@ -652,7 +663,7 @@
                                         placeholder="{{ _('home.search_configs') }}"
                                         class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
                                 </div>
-                                <div class="overflow-y-auto p-1" style="min-height: 0"
+                                <div x-ref="homeConfigList" class="overflow-y-auto p-1" style="min-height: 0"
                                     :style="{ maxHeight: `${configMenuListMaxHeight}px` }">
                                     <button x-show="!configSearch.trim()" type="button" role="option"
                                         :aria-selected="selectedConfig === ''" @click="selectHomeConfig(null)"
