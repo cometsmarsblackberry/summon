@@ -117,6 +117,7 @@ Type=simple
 User=core
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+	Environment=AGENT_MODE=cloud
 	Environment=BACKEND_URL={ws_url}
 	Environment=AUTH_TOKEN={auth_token}
 	Environment=INSTANCE_ID={instance_id}
@@ -660,12 +661,10 @@ async def destroy_instance(instance_id: str, db: AsyncSession) -> bool:
 
 
 async def get_enabled_locations(db: AsyncSession) -> list[EnabledLocation]:
-    """Get all enabled locations for reservations."""
+    """Get enabled locations, including locations served only by Instant hosts."""
     result = await db.execute(
         select(EnabledLocation)
-        .join(Provider, EnabledLocation.provider == Provider.code)
         .where(EnabledLocation.enabled == True)
-        .where(Provider.enabled == True)
         .order_by(EnabledLocation.display_order)
     )
     return list(result.scalars().all())

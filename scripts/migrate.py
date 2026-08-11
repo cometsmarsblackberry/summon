@@ -29,6 +29,7 @@ CATEGORIES = {
     "locations": "Server locations (code, name, city, country, provider config)",
     "providers": "Cloud providers (code, name, billing, instance plan)",
     "location_providers": "Location-provider mappings (failover priority)",
+    "instant_hosts": "Instant host and slot metadata (credentials excluded)",
     "maps": "Game maps (name, display_name, enabled, default)",
     "settings": "Site settings (key-value overrides)",
     "monthly_costs": "Monthly cost history (hours, USD, EUR, reservations)",
@@ -175,6 +176,7 @@ def _export_locations(conn: sqlite3.Connection) -> list[dict]:
         "city", "country", "continent", "subdivision",
         "recommended", "enabled", "display_order",
         "instance_plan", "region_instance_limit",
+        "ping_url",
     ]
     # Only select columns that exist (handles older schemas)
     existing = [c for c in cols if _table_has_column(conn, "enabled_locations", c)]
@@ -211,6 +213,35 @@ def _export_location_providers(conn: sqlite3.Connection) -> list[dict]:
         "ORDER BY location_code, priority"
     )
     return [dict(row) for row in cur.fetchall()]
+
+
+def _export_instant_hosts(conn: sqlite3.Connection) -> list[dict]:
+    """Export host/slot metadata without credentials or live assignments."""
+    if not _table_exists(conn, "instant_hosts"):
+        return []
+    host_columns = [
+        "id", "name", "location", "public_ipv4", "desired_image", "version_pin",
+    ]
+    existing = [
+        column for column in host_columns
+        if _table_has_column(conn, "instant_hosts", column)
+    ]
+    rows = conn.execute(
+        f"SELECT {', '.join(existing)} FROM instant_hosts "
+        "WHERE deleted_at IS NULL ORDER BY location, name"
+    ).fetchall()
+    exported = []
+    for row in rows:
+        host = dict(row)
+        source_id = host.pop("id")
+        slots = conn.execute(
+            "SELECT slot_index, game_port, tv_port, enabled "
+            "FROM instant_slots WHERE host_id = ? ORDER BY slot_index",
+            (source_id,),
+        ).fetchall()
+        host["slots"] = [dict(slot) for slot in slots]
+        exported.append(host)
+    return exported
 
 
 def _export_maps(conn: sqlite3.Connection) -> list[dict]:
@@ -325,7 +356,7 @@ def _import_locations(conn: sqlite3.Connection, records: list[dict], mode: str) 
                     "vultr_region=?, billing_model=?, "
                     "city=?, country=?, continent=?, subdivision=?, "
                     "recommended=?, enabled=?, "
-                    "display_order=?, instance_plan=?, region_instance_limit=? "
+                    "display_order=?, instance_plan=?, region_instance_limit=?, ping_url=? "
                     "WHERE code=?",
                     (
                         rec["name"], rec.get("provider", "vultr"),
@@ -335,7 +366,7 @@ def _import_locations(conn: sqlite3.Connection, records: list[dict], mode: str) 
                         rec.get("subdivision"),
                         rec.get("recommended", 0), rec.get("enabled", 1),
                         rec.get("display_order", 0), rec.get("instance_plan"),
-                        rec.get("region_instance_limit"), rec["code"],
+                        rec.get("region_instance_limit"), rec.get("ping_url"), rec["code"],
                     ),
                 )
                 updated += 1
@@ -346,8 +377,8 @@ def _import_locations(conn: sqlite3.Connection, records: list[dict], mode: str) 
                 "INSERT INTO enabled_locations "
                 "(code, name, provider, provider_region, vultr_region, billing_model, "
                 "city, country, continent, subdivision, "
-                "recommended, enabled, display_order, instance_plan, region_instance_limit) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "recommended, enabled, display_order, instance_plan, region_instance_limit, ping_url) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     rec["code"], rec["name"], rec.get("provider", "vultr"),
                     rec.get("provider_region", ""),
@@ -356,7 +387,7 @@ def _import_locations(conn: sqlite3.Connection, records: list[dict], mode: str) 
                     rec.get("subdivision"),
                     rec.get("recommended", 0), rec.get("enabled", 1),
                     rec.get("display_order", 0), rec.get("instance_plan"),
-                    rec.get("region_instance_limit"),
+                    rec.get("region_instance_limit"), rec.get("ping_url"),
                 ),
             )
             created += 1
@@ -442,6 +473,140 @@ def _import_location_providers(conn: sqlite3.Connection, records: list[dict], mo
                 ),
             )
             created += 1
+    return {"created": created, "updated": updated, "skipped": skipped}
+
+
+def _import_instant_hosts(conn: sqlite3.Connection, records: list[dict], mode: str) -> dict:
+    """Import hosts disabled and deliberately stripped of enrollment state."""
+    if not _table_exists(conn, "instant_hosts"):
+        return {"created": 0, "updated": 0, "skipped": len(records)}
+    created = updated = skipped = 0
+    for rec in records:
+        imported_slots = rec.get("slots") or []
+        slot_indexes: set[int] = set()
+        imported_ports: set[int] = set()
+        for slot in imported_slots:
+            slot_index = slot["slot_index"]
+            game_port = slot["game_port"]
+            tv_port = slot["tv_port"]
+            if (
+                not isinstance(slot_index, int)
+                or isinstance(slot_index, bool)
+                or slot_index < 0
+            ):
+                raise ValueError("Instant slot indexes must be non-negative integers")
+            if slot_index in slot_indexes:
+                raise ValueError(f"Duplicate Instant slot index {slot_index}")
+            if not all(
+                isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535
+                for port in (game_port, tv_port)
+            ):
+                raise ValueError("Instant slot ports must be integers between 1 and 65535")
+            if game_port in imported_ports or tv_port in imported_ports or game_port == tv_port:
+                raise ValueError("Imported Instant game and SourceTV ports overlap")
+            slot_indexes.add(slot_index)
+            imported_ports.update((game_port, tv_port))
+
+        existing = conn.execute(
+            "SELECT id FROM instant_hosts WHERE public_ipv4 = ? AND deleted_at IS NULL",
+            (rec["public_ipv4"],),
+        ).fetchone()
+        if existing and mode != "update":
+            skipped += 1
+            continue
+        if existing:
+            host_id = existing["id"]
+            open_assignment = conn.execute(
+                "SELECT 1 FROM instant_assignments a "
+                "JOIN instant_slots s ON s.id = a.slot_id "
+                "WHERE s.host_id = ? AND a.closed_at IS NULL LIMIT 1",
+                (host_id,),
+            ).fetchone()
+            if open_assignment:
+                # Import is configuration management, not a reservation
+                # lifecycle operation. Never revoke or rewrite a live host.
+                skipped += 1
+                continue
+            conn.execute(
+                "UPDATE instant_hosts SET name=?, location=?, desired_image=?, version_pin=?, "
+                "enabled=0, draining=0, credential_hash=NULL, enrollment_token_hash=NULL, "
+                "enrollment_expires_at=NULL, enrollment_used_at=NULL, health_status='unenrolled' "
+                "WHERE id=?",
+                (
+                    rec["name"], rec["location"], rec.get("desired_image"),
+                    rec.get("version_pin"), host_id,
+                ),
+            )
+            conn.execute("UPDATE instant_slots SET enabled=0 WHERE host_id=?", (host_id,))
+
+            # A base-port shift can make a desired port equal another row's old
+            # unique port. Move all historical rows to unused ports first, then
+            # apply the imported values. This preserves slot/assignment IDs and
+            # keeps the whole import atomic under the caller's transaction.
+            existing_slots = conn.execute(
+                "SELECT id, game_port, tv_port FROM instant_slots "
+                "WHERE host_id=? ORDER BY slot_index",
+                (host_id,),
+            ).fetchall()
+            reserved_ports = set(imported_ports)
+            for existing_slot in existing_slots:
+                reserved_ports.update(
+                    (existing_slot["game_port"], existing_slot["tv_port"])
+                )
+            parking_ports: list[int] = []
+            candidate = 65535
+            required = len(existing_slots) * 2
+            while len(parking_ports) < required and candidate >= 1:
+                if candidate not in reserved_ports:
+                    parking_ports.append(candidate)
+                candidate -= 1
+            if len(parking_ports) != required:
+                raise ValueError("Could not reserve temporary Instant slot ports")
+            for position, existing_slot in enumerate(existing_slots):
+                conn.execute(
+                    "UPDATE instant_slots SET game_port=?, tv_port=? WHERE id=?",
+                    (
+                        parking_ports[position * 2],
+                        parking_ports[position * 2 + 1],
+                        existing_slot["id"],
+                    ),
+                )
+            updated += 1
+        else:
+            cursor = conn.execute(
+                "INSERT INTO instant_hosts "
+                "(name, location, public_ipv4, enabled, draining, health_status, "
+                "image_status, update_status, update_auto_drained, desired_image, version_pin) "
+                "VALUES (?, ?, ?, 0, 0, 'unenrolled', 'unprepared', 'idle', 0, ?, ?)",
+                (
+                    rec["name"], rec["location"], rec["public_ipv4"],
+                    rec.get("desired_image"), rec.get("version_pin"),
+                ),
+            )
+            host_id = cursor.lastrowid
+            created += 1
+
+        for slot in imported_slots:
+            row = conn.execute(
+                "SELECT id FROM instant_slots WHERE host_id=? AND slot_index=?",
+                (host_id, slot["slot_index"]),
+            ).fetchone()
+            values = (
+                slot["game_port"], slot["tv_port"],
+                1 if slot.get("enabled", 1) else 0,
+            )
+            if row:
+                conn.execute(
+                    "UPDATE instant_slots SET game_port=?, tv_port=?, enabled=?, "
+                    "error_code=NULL, error_message=NULL, quarantined_at=NULL WHERE id=?",
+                    (*values, row["id"]),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO instant_slots "
+                    "(host_id, slot_index, game_port, tv_port, enabled) VALUES (?, ?, ?, ?, ?)",
+                    (host_id, slot["slot_index"], *values),
+                )
     return {"created": created, "updated": updated, "skipped": skipped}
 
 
@@ -574,6 +739,7 @@ EXPORTERS = {
     "locations": _export_locations,
     "providers": _export_providers,
     "location_providers": _export_location_providers,
+    "instant_hosts": _export_instant_hosts,
     "maps": _export_maps,
     "settings": _export_settings,
     "monthly_costs": _export_monthly_costs,
@@ -586,6 +752,7 @@ IMPORTERS = {
     "locations": _import_locations,
     "providers": _import_providers,
     "location_providers": _import_location_providers,
+    "instant_hosts": _import_instant_hosts,
     "maps": _import_maps,
     "settings": _import_settings,
     "monthly_costs": _import_monthly_costs,

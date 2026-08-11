@@ -8,11 +8,10 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from app.database import async_session_maker
-from app.models.reservation import Reservation, ReservationStatus
-from app.models.instance import CloudInstance
+from app.models import InstantAssignment, Reservation, ReservationStatus, RuntimeKind
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,7 @@ def schedule_expiry_timer(
     reservation_id: int,
     reservation_number: int,
     ends_at: datetime,
-    instance_id: int,
+    instance_id: str | None,
 ) -> None:
     """Schedule (or reschedule) an expiry timer for a reservation.
 
@@ -33,7 +32,8 @@ def schedule_expiry_timer(
         reservation_id: Reservation PK
         reservation_number: Human-readable reservation number
         ends_at: When the reservation expires
-        instance_id: CloudInstance.id (FK) for destruction
+        instance_id: Legacy CloudInstance.id used for logging only. Instant
+            reservations leave it unset and are resolved from the database.
     """
     cancel_expiry_timer(reservation_id)
 
@@ -67,18 +67,31 @@ def cancel_all_expiry_timers() -> None:
 
 
 async def restore_expiry_timers() -> None:
-    """Re-schedule expiry timers for all ACTIVE reservations.
+    """Re-schedule expiry timers for active and leased Instant reservations.
 
     Called once at application startup so that timers survive restarts.
     """
     async with async_session_maker() as db:
-        result = await db.execute(
-            select(Reservation).where(Reservation.status == ReservationStatus.ACTIVE)
+        instant_history = exists().where(
+            InstantAssignment.reservation_id == Reservation.id
         )
+        result = await db.execute(select(Reservation).where(
+            (Reservation.status == ReservationStatus.ACTIVE)
+            | (
+                Reservation.status.in_((
+                    ReservationStatus.PENDING,
+                    ReservationStatus.PROVISIONING,
+                ))
+                & (
+                    (Reservation.runtime_kind == RuntimeKind.INSTANT)
+                    | instant_history
+                )
+            )
+        ))
         reservations = list(result.scalars().all())
 
     for r in reservations:
-        if r.instance_id and r.ends_at:
+        if r.ends_at:
             schedule_expiry_timer(r.id, r.reservation_number, r.ends_at, r.instance_id)
 
     if reservations:
@@ -89,7 +102,7 @@ async def _expiry_worker(
     reservation_id: int,
     reservation_number: int,
     delay: float,
-    instance_id: int,
+    instance_id: str | None,
 ) -> None:
     """Sleep until expiry, then end the reservation and destroy the instance.
 
@@ -109,7 +122,30 @@ async def _expiry_worker(
             )
             reservation = result.scalar_one_or_none()
 
-            if not reservation or reservation.status != ReservationStatus.ACTIVE:
+            instant_history_result = await db.execute(select(
+                exists().where(
+                    InstantAssignment.reservation_id == reservation_id
+                )
+            )) if reservation else None
+            has_instant_history = bool(
+                instant_history_result.scalar()
+                if instant_history_result is not None else False
+            )
+            instant_provisioning = bool(
+                reservation
+                and reservation.status in {
+                    ReservationStatus.PENDING,
+                    ReservationStatus.PROVISIONING,
+                }
+                and (
+                    reservation.runtime_kind == RuntimeKind.INSTANT
+                    or has_instant_history
+                )
+            )
+            if not reservation or (
+                reservation.status != ReservationStatus.ACTIVE
+                and not instant_provisioning
+            ):
                 return  # Race guard: already ended
 
             # End the reservation
@@ -124,22 +160,17 @@ async def _expiry_worker(
             from app.routers.internal import clear_player_data
             clear_player_data(reservation_number)
 
-            # Best-effort: notify agent
-            if instance_id:
-                ci_result = await db.execute(
-                    select(CloudInstance).where(CloudInstance.id == instance_id)
-                )
-                cloud_instance = ci_result.scalar_one_or_none()
-                if cloud_instance:
-                    from app.routers.internal import send_to_agent
-                    await send_to_agent(cloud_instance.instance_id, {
-                        "type": "reservation.end",
-                    })
-
-            # Destroy instance — no billing time left, skip warm pool
-            if instance_id:
-                from app.services.orchestrator import destroy_instance
-                await destroy_instance(instance_id, db)
+            # Runtime-specific expiry. Instant keeps the slot leased until a
+            # stop acknowledgement/reconciliation; cloud is destroyed because
+            # no paid reservation time remains.
+            from app.services.runtime import end_reservation_runtime
+            await end_reservation_runtime(
+                reservation,
+                db,
+                was_active=True,
+                had_started=reservation.started_at is not None,
+                at_expiry=True,
+            )
 
     except Exception:
         logger.exception(f"Expiry worker error for reservation #{reservation_number}")

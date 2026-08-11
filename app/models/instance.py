@@ -90,8 +90,8 @@ class EnabledLocation(Base):
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     
     # Provider configuration
-    provider: Mapped[str] = mapped_column(String(32), ForeignKey("providers.code"), nullable=False, default="vultr")
-    provider_region: Mapped[str] = mapped_column(String(32), nullable=False)  # Provider-specific region ID
+    provider: Mapped[Optional[str]] = mapped_column(String(32), ForeignKey("providers.code"), nullable=True)
+    provider_region: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # Provider-specific region ID
     
     # Legacy field for backward compatibility (same as provider_region for Vultr)
     vultr_region: Mapped[str] = mapped_column(String(32), nullable=True)
@@ -114,6 +114,10 @@ class EnabledLocation(Base):
 
     # Optional per-provider-region instance limit override (used by per-region quota providers like Gcore).
     region_instance_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Infrastructure-neutral latency probe. When absent the client skips
+    # latency measurement unless a legacy provider probe can be derived.
+    ping_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
     def __repr__(self) -> str:
         return f"<Location {self.code}: {self.name} ({self.provider})>"

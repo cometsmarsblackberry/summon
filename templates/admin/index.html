@@ -12,6 +12,8 @@
     var _adminLocationProviders = {{ location_providers | tojson }};
     var _adminReservations = {{ reservations | tojson }};
     var _adminInstances = {{ instances | tojson }};
+    var _adminInstantHosts = {{ instant_hosts | tojson }};
+    var _adminInstantMetrics = {{ instant_metrics | tojson }};
     var _adminSettings = {
         max_duration_hours: {{ reservation_settings.max_duration_hours }},
         auto_end_minutes: {{ reservation_settings.auto_end_minutes }},
@@ -37,6 +39,8 @@
         captcha_min_tf2_hours: {{ captcha_settings.min_tf2_hours }},
         captcha_min_account_age_days: {{ captcha_settings.min_account_age_days }},
         fastdl_url: {{ fastdl_url | tojson }},
+        instant_hosts_enabled: {{ instant_settings.enabled | tojson }},
+        instant_container_image: {{ instant_settings.container_image | tojson }},
     };
 
     function adminPanel() {
@@ -44,7 +48,7 @@
             /* ── Tab state ── */
             tab: 'dashboard',
             init() {
-                const valid = ['dashboard','locations','providers','maps','trivia','users','settings'];
+                const valid = ['dashboard','locations','instant-hosts','providers','maps','trivia','users','settings'];
                 const hash = window.location.hash.slice(1);
                 if (valid.includes(hash)) this.tab = hash;
                 this.$watch('tab', v => { window.location.hash = v; });
@@ -113,16 +117,17 @@
             showLocModal: false,
             locEditMode: false,
             locEditCode: null,
-            locFormData: { code: '', name: '', provider: '', provider_region: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' },
+            locFormData: { code: '', name: '', provider: '', provider_region: '', ping_url: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' },
             get defaultProvider() { return this.providers[0]?.code || 'vultr'; },
             openAddLoc() {
-                this.locFormData = { code: '', name: '', provider: this.defaultProvider, provider_region: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' };
+                this.locFormData = { code: '', name: '', provider: this.defaultProvider, provider_region: '', ping_url: '', city: '', country: '', continent: '', subdivision: '', recommended: false, instance_plan: '', region_instance_limit: '' };
                 this.locEditMode = false; this.locEditCode = null; this.showLocModal = true;
             },
             openEditLoc(loc) {
                 this.locFormData = {
                     code: loc.code, name: loc.name, provider: loc.provider,
                     provider_region: loc.provider_region,
+                    ping_url: loc.ping_url || '',
                     city: loc.city || '', country: loc.country || '', continent: loc.continent || '',
                     subdivision: loc.subdivision || '',
                     recommended: loc.recommended,
@@ -132,12 +137,14 @@
                 this.locEditMode = true; this.locEditCode = loc.code; this.showLocModal = true;
             },
             async saveLoc() {
-                if (!this.locFormData.provider_region) { alert('Region ID is required'); return; }
+                if (this.locFormData.provider && !this.locFormData.provider_region) { alert('Region ID is required for cloud locations'); return; }
                 if (this.locFormData.city && this.locFormData.country && !this.locFormData.name)
                     this.locFormData.name = this.locFormData.city + ', ' + this.locFormData.country;
                 if (!this.locFormData.name) { alert('Display name is required'); return; }
                 if (!this.locFormData.code) { alert('Code is required'); return; }
                 const payload = { ...this.locFormData };
+                if (!payload.provider) { payload.provider = null; payload.provider_region = null; }
+                if (!payload.ping_url) payload.ping_url = null;
                 if (!payload.instance_plan) delete payload.instance_plan;
                 if (!payload.city) delete payload.city;
                 if (!payload.country) delete payload.country;
@@ -207,6 +214,123 @@
             async resetSuspension(locCode, provCode) {
                 await fetch('/admin/provider-status/' + locCode + '/' + provCode + '/reset', { method: 'POST' });
                 location.reload();
+            },
+
+            /* ── Instant hosts ── */
+            instantHosts: _adminInstantHosts,
+            instantMetrics: _adminInstantMetrics,
+            showInstantHostModal: false,
+            enrollmentToken: '',
+            copyOnceKind: 'enrollment',
+            showInstantEditModal: false,
+            editingInstantHost: null,
+            instantEditForm: {},
+            instantHostForm: { name: '', location: '', public_ipv4: '', slot_count: 2, base_port: 27015, desired_image: '' },
+            openAddInstantHost() {
+                this.instantHostForm = {
+                    name: '', location: this.allLocations[0]?.code || '', public_ipv4: '',
+                    slot_count: 2, base_port: 27015, desired_image: ''
+                };
+                this.enrollmentToken = '';
+                this.copyOnceKind = 'enrollment';
+                this.showInstantHostModal = true;
+            },
+            async createInstantHost() {
+                const payload = { ...this.instantHostForm };
+                payload.slot_count = parseInt(payload.slot_count, 10);
+                payload.base_port = parseInt(payload.base_port, 10);
+                if (!payload.desired_image) delete payload.desired_image;
+                const res = await fetch('/admin/instant-hosts', {
+                    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not create host'); return; }
+                this.enrollmentToken = data.enrollment_token;
+                this.copyOnceKind = 'enrollment';
+                this.instantHosts.push(data);
+            },
+            async hostAction(host, path, body = null) {
+                const options = {method:'POST', headers:{'Content-Type':'application/json'}};
+                if (body !== null) options.body = JSON.stringify(body);
+                const res = await fetch('/admin/instant-hosts/' + host.id + path, options);
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Host action failed'); return null; }
+                return data;
+            },
+            async toggleInstantHost(host) {
+                const data = await this.hostAction(host, '/state', {enabled: !host.enabled});
+                if (data) host.enabled = data.enabled;
+            },
+            async toggleDrain(host) {
+                const data = await this.hostAction(host, '/drain', {draining: !host.draining});
+                if (data) host.draining = data.draining;
+            },
+            async renewEnrollment(host) {
+                const data = await this.hostAction(host, '/enrollment-token');
+                if (data) {
+                    this.enrollmentToken = data.enrollment_token;
+                    this.copyOnceKind = 'enrollment';
+                    this.showInstantHostModal = true;
+                    host.enabled = false; host.connected = false; host.enrolled = false;
+                }
+            },
+            openEditInstantHost(host) {
+                const enabledSlots = host.slots.filter(slot => slot.enabled);
+                this.editingInstantHost = host;
+                this.instantEditForm = {
+                    name: host.name,
+                    location: host.location,
+                    public_ipv4: host.public_ipv4,
+                    slot_count: enabledSlots.length,
+                    base_port: enabledSlots.length ? Math.min(...enabledSlots.map(slot => slot.game_port)) : 27015,
+                    desired_image: host.desired_image || '',
+                    version_pin: host.version_pin || '',
+                };
+                this.showInstantEditModal = true;
+            },
+            async saveInstantHost() {
+                const payload = {...this.instantEditForm};
+                payload.slot_count = parseInt(payload.slot_count, 10);
+                payload.base_port = parseInt(payload.base_port, 10);
+                payload.desired_image = payload.desired_image || null;
+                payload.version_pin = payload.version_pin || null;
+                const res = await fetch('/admin/instant-hosts/' + this.editingInstantHost.id, {
+                    method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not update host'); return; }
+                const index = this.instantHosts.findIndex(item => item.id === data.id);
+                if (index >= 0) this.instantHosts[index] = data;
+                this.showInstantEditModal = false;
+            },
+            async rotateCredential(host) {
+                if (!confirm('Rotate this credential? The host is disabled until its credential file is replaced.')) return;
+                const data = await this.hostAction(host, '/credential');
+                if (data) {
+                    this.enrollmentToken = data.credential;
+                    this.copyOnceKind = 'credential';
+                    this.showInstantHostModal = true;
+                    host.enabled = false; host.connected = false;
+                }
+            },
+            async clearSlotError(host, slot) {
+                const data = await this.hostAction(host, '/slots/' + slot.id + '/clear-error');
+                if (data) { slot.error_code = null; slot.error_message = null; slot.quarantined_at = null; }
+            },
+            async prepareImage(host) {
+                const data = await this.hostAction(host, '/image', {});
+                if (data) host.image_status = data.status;
+            },
+            async updateAgent(host) {
+                const data = await this.hostAction(host, '/update');
+                if (data) { host.draining = true; host.update_status = data.update_status; }
+            },
+            async deregisterHost(host) {
+                if (!confirm('Deregister ' + host.name + '? This only revokes Summon access; it does not alter the VPS.')) return;
+                const res = await fetch('/admin/instant-hosts/' + host.id, {method:'DELETE'});
+                const data = await res.json();
+                if (!res.ok) { alert(data.detail || 'Could not deregister host'); return; }
+                this.instantHosts = this.instantHosts.filter(item => item.id !== host.id);
             },
 
             /* ── Providers ── */
@@ -536,6 +660,7 @@
         <template x-for="t in [
             {id:'dashboard', label:'Dashboard'},
             {id:'locations', label:'Locations'},
+            {id:'instant-hosts', label:'Instant Hosts'},
             {id:'providers', label:'Providers'},
             {id:'maps', label:'Maps'},
             {id:'trivia', label:'Trivia'},
@@ -738,6 +863,121 @@
                     <button @click="locPage++" :disabled="locPage >= locTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
                     <button @click="locPage = locTotalPages" :disabled="locPage >= locTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- INSTANT HOSTS TAB                                           -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'instant-hosts'" x-cloak class="space-y-4">
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex items-center justify-between mb-3">
+                <div>
+                    <h2 class="text-sm font-medium text-slate-700 uppercase tracking-wide">Operator-owned hosts</h2>
+                    <p class="text-xs text-slate-400 mt-1">Summon controls TF2 containers only. VPS, OS, firewall, and billing remain operator-managed.</p>
+                </div>
+                <button @click="openAddInstantHost()" class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded">+ Add Host</button>
+            </div>
+            <div class="mb-4 grid gap-2 rounded bg-slate-50 px-3 py-2 sm:grid-cols-[1fr_auto]">
+                <div class="space-y-2">
+                    <label class="flex items-center gap-2 text-xs text-slate-600">
+                        <input type="checkbox" x-model="settingsForm.instant_hosts_enabled" class="rounded border-slate-300">
+                        Global Instant scheduling rollout
+                    </label>
+                    <input x-model="settingsForm.instant_container_image" placeholder="Site-wide TF2 image"
+                        class="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800">
+                </div>
+                <button @click="saveSettings()" class="self-end px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded">Save</button>
+            </div>
+            <div class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div class="rounded bg-green-50 px-2 py-2">
+                    <div class="text-lg font-semibold text-green-800" x-text="instantMetrics.available_slots"></div>
+                    <div class="text-xs text-green-700">Available slots</div>
+                </div>
+                <div class="rounded bg-blue-50 px-2 py-2">
+                    <div class="text-lg font-semibold text-blue-800" x-text="instantMetrics.active_assignments"></div>
+                    <div class="text-xs text-blue-700">Active assignments</div>
+                </div>
+                <div class="rounded bg-amber-50 px-2 py-2">
+                    <div class="text-lg font-semibold text-amber-800" x-text="instantMetrics.start_failures + ' / ' + instantMetrics.fallback_reservations"></div>
+                    <div class="text-xs text-amber-700">Start failures / fallbacks</div>
+                </div>
+                <div class="rounded bg-slate-100 px-2 py-2">
+                    <div class="text-lg font-semibold text-slate-800" x-text="instantMetrics.average_start_latency_seconds == null ? '-' : instantMetrics.average_start_latency_seconds + 's'"></div>
+                    <div class="text-xs text-slate-600">Average start latency</div>
+                </div>
+                <div class="rounded bg-red-50 px-2 py-2">
+                    <div class="text-lg font-semibold text-red-800" x-text="instantMetrics.offline_hosts"></div>
+                    <div class="text-xs text-red-700">Heartbeat losses now</div>
+                </div>
+                <div class="rounded bg-red-50 px-2 py-2">
+                    <div class="text-lg font-semibold text-red-800" x-text="instantMetrics.reconciliation_conflicts"></div>
+                    <div class="text-xs text-red-700">Reconciliation conflicts</div>
+                </div>
+                <div class="col-span-2 rounded bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                    <div><strong>Agents:</strong> <span x-text="JSON.stringify(instantMetrics.agent_versions)"></span></div>
+                    <div class="mt-1 truncate" :title="JSON.stringify(instantMetrics.ready_images)"><strong>Images:</strong> <span x-text="JSON.stringify(instantMetrics.ready_images)"></span></div>
+                </div>
+            </div>
+            <template x-if="instantHosts.length === 0">
+                <p class="text-sm text-slate-400 py-4">No Instant hosts registered.</p>
+            </template>
+            <div class="space-y-3">
+                <template x-for="host in instantHosts" :key="host.id">
+                    <div class="border border-slate-200 rounded-lg p-3">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-sm text-slate-800" x-text="host.name"></span>
+                                    <span class="font-mono text-xs text-slate-500" x-text="host.public_ipv4"></span>
+                                    <span class="text-xs px-1.5 py-0.5 rounded"
+                                        :class="host.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'"
+                                        x-text="host.connected ? 'connected' : 'offline'"></span>
+                                    <span x-show="host.draining" class="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">draining</span>
+                                    <span class="text-xs text-slate-400" x-text="host.location"></span>
+                                </div>
+                                <div class="text-xs text-slate-400 mt-1">
+                                    <span x-text="'agent ' + (host.agent_version || '-')"></span>
+                                    <span x-text="' · protocol ' + (host.protocol_version || '-')"></span>
+                                    <span x-text="' · image ' + host.image_status"></span>
+                                    <span x-text="' · update ' + host.update_status"></span>
+                                </div>
+                                <p x-show="host.health_error || host.image_error || host.reconciliation_error"
+                                    class="text-xs text-red-600 mt-1 break-words"
+                                    x-text="host.health_error || host.image_error || host.reconciliation_error"></p>
+                            </div>
+                            <div class="flex gap-1 flex-wrap justify-end">
+                                <button @click="openEditInstantHost(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Edit</button>
+                                <button @click="toggleInstantHost(host)" class="px-2 py-1 text-xs rounded bg-green-100 text-green-800" x-text="host.enabled ? 'Disable' : 'Enable'"></button>
+                                <button @click="toggleDrain(host)" class="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800" x-text="host.draining ? 'Undrain' : 'Drain'"></button>
+                                <button @click="prepareImage(host)" class="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800">Prepare image</button>
+                                <button @click="updateAgent(host)" class="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800">Update agent</button>
+                                <button @click="renewEnrollment(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Re-enroll</button>
+                                <button @click="rotateCredential(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Rotate credential</button>
+                                <button @click="deregisterHost(host)" class="px-2 py-1 text-xs rounded bg-red-100 text-red-700">Deregister</button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                            <template x-for="slot in host.slots" :key="slot.id">
+                                <div class="rounded bg-slate-50 px-2 py-1.5 text-xs flex items-center justify-between"
+                                    :class="slot.error_code ? 'border border-red-200' : ''">
+                                    <span>
+                                        <strong x-text="'Slot ' + slot.slot_index"></strong>
+                                        <span class="font-mono text-slate-500" x-text="' UDP ' + slot.game_port + ' / ' + slot.tv_port"></span>
+                                    </span>
+                                    <span class="text-blue-700" x-text="slot.assignment ? 'reservation ' + slot.assignment.reservation_id : 'idle'"></span>
+                                    <button x-show="slot.error_code" @click="clearSlotError(host, slot)"
+                                        class="text-red-600 underline" x-text="slot.error_code + ' · clear'"></button>
+                                </div>
+                            </template>
+                        </div>
+                        <details class="mt-2 text-xs text-slate-500">
+                            <summary class="cursor-pointer">Health, preflight, and host usage</summary>
+                            <pre class="mt-1 max-h-48 overflow-auto rounded bg-slate-900 p-2 text-slate-100" x-text="JSON.stringify({health: host.health_status, preflight: host.preflight_report, usage: host.system_stats}, null, 2)"></pre>
+                        </details>
+                    </div>
+                </template>
             </div>
         </div>
     </div>
@@ -1346,6 +1586,75 @@
     <!-- MODALS                                                      -->
     <!-- ════════════════════════════════════════════════════════════ -->
 
+    <!-- Instant Host Form / copy-once enrollment token -->
+    <div x-show="showInstantHostModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showInstantHostModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/20" @click="showInstantHostModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-lg w-full p-5 space-y-3">
+                <template x-if="!enrollmentToken">
+                    <div class="space-y-3">
+                        <h3 class="text-sm font-semibold text-slate-900">Add Instant host</h3>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input x-model="instantHostForm.name" placeholder="Host name" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <select x-model="instantHostForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                                <template x-for="loc in allLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
+                            </select>
+                            <input x-model="instantHostForm.public_ipv4" placeholder="Static public IPv4" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <input x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <input x-model.number="instantHostForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <input x-model="instantHostForm.desired_image" placeholder="Image override (optional)" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        </div>
+                        <p class="text-xs text-slate-400">Ports use base + slot × 10; SourceTV uses game port + 5. The host starts disabled.</p>
+                        <div class="flex gap-2 justify-end">
+                            <button @click="showInstantHostModal=false" class="px-3 py-1.5 text-xs bg-slate-200 rounded">Cancel</button>
+                            <button @click="createInstantHost()" class="px-3 py-1.5 text-xs bg-green-600 text-white rounded">Create</button>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="enrollmentToken">
+                    <div class="space-y-3">
+                        <h3 class="text-sm font-semibold text-slate-900" x-text="copyOnceKind === 'credential' ? 'Copy host credential now' : 'Copy enrollment token now'"></h3>
+                        <p class="text-xs text-amber-700" x-text="copyOnceKind === 'credential' ? 'Replace /var/lib/summon-agent/credential with this value (mode 0600), then restart the service. It will not be shown again.' : 'This one-use token expires in 15 minutes and will not be shown again.'"></p>
+                        <code class="block p-3 rounded bg-slate-900 text-green-300 break-all text-xs" x-text="enrollmentToken"></code>
+                        <button @click="navigator.clipboard.writeText(enrollmentToken)" class="px-3 py-1.5 text-xs bg-slate-200 rounded" x-text="copyOnceKind === 'credential' ? 'Copy credential' : 'Copy token'"></button>
+                        <div x-show="copyOnceKind === 'enrollment'" class="text-xs text-slate-500 space-y-1">
+                            <p>On Ubuntu 26.04 AMD64, run:</p>
+                            <code class="block p-2 rounded bg-slate-100 break-all">curl -fsSL {{ base_url }}/static/install-instant-host.sh | sudo bash</code>
+                            <p>The installer prompts invisibly for this token. It prints firewall rules but never modifies the firewall.</p>
+                        </div>
+                        <div class="flex justify-end"><button @click="showInstantHostModal=false; enrollmentToken=''" class="px-3 py-1.5 text-xs bg-brand-600 rounded">Done</button></div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instant Host Edit Modal -->
+    <div x-show="showInstantEditModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showInstantEditModal = false">
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/20" @click="showInstantEditModal = false"></div>
+            <div class="relative bg-white rounded-lg shadow-xl max-w-lg w-full p-5 space-y-3">
+                <h3 class="text-sm font-semibold text-slate-900">Edit Instant host</h3>
+                <p class="text-xs text-amber-700">Address, location, ports, and capacity require the host to be drained and idle. Image changes affect only future containers.</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <input x-model="instantEditForm.name" placeholder="Host name" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <select x-model="instantEditForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <template x-for="loc in allLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
+                    </select>
+                    <input x-model="instantEditForm.public_ipv4" placeholder="Static public IPv4" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model.number="instantEditForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model.number="instantEditForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model="instantEditForm.version_pin" placeholder="Agent version pin (optional)" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <input x-model="instantEditForm.desired_image" placeholder="Image override (optional)" class="col-span-2 px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                </div>
+                <div class="flex gap-2 justify-end">
+                    <button @click="showInstantEditModal=false" class="px-3 py-1.5 text-xs bg-slate-200 rounded">Cancel</button>
+                    <button @click="saveInstantHost()" class="px-3 py-1.5 text-xs bg-green-600 text-white rounded">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Location Form Modal -->
     <div x-show="showLocModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" @keydown.escape.window="showLocModal = false">
         <div class="flex min-h-full items-center justify-center p-4">
@@ -1356,6 +1665,7 @@
                     <select x-model="locFormData.provider"
                         @change="if (!locEditMode && locFormData.provider_region) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
                         class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <option value="">Instant only (no cloud)</option>
                         <template x-for="p in providers" :key="p.code">
                             <option :value="p.code" x-text="p.name"></option>
                         </template>
@@ -1364,6 +1674,8 @@
                         @input="if (!locEditMode) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
                         class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                 </div>
+                <input x-model="locFormData.ping_url" placeholder="Ping URL (optional for any infrastructure)"
+                    class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                 <div class="grid grid-cols-2 gap-2">
                     <input x-model="locFormData.city" placeholder="City (e.g., Singapore)"
                         @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"

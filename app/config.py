@@ -71,6 +71,14 @@ class Settings(BaseSettings):
 
     # Agent heartbeat interval (system stats update frequency)
     agent_heartbeat_interval_sec: int = 10
+
+    # Enable operator-owned Instant hosts through the environment or admin settings.
+    instant_hosts_enabled: bool = False
+    instant_container_image: str = "ghcr.io/cometsmarsblackberry/tf2-summon/i386:nightly"
+    instant_host_offline_seconds: int = 30
+    instant_protocol_min: int = 1
+    instant_protocol_max: int = 1
+    agent_version: str = "0.2.0"
     
     # Reservation defaults
     max_duration_hours: int = 4  # Max reservation duration in hours

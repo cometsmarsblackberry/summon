@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -408,17 +409,20 @@ type ContainerConfig struct {
 	LogSecret         string
 	DemosTFAPIKey     string
 	LogsTFAPIKey      string
-	MOTDURL string
+	MOTDURL           string
 	// Server settings from config
 	FastDLURL      string
 	HostnameFormat string
 	AdminSteamIDs  []string
+	// External host ports. Zero values preserve the cloud defaults.
+	GamePort int
+	TVPort   int
+	Labels   map[string]string
 }
 
-// StartContainer creates and starts the TF2 container using podman CLI
-func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
-	log.Printf("Starting container: %s", cfg.Name)
-
+// BuildRunArgs builds deterministic rootless Podman arguments. RCON remains
+// reachable only inside the container; only game and SourceTV ports are bound.
+func BuildRunArgs(cfg ContainerConfig) []string {
 	// Build hostname from format string (e.g., "My Server #{number} | {location}")
 	hostname := cfg.HostnameFormat
 	hostname = strings.ReplaceAll(hostname, "{number}", fmt.Sprintf("%d", cfg.ReservationNumber))
@@ -431,6 +435,15 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 		mapDownloadURL += "/"
 	}
 	mapDownloadURL += "maps/"
+	instantRuntime := cfg.GamePort != 0 || cfg.TVPort != 0
+	gamePort := cfg.GamePort
+	if gamePort == 0 {
+		gamePort = 27015
+	}
+	tvPort := cfg.TVPort
+	if tvPort == 0 {
+		tvPort = 27020
+	}
 
 	// Build podman run command
 	args := []string{
@@ -438,10 +451,16 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 		"-d", // Detached mode
 		"--name", cfg.Name,
 		"--rm", // Auto-remove when stopped
-		// Port mappings
-		"-p", "27015:27015/tcp",
-		"-p", "27015:27015/udp",
-		"-p", "27020:27020/udp", // STV
+	}
+	// Instant hosts deliberately publish UDP only. Source RCON listens on the
+	// game server's TCP port, so a TCP mapping would make it public. Preserve
+	// the legacy cloud mapping exactly for disposable single-server VMs.
+	if !instantRuntime {
+		args = append(args, "-p", fmt.Sprintf("%d:27015/tcp", gamePort))
+	}
+	args = append(args,
+		"-p", fmt.Sprintf("%d:27015/udp", gamePort),
+		"-p", fmt.Sprintf("%d:27020/udp", tvPort), // STV
 		// Environment variables
 		"-e", fmt.Sprintf("SERVER_PASSWORD=%s", cfg.Password),
 		"-e", fmt.Sprintf("RCON_PASSWORD=%s", cfg.RCONPassword),
@@ -454,6 +473,14 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 		"-e", fmt.Sprintf("DEMOS_TF_APIKEY=%s", cfg.DemosTFAPIKey),
 		"-e", fmt.Sprintf("LOGS_TF_APIKEY=%s", cfg.LogsTFAPIKey),
 		"-e", fmt.Sprintf("MOTD_URL=%s", cfg.MOTDURL),
+	)
+	labelKeys := make([]string, 0, len(cfg.Labels))
+	for key := range cfg.Labels {
+		labelKeys = append(labelKeys, key)
+	}
+	sort.Strings(labelKeys)
+	for _, key := range labelKeys {
+		args = append(args, "--label", fmt.Sprintf("%s=%s", key, cfg.Labels[key]))
 	}
 
 	// Pass site admins as SourceMod admins
@@ -466,6 +493,13 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 		cfg.Image,
 		"+map", "cp_badlands", // Start map (will be changed via RCON)
 	)
+	return args
+}
+
+// StartContainer creates and starts the TF2 container using podman CLI
+func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (string, error) {
+	log.Printf("Starting container: %s", cfg.Name)
+	args := BuildRunArgs(cfg)
 
 	cmd := buildPodmanCmd(ctx, args...)
 	output, err := cmd.CombinedOutput()
@@ -475,7 +509,11 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 	}
 
 	containerID := strings.TrimSpace(string(output))
-	log.Printf("Container created and started: %s", containerID[:12])
+	shortID := containerID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	log.Printf("Container created and started: %s", shortID)
 	return containerID, nil
 }
 
@@ -490,12 +528,98 @@ func (c *Client) StopContainer(ctx context.Context, containerID string) error {
 	cmd := buildPodmanCmd(ctx, "stop", "-t", "10", containerID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		lower := strings.ToLower(string(output))
+		if strings.Contains(lower, "no such container") || strings.Contains(lower, "not found") {
+			return nil
+		}
 		log.Printf("Stop failed: %s", string(output))
 		return fmt.Errorf("podman stop failed: %w (output: %s)", err, string(output))
 	}
 
 	log.Println("Container stopped")
 	return nil
+}
+
+// ManagedContainer is one labeled TF2 container discovered after an agent restart.
+type ManagedContainer struct {
+	ID     string            `json:"container_id"`
+	Name   string            `json:"name"`
+	State  string            `json:"state"`
+	Labels map[string]string `json:"labels"`
+	Stats  map[string]any    `json:"stats,omitempty"`
+}
+
+// ListManagedContainers returns complete Instant container inventory from labels.
+func (c *Client) ListManagedContainers(ctx context.Context) ([]ManagedContainer, error) {
+	cmd := buildPodmanCmd(ctx, "ps", "-a", "--filter", "label=summon.runtime=instant", "--format", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("podman ps: %w (output: %s)", err, string(output))
+	}
+	var raw []struct {
+		ID     string            `json:"Id"`
+		IDAlt  string            `json:"ID"`
+		Names  []string          `json:"Names"`
+		State  string            `json:"State"`
+		Status string            `json:"Status"`
+		Labels map[string]string `json:"Labels"`
+	}
+	if len(strings.TrimSpace(string(output))) == 0 {
+		return nil, nil
+	}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("parse podman inventory: %w", err)
+	}
+	containers := make([]ManagedContainer, 0, len(raw))
+	for _, item := range raw {
+		id := item.ID
+		if id == "" {
+			id = item.IDAlt
+		}
+		name := ""
+		if len(item.Names) > 0 {
+			name = item.Names[0]
+		}
+		state := item.State
+		if state == "" {
+			state = item.Status
+		}
+		containers = append(containers, ManagedContainer{
+			ID: id, Name: name, State: state, Labels: item.Labels,
+		})
+	}
+	return containers, nil
+}
+
+// ContainerStats returns one no-stream Podman stats sample.
+func (c *Client) ContainerStats(ctx context.Context, containerID string) (map[string]any, error) {
+	cmd := buildPodmanCmd(ctx, "stats", "--no-stream", "--format", "json", containerID)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("podman stats: %w (output: %s)", err, string(output))
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(output, &rows); err != nil {
+		return nil, fmt.Errorf("parse podman stats: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return rows[0], nil
+}
+
+// ImageDigest resolves a prepared mutable image reference to its immutable digest.
+func (c *Client) ImageDigest(ctx context.Context, image string) (string, error) {
+	cmd := buildPodmanCmd(ctx, "image", "inspect", "--format", "{{.Digest}}", image)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("podman image inspect: %w (output: %s)", err, string(output))
+	}
+	digest := strings.TrimSpace(string(output))
+	if digest == "" || digest == "<no value>" {
+		return "", fmt.Errorf("image has no repository digest")
+	}
+	return digest, nil
 }
 
 // GetContainerStatus returns whether the container is running using podman CLI

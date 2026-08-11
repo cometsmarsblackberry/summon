@@ -482,6 +482,7 @@ async def export_account_data(
                 "reservation_number": r.reservation_number,
                 "location": r.location,
                 "status": r.status.value,
+                "runtime_kind": getattr(r.runtime_kind, "value", r.runtime_kind),
                 "first_map": r.first_map,
                 "starts_at": fmt_dt(r.starts_at),
                 "ends_at": fmt_dt(r.ends_at),
@@ -545,25 +546,16 @@ async def delete_account(
     for reservation in active_reservations:
         reservation.status = ReservationStatus.ENDED
         reservation.ended_at = datetime.now(timezone.utc)
-        if reservation.instance_id:
-            try:
-                from app.routers.internal import send_container_stop
-                from app.models.instance import CloudInstance
-                from app.services.orchestrator import release_to_warm_pool, destroy_instance, is_hourly_billing
-
-                ci_result = await db.execute(
-                    select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-                )
-                cloud_instance = ci_result.scalar_one_or_none()
-                if cloud_instance:
-                    await send_container_stop(cloud_instance.instance_id)
-
-                if await is_hourly_billing(reservation.location, db):
-                    await release_to_warm_pool(reservation.instance_id, db)
-                else:
-                    await destroy_instance(reservation.instance_id, db)
-            except Exception:
-                logger.warning("Failed to clean up instance for reservation %s", reservation.id, exc_info=True)
+        try:
+            from app.services.runtime import end_reservation_runtime
+            await end_reservation_runtime(
+                reservation,
+                db,
+                was_active=reservation.started_at is not None,
+                had_started=reservation.started_at is not None,
+            )
+        except Exception:
+            logger.warning("Failed to clean up runtime for reservation %s", reservation.id, exc_info=True)
 
         from app.services.timer import cancel_expiry_timer
         cancel_expiry_timer(reservation.id)

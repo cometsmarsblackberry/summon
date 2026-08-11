@@ -91,6 +91,45 @@ async def lifespan(app: FastAPI):
     from app.services.timer import restore_expiry_timers
     await restore_expiry_timers()
 
+    # A process can stop after an Instant failure commits its cloud-fallback
+    # decision but before the detached provider worker starts. Resume only
+    # those history-backed, instance-less fallbacks; ordinary cloud
+    # provisioning remains on its existing path and is never duplicated.
+    from app.models.instant import InstantAssignment
+    from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
+    from app.routers.reservations import provision_reservation_background
+    from sqlalchemy import select
+    fallback_recovery_tasks: set[asyncio.Task] = set()
+    async with async_session_maker() as db:
+        fallback_rows = await db.execute(
+            select(Reservation.id)
+            .join(
+                InstantAssignment,
+                InstantAssignment.reservation_id == Reservation.id,
+            )
+            .where(
+                Reservation.runtime_kind == RuntimeKind.CLOUD,
+                Reservation.instance_id.is_(None),
+                Reservation.status.in_((
+                    ReservationStatus.PENDING,
+                    ReservationStatus.PROVISIONING,
+                )),
+            )
+            .distinct()
+        )
+        fallback_ids = list(fallback_rows.scalars().all())
+    for reservation_id in fallback_ids:
+        task = asyncio.create_task(provision_reservation_background(
+            reservation_id, settings.database_url
+        ))
+        fallback_recovery_tasks.add(task)
+        task.add_done_callback(fallback_recovery_tasks.discard)
+    if fallback_ids:
+        logger.info(
+            "Resumed %s interrupted Instant-to-cloud fallback(s)",
+            len(fallback_ids),
+        )
+
     logger.info(f"Cloud provider configured: {settings.cloud_configured}")
     logger.info(f"Steam API configured: {settings.steam_configured}")
     logger.info("Beta mode: %s", settings.beta_mode)
@@ -124,10 +163,9 @@ async def lifespan(app: FastAPI):
     # Start background task for instance cleanup and sync
     async def cleanup_loop():
         from app.services.orchestrator import cleanup_expired_instances, sync_cloud_instances
-        from app.services.orchestrator import release_to_warm_pool, destroy_instance, is_hourly_billing
         from app.models.reservation import Reservation, ReservationStatus
-        from app.models.instance import CloudInstance
-        from app.routers.internal import clear_player_data, send_to_agent
+        from app.routers.internal import clear_player_data
+        from app.services.runtime import end_reservation_runtime
         from sqlalchemy import select
         from datetime import datetime, timedelta, timezone
 
@@ -167,23 +205,16 @@ async def lifespan(app: FastAPI):
                             from app.services.timer import cancel_expiry_timer
                             cancel_expiry_timer(reservation.id)
 
-                            if reservation.instance_id:
-                                # Notify agent to stop container
-                                ci_result = await db.execute(
-                                    select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-                                )
-                                cloud_instance = ci_result.scalar_one_or_none()
-                                if cloud_instance:
-                                    await send_to_agent(cloud_instance.instance_id, {"type": "reservation.end"})
-
-                                # Release or destroy based on billing model
-                                if await is_hourly_billing(reservation.location, db):
-                                    await release_to_warm_pool(reservation.instance_id, db)
-                                else:
-                                    await destroy_instance(reservation.instance_id, db)
+                            await end_reservation_runtime(
+                                reservation,
+                                db,
+                                was_active=True,
+                                had_started=reservation.started_at is not None,
+                            )
 
                         if empty_reservations:
                             await db.commit()
+
                 except Exception as e:
                     logger.error(f"Auto-end error: {e}")
 
@@ -199,12 +230,55 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(60)  # Run every minute
     
     cleanup_task = asyncio.create_task(cleanup_loop())
+
+    async def instant_heartbeat_loop():
+        """Persist the 30-second offline transition independently of cloud cleanup."""
+        from app.models.instant import InstantHost
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+
+        while True:
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(
+                    seconds=settings.instant_host_offline_seconds
+                )
+                async with async_session_maker() as db:
+                    result = await db.execute(select(InstantHost).where(
+                        InstantHost.deleted_at.is_(None),
+                        InstantHost.last_heartbeat_at.is_not(None),
+                        InstantHost.last_heartbeat_at < cutoff,
+                        InstantHost.health_status != "offline",
+                    ))
+                    stale_hosts = list(result.scalars().all())
+                    for host in stale_hosts:
+                        host.health_status = "offline"
+                    if stale_hosts:
+                        await db.commit()
+                        logger.warning(
+                            "instant_event=heartbeat_loss hosts=%s host_ids=%s",
+                            len(stale_hosts),
+                            ",".join(str(host.id) for host in stale_hosts),
+                        )
+            except Exception:
+                logger.exception("Instant heartbeat monitor failed")
+            await asyncio.sleep(10)
+
+    instant_heartbeat_task = asyncio.create_task(instant_heartbeat_loop())
     
     yield
     
     # Shutdown
     from app.services.timer import cancel_all_expiry_timers
     cancel_all_expiry_timers()
+    for task in fallback_recovery_tasks:
+        task.cancel()
+    if fallback_recovery_tasks:
+        await asyncio.gather(*fallback_recovery_tasks, return_exceptions=True)
+    instant_heartbeat_task.cancel()
+    try:
+        await instant_heartbeat_task
+    except asyncio.CancelledError:
+        pass
     cleanup_task.cancel()
     try:
         await cleanup_task
