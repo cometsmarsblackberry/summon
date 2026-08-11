@@ -12,11 +12,12 @@
     </div>
     {% endif %}
 
-    <div class="{{ 'bg-white shadow-sm rounded-lg border border-slate-200 p-6' if uses_legacy_layout else '' }}" x-data="{
+    <div x-data="{
         status: '{{ reservation.status.value }}',
         locale: '{{ request.state.locale|default('en') }}',
         currentMap: '{{ reservation.first_map }}',
         endsAt: '{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:00Z') }}',
+        endedAt: '{{ reservation.ended_at.strftime('%Y-%m-%dT%H:%M:%SZ') if reservation.ended_at else '' }}',
         connection: null,
         error: null,
         bootProgress: null,
@@ -66,6 +67,16 @@
                 && date.getDate() === tomorrow.getDate();
             const time = this.formatLocal(value);
             return isTomorrow ? 'tomorrow at ' + time : time;
+        },
+
+        formatEndedTime(value) {
+            if (!value) return '';
+            const date = new Date(this.normalizeIso(value));
+            if (Number.isNaN(date.getTime())) return '';
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return day + '/' + month + '/' + year + ' ' + this.formatLocal(value);
         },
 
         formatUtc(value) {
@@ -610,7 +621,7 @@
             return s + 's';
         }
     }">
-        <section class="{{ '' if uses_legacy_layout else 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6' }}">
+        <section class="{{ 'rounded-lg border border-slate-200 bg-white p-6 shadow-sm' if uses_legacy_layout else 'rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6' }}">
         <div class="flex items-center justify-between {{ 'mb-4' if uses_legacy_layout else 'mb-2' }}">
             <h1 class="flex items-center gap-2 text-lg font-semibold">
                 {{ _('status.heading', number=reservation.reservation_number) }}
@@ -695,14 +706,21 @@
                 </span>
             </div>
             <div class="flex justify-between text-sm">
+                {% if is_ended %}
+                <span class="text-slate-500">{{ _('status.ended_at') }}</span>
+                <span class="text-slate-800" :title="formatUtc(endedAt)" x-text="formatEndedTime(endedAt)"></span>
+                {% else %}
                 <span class="text-slate-500">{{ _('status.ends_at') }}</span>
                 <span class="text-slate-800" :title="formatUtc(endsAt)" x-text="formatEndTime(endsAt)"></span>
+                {% endif %}
             </div>
+            {% if not is_ended %}
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500">{{ _('status.auto_end_when_empty') }}</span>
                 <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default') }}</span>
                 <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800" x-text="formatAutoEnd(autoEndRemaining)"></span>
             </div>
+            {% endif %}
         </div>
         {% else %}
         <div class="space-y-2">

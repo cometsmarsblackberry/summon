@@ -87,6 +87,7 @@
         "location": "สถานที่",
         "map": "แผนที่",
         "ends_at": "สิ้นสุดเมื่อ",
+        "ended_at": "สิ้นสุดแล้วเมื่อ",
         "auto_end_when_empty": "สิ้นสุดอัตโนมัติเมื่อว่างเปล่า",
         "auto_end_default": "30 นาที",
         "connection_details": "รายละเอียดการเชื่อมต่อ",

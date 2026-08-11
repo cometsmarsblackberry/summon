@@ -87,6 +87,7 @@
         "location": "Lokasyon",
         "map": "Mapa",
         "ends_at": "Magtatapos sa",
+        "ended_at": "Natapos noong",
         "auto_end_when_empty": "Awtomatikong magtatapos kapag walang laman",
         "auto_end_default": "30 min",
         "connection_details": "Mga Detalye ng Koneksyon",

@@ -87,6 +87,7 @@
         "location": "Lokasi",
         "map": "Peta",
         "ends_at": "Tamat pada",
+        "ended_at": "Telah tamat pada",
         "auto_end_when_empty": "Tamat automatik apabila kosong",
         "auto_end_default": "30 min",
         "connection_details": "Butiran Sambungan",

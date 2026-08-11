@@ -87,6 +87,7 @@
         "location": "Sijainti",
         "map": "Kartta",
         "ends_at": "Päättyy klo",
+        "ended_at": "Päättyi klo",
         "auto_end_when_empty": "Automaattinen lopetus tyhjänä",
         "auto_end_default": "30 min",
         "connection_details": "Yhteystiedot",

@@ -87,6 +87,7 @@
         "location": "ロケーション",
         "map": "マップ",
         "ends_at": "終了時刻",
+        "ended_at": "終了日時",
         "auto_end_when_empty": "空になったら自動終了",
         "auto_end_default": "30分",
         "connection_details": "接続詳細",
