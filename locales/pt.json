@@ -87,6 +87,7 @@
         "location": "Local",
         "map": "Mapa",
         "ends_at": "Termina às",
+        "ended_at": "Terminou às",
         "auto_end_when_empty": "Encerrar automaticamente quando vazio",
         "auto_end_default": "30 min",
         "connection_details": "Detalhes de conexão",

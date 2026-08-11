@@ -87,6 +87,7 @@
         "location": "위치",
         "map": "맵",
         "ends_at": "종료 시간",
+        "ended_at": "종료된 시각",
         "auto_end_when_empty": "비었을 때 자동 종료",
         "auto_end_default": "30분",
         "connection_details": "연결 세부 정보",

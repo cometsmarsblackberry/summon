@@ -87,6 +87,7 @@
         "location": "Plats",
         "map": "Karta",
         "ends_at": "Avslutas",
+        "ended_at": "Avslutades",
         "auto_end_when_empty": "Autoslut när tom",
         "auto_end_default": "30 min",
         "connection_details": "Anslutningsdetaljer",

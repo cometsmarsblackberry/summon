@@ -87,6 +87,7 @@
         "location": "Địa điểm",
         "map": "Bản đồ",
         "ends_at": "Kết thúc lúc",
+        "ended_at": "Đã kết thúc lúc",
         "auto_end_when_empty": "Tự kết thúc khi trống",
         "auto_end_default": "30 phút",
         "connection_details": "Chi tiết kết nối",

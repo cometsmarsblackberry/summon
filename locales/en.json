@@ -88,6 +88,7 @@
         "location": "Location",
         "map": "Map",
         "ends_at": "Ends at",
+        "ended_at": "Ended at",
         "auto_end_when_empty": "Auto-end when empty",
         "auto_end_default": "30 min",
         "auto_end_explanation": "Auto-ends after 30 min empty",
