@@ -484,6 +484,64 @@ bool IsSafeOwnerCommandLine(const char[] commandLine)
     return true;
 }
 
+bool IsSafeTournamentWhitelistPath(const char[] path)
+{
+    int length = strlen(path);
+
+    // An empty value removes the active whitelist. Non-empty values must stay
+    // inside cfg, use a plain portable filename, and already exist in the
+    // game's filesystem search path.
+    if (length == 0)
+        return true;
+
+    if (length < 9
+        || length >= PLATFORM_MAX_PATH
+        || StrContains(path, "cfg/", false) != 0
+        || StrContains(path, "..") != -1
+        || StrContains(path, "\\") != -1
+        || !StrEqual(path[length - 4], ".txt", false))
+    {
+        return false;
+    }
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = path[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        if (!isLetter && !isDigit
+            && character != '_'
+            && character != '-'
+            && character != '.'
+            && character != '/')
+        {
+            return false;
+        }
+    }
+
+    return FileExists(path, true);
+}
+
+bool AreOwnerCommandArgumentsAllowed(const char[] operation, int args)
+{
+    if (!StrEqual(operation, "mp_tournament_whitelist"))
+        return true;
+
+    // Reading the current value takes no value argument. Setting it takes one
+    // path argument; accepting more would make the native parsing ambiguous.
+    if (args == 1)
+        return true;
+
+    if (args != 2)
+        return false;
+
+    char path[PLATFORM_MAX_PATH];
+    GetCmdArg(2, path, sizeof(path));
+    return IsSafeTournamentWhitelistPath(path);
+}
+
 bool TryConsumeOwnerCommandCooldown()
 {
     float now = GetEngineTime();
@@ -614,6 +672,15 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
         || !IsSafeOwnerCommandLine(commandLine))
     {
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That command line is not safe to run.");
+        return Plugin_Handled;
+    }
+
+    if (!AreOwnerCommandArgumentsAllowed(operation, args))
+    {
+        PrintToChat(
+            client,
+            "\x01[\x07FF6600Reserve\x01] \x07FF6666That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files."
+        );
         return Plugin_Handled;
     }
 
