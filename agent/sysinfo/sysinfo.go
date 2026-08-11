@@ -11,22 +11,22 @@ import (
 
 // Stats holds a snapshot of system metrics.
 type Stats struct {
-	CPUModel     string  `json:"cpu_model"`
-	CPUPercent   float64 `json:"cpu_percent"`
-	MemTotalMB   int     `json:"mem_total_mb"`
-	MemUsedMB    int     `json:"mem_used_mb"`
-	MemPercent   float64 `json:"mem_percent"`
-	SwapTotalMB  int     `json:"swap_total_mb"`
-	SwapUsedMB   int     `json:"swap_used_mb"`
-	SwapPercent  float64 `json:"swap_percent"`
-	DiskTotalGB  float64 `json:"disk_total_gb"`
-	DiskUsedGB   float64 `json:"disk_used_gb"`
-	DiskPercent  float64 `json:"disk_percent"`
-	UptimeSec    int     `json:"uptime_sec"`
-	LoadAvg1     float64 `json:"load_avg_1"`
-	LoadAvg5     float64 `json:"load_avg_5"`
-	LoadAvg15    float64 `json:"load_avg_15"`
-	NumCPUs      int     `json:"num_cpus"`
+	CPUModel    string  `json:"cpu_model"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemTotalMB  int     `json:"mem_total_mb"`
+	MemUsedMB   int     `json:"mem_used_mb"`
+	MemPercent  float64 `json:"mem_percent"`
+	SwapTotalMB int     `json:"swap_total_mb"`
+	SwapUsedMB  int     `json:"swap_used_mb"`
+	SwapPercent float64 `json:"swap_percent"`
+	DiskTotalGB float64 `json:"disk_total_gb"`
+	DiskUsedGB  float64 `json:"disk_used_gb"`
+	DiskPercent float64 `json:"disk_percent"`
+	UptimeSec   int     `json:"uptime_sec"`
+	LoadAvg1    float64 `json:"load_avg_1"`
+	LoadAvg5    float64 `json:"load_avg_5"`
+	LoadAvg15   float64 `json:"load_avg_15"`
+	NumCPUs     int     `json:"num_cpus"`
 }
 
 // cpuTimes holds cumulative CPU jiffies from /proc/stat.

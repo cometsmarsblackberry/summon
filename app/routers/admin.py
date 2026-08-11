@@ -3,6 +3,7 @@
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.user import User
 from app.models.reservation import Reservation, ReservationStatus
@@ -21,6 +23,7 @@ from app.models.instance import (
     LocationProvider,
     Provider,
 )
+from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.models.cost import MonthlyCost
 from app.routers.auth import require_admin
 from app.services.orchestrator import get_enabled_locations
@@ -78,8 +81,8 @@ class CreateLocationRequest(BaseModel):
     """Request to create a new location."""
     code: str
     name: str
-    provider: str = "vultr"
-    provider_region: str
+    provider: str | None = None
+    provider_region: str | None = None
     billing_model: str = "hourly"
     city: str | None = None
     country: str | None = None
@@ -88,6 +91,7 @@ class CreateLocationRequest(BaseModel):
     recommended: bool = False
     instance_plan: str | None = None
     region_instance_limit: int | None = None
+    ping_url: str | None = None
 
 
 class UpdateLocationRequest(BaseModel):
@@ -103,6 +107,7 @@ class UpdateLocationRequest(BaseModel):
     recommended: bool | None = None
     instance_plan: str | None = None
     region_instance_limit: int | None = None
+    ping_url: str | None = None
 
 
 class CreateProviderRequest(BaseModel):
@@ -166,7 +171,13 @@ async def admin_panel(
     from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Reservation)
-        .options(selectinload(Reservation.user), selectinload(Reservation.cloud_instance))
+        .options(
+            selectinload(Reservation.user),
+            selectinload(Reservation.cloud_instance),
+            selectinload(Reservation.instant_assignments)
+            .selectinload(InstantAssignment.slot)
+            .selectinload(InstantSlot.host),
+        )
         .order_by(Reservation.created_at.desc())
         .limit(200)
     )
@@ -186,6 +197,7 @@ async def admin_panel(
             "instance_id": r.cloud_instance.instance_id if r.cloud_instance else r.instance_id,
             "cloud_instance_db_id": r.cloud_instance.id if r.cloud_instance else r.instance_id,
             "status": r.status.value,
+            "runtime_kind": getattr(r.runtime_kind, "value", r.runtime_kind),
             "user_name": r.user.display_name if r.user else "Unknown",
             "user_steam_id": r.user.steam_id if r.user else None,
             "starts_at": r.starts_at.isoformat() if r.starts_at else None,
@@ -194,6 +206,9 @@ async def admin_panel(
             "first_map": r.first_map,
             "sdr_ip": r.sdr_ip,
             "ip_address": r.cloud_instance.ip_address if r.cloud_instance else None,
+            "direct_ip": r.direct_ip,
+            "direct_port": r.direct_port,
+            "direct_tv_port": r.direct_tv_port,
         }
         for r in reservations
     ]
@@ -215,6 +230,7 @@ async def admin_panel(
             "display_order": loc.display_order,
             "instance_plan": loc.instance_plan,
             "region_instance_limit": loc.region_instance_limit,
+            "ping_url": loc.ping_url,
         }
         for loc in locations
     ]
@@ -327,6 +343,34 @@ async def admin_panel(
     reservation_settings = await get_reservation_settings(db)
     captcha_settings = await get_captcha_settings(db)
 
+    # Instant host metadata is safe to embed in the admin page. Credentials,
+    # enrollment token hashes, and historical assignments are never included.
+    from app.services.instant_hosts import get_admin_counters, serialize_host
+    host_result = await db.execute(
+        select(InstantHost)
+        .options(selectinload(InstantHost.slots))
+        .where(InstantHost.deleted_at.is_(None))
+        .order_by(InstantHost.location, InstantHost.name)
+    )
+    instant_hosts = list(host_result.scalars().all())
+    open_result = await db.execute(
+        select(InstantAssignment)
+        .join(InstantSlot, InstantAssignment.slot_id == InstantSlot.id)
+        .where(InstantAssignment.closed_at.is_(None))
+    )
+    open_by_slot = {a.slot_id: a for a in open_result.scalars().all()}
+    instant_hosts_data = [
+        serialize_host(
+            host,
+            slots=host.slots,
+            open_by_slot={slot.id: open_by_slot[slot.id] for slot in host.slots if slot.id in open_by_slot},
+        )
+        for host in instant_hosts
+    ]
+    from app.services.settings import get_instant_settings
+    instant_settings = await get_instant_settings(db)
+    instant_metrics = await get_admin_counters(db)
+
     return templates.TemplateResponse(
         request,
         "admin/index.html",
@@ -348,6 +392,9 @@ async def admin_panel(
             "reservation_settings": reservation_settings,
             "captcha_settings": captcha_settings,
             "trivia": trivia_data,
+            "instant_hosts": instant_hosts_data,
+            "instant_settings": instant_settings,
+            "instant_metrics": instant_metrics,
         }
     )
 
@@ -394,6 +441,13 @@ async def create_location(
 
     if request.region_instance_limit is not None and request.region_instance_limit < 1:
         raise HTTPException(status_code=400, detail="region_instance_limit must be >= 1")
+    if bool(request.provider) != bool(request.provider_region):
+        raise HTTPException(
+            status_code=400,
+            detail="provider and provider_region must either both be set or both be omitted",
+        )
+    if request.ping_url and not request.ping_url.startswith(("https://", "http://")):
+        raise HTTPException(status_code=400, detail="ping_url must use http or https")
 
     subdivision = normalize_subdivision(request.subdivision) if request.subdivision else None
 
@@ -411,6 +465,7 @@ async def create_location(
         recommended=request.recommended,
         instance_plan=request.instance_plan or None,
         region_instance_limit=request.region_instance_limit,
+        ping_url=request.ping_url.strip() if request.ping_url else None,
         enabled=True,
         display_order=max_order + 1,
     )
@@ -445,11 +500,13 @@ async def update_location(
     # Update only provided fields
     if request.name is not None:
         location.name = request.name
-    if request.provider is not None:
-        location.provider = request.provider
-    if request.provider_region is not None:
-        location.provider_region = request.provider_region
-        if location.provider == "vultr":
+    if "provider" in request.model_fields_set:
+        location.provider = request.provider or None
+        if not location.provider:
+            location.vultr_region = None
+    if "provider_region" in request.model_fields_set:
+        location.provider_region = request.provider_region or None
+        if location.provider == "vultr" and request.provider_region:
             location.vultr_region = request.provider_region
     if request.display_order is not None:
         location.display_order = request.display_order
@@ -469,6 +526,15 @@ async def update_location(
         if request.region_instance_limit < 1:
             raise HTTPException(status_code=400, detail="region_instance_limit must be >= 1")
         location.region_instance_limit = request.region_instance_limit
+    if "ping_url" in request.model_fields_set:
+        if request.ping_url and not request.ping_url.startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail="ping_url must use http or https")
+        location.ping_url = request.ping_url.strip() if request.ping_url else None
+    if bool(location.provider) != bool(location.provider_region):
+        raise HTTPException(
+            status_code=400,
+            detail="provider and provider_region must either both be set or both be omitted",
+        )
 
     await db.commit()
 
@@ -483,6 +549,7 @@ async def update_location(
         "provider_region": location.provider_region,
         "billing_model": location.billing_model,
         "recommended": location.recommended,
+        "ping_url": location.ping_url,
     }
 
 
@@ -531,11 +598,424 @@ async def delete_location(
             status_code=400,
             detail=f"Cannot delete location with {instance_count} active instance(s)"
         )
+
+    host_count_result = await db.execute(
+        select(func.count(InstantHost.id)).where(InstantHost.location == location_code)
+    )
+    if host_count_result.scalar_one() > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete a location with Instant host history",
+        )
     
     await db.delete(location)
     await db.commit()
     
     return {"deleted": True, "code": location_code}
+
+
+# ==================== INSTANT HOSTS ====================
+
+class CreateInstantHostRequest(BaseModel):
+    name: str
+    location: str
+    public_ipv4: str
+    slot_count: int = 1
+    base_port: int = 27015
+    desired_image: str | None = None
+
+
+class UpdateInstantHostRequest(BaseModel):
+    name: str | None = None
+    location: str | None = None
+    public_ipv4: str | None = None
+    slot_count: int | None = None
+    base_port: int | None = None
+    desired_image: str | None = None
+    version_pin: str | None = None
+
+
+class InstantHostStateRequest(BaseModel):
+    enabled: bool
+
+
+class InstantHostDrainRequest(BaseModel):
+    draining: bool
+
+
+class PrepareInstantImageRequest(BaseModel):
+    image: str | None = None
+
+
+async def _load_host_or_404(
+    host_id: int, db: AsyncSession, *, include_deleted: bool = False
+) -> InstantHost:
+    result = await db.execute(
+        select(InstantHost)
+        .options(selectinload(InstantHost.slots))
+        .where(InstantHost.id == host_id)
+    )
+    host = result.scalar_one_or_none()
+    if host is None or (host.deleted_at is not None and not include_deleted):
+        raise HTTPException(status_code=404, detail="Instant host not found")
+    return host
+
+
+async def _serialize_admin_host(host: InstantHost, db: AsyncSession) -> dict:
+    from app.services.instant_hosts import serialize_host
+    result = await db.execute(
+        select(InstantAssignment)
+        .join(InstantSlot, InstantAssignment.slot_id == InstantSlot.id)
+        .where(
+            InstantSlot.host_id == host.id,
+            InstantAssignment.closed_at.is_(None),
+        )
+    )
+    assignments = {item.slot_id: item for item in result.scalars().all()}
+    return serialize_host(host, slots=host.slots, open_by_slot=assignments)
+
+
+@router.get("/instant-hosts")
+async def list_instant_hosts(
+    include_deleted: bool = False,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(InstantHost).options(selectinload(InstantHost.slots))
+    if not include_deleted:
+        query = query.where(InstantHost.deleted_at.is_(None))
+    hosts = list((await db.execute(
+        query.order_by(InstantHost.location, InstantHost.name)
+    )).scalars().all())
+    return {"hosts": [await _serialize_admin_host(host, db) for host in hosts]}
+
+
+@router.get("/instant-hosts/metrics")
+async def get_instant_host_metrics(
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import get_admin_counters
+    return await get_admin_counters(db)
+
+
+@router.get("/instant-hosts/{host_id}")
+async def get_instant_host(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _serialize_admin_host(await _load_host_or_404(host_id, db), db)
+
+
+@router.post("/instant-hosts", status_code=201)
+async def create_instant_host(
+    request: CreateInstantHostRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import InstantHostError, create_host
+    try:
+        host, token = await create_host(
+            db,
+            name=request.name,
+            location=request.location,
+            public_ipv4=request.public_ipv4,
+            slot_count=request.slot_count,
+            base_port=request.base_port,
+            desired_image=request.desired_image,
+        )
+    except InstantHostError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload = await _serialize_admin_host(
+        await _load_host_or_404(host.id, db), db
+    )
+    payload.update({
+        "enrollment_token": token,
+        "enrollment_expires_at": host.enrollment_expires_at,
+        "installer_url": f"{get_settings().base_url}/static/install-instant-host.sh",
+    })
+    return payload
+
+
+@router.put("/instant-hosts/{host_id}")
+async def update_instant_host(
+    host_id: int,
+    request: UpdateInstantHostRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import (
+        InstantHostError, configure_slots, generate_slot_ports,
+        host_has_open_assignments, validate_image_reference, validate_public_ipv4,
+    )
+    host = await _load_host_or_404(host_id, db)
+    capacity_change = request.slot_count is not None or request.base_port is not None
+    identity_change = request.location is not None or request.public_ipv4 is not None
+    if (capacity_change or identity_change) and (
+        not host.draining or await host_has_open_assignments(db, host.id)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Host must be drained and idle before changing address, location, or capacity",
+        )
+    if request.name is not None:
+        name = request.name.strip()
+        if not name or len(name) > 64:
+            raise HTTPException(status_code=400, detail="Invalid host name")
+        host.name = name
+    if request.location is not None:
+        if await db.get(EnabledLocation, request.location) is None:
+            raise HTTPException(status_code=400, detail="Location does not exist")
+        host.location = request.location
+    if request.public_ipv4 is not None:
+        try:
+            address = validate_public_ipv4(request.public_ipv4)
+        except InstantHostError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        duplicate = await db.execute(select(InstantHost.id).where(
+            InstantHost.public_ipv4 == address,
+            InstantHost.id != host.id,
+            InstantHost.deleted_at.is_(None),
+        ))
+        if duplicate.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=400, detail="Another Instant host uses this IPv4 address")
+        host.public_ipv4 = address
+    if "desired_image" in request.model_fields_set:
+        try:
+            host.desired_image = (
+                validate_image_reference(request.desired_image)
+                if request.desired_image else None
+            )
+        except InstantHostError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if "version_pin" in request.model_fields_set:
+        version_pin = request.version_pin.strip() if request.version_pin else ""
+        if len(version_pin) > 64 or any(ch.isspace() for ch in version_pin):
+            raise HTTPException(status_code=400, detail="Invalid agent version pin")
+        host.version_pin = version_pin or None
+
+    if capacity_change:
+        current_enabled = [slot for slot in host.slots if slot.enabled]
+        count = request.slot_count if request.slot_count is not None else len(current_enabled)
+        base = request.base_port
+        if base is None:
+            base = min((slot.game_port for slot in current_enabled), default=27015)
+        try:
+            generate_slot_ports(count, base)
+            await configure_slots(db, host, slot_count=count, base_port=base)
+        except InstantHostError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        await db.commit()
+    host = await _load_host_or_404(host.id, db)
+    from app.routers.internal import refresh_instant_host_configuration
+    await refresh_instant_host_configuration(host)
+    return await _serialize_admin_host(host, db)
+
+
+@router.post("/instant-hosts/{host_id}/enrollment-token")
+async def renew_instant_host_enrollment(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import InstantHostError, renew_enrollment
+    host = await _load_host_or_404(host_id, db)
+    try:
+        token = await renew_enrollment(db, host)
+    except InstantHostError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from app.routers.internal import connected_instant_hosts
+    socket = connected_instant_hosts.pop(host.id, None)
+    if socket is not None:
+        try:
+            await socket.close(code=4003, reason="Re-enrollment requested")
+        except Exception:
+            pass
+    return {"host_id": host.id, "enrollment_token": token, "expires_at": host.enrollment_expires_at}
+
+
+@router.post("/instant-hosts/{host_id}/state")
+async def set_instant_host_state(
+    host_id: int,
+    request: InstantHostStateRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import host_is_online, protocol_is_compatible
+    host = await _load_host_or_404(host_id, db)
+    if request.enabled:
+        from app.routers.internal import connected_instant_hosts
+        if not host.enrolled:
+            raise HTTPException(status_code=409, detail="Host must be enrolled first")
+        if not host_is_online(host) or host.id not in connected_instant_hosts:
+            raise HTTPException(status_code=409, detail="Host is offline")
+        if not protocol_is_compatible(host):
+            raise HTTPException(status_code=409, detail="Agent protocol is incompatible")
+        if host.health_status not in {"ready", "healthy", "online", "degraded"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Host handshake and health checks must complete before enabling",
+            )
+        if not host.ready_image_digest:
+            raise HTTPException(status_code=409, detail="Host has no prepared TF2 image")
+    host.enabled = request.enabled
+    await db.commit()
+    from app.routers.internal import refresh_instant_host_configuration
+    await refresh_instant_host_configuration(host)
+    return {"id": host.id, "enabled": host.enabled}
+
+
+@router.post("/instant-hosts/{host_id}/drain")
+async def set_instant_host_drain(
+    host_id: int,
+    request: InstantHostDrainRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    host = await _load_host_or_404(host_id, db)
+    if not request.draining and host.update_status in {
+        "queued", "queued_offline", "checking", "waiting_for_idle",
+        "downloading", "activating",
+    }:
+        raise HTTPException(
+            status_code=409,
+            detail="Host cannot be undrained while an agent update is pending",
+        )
+    host.draining = request.draining
+    await db.commit()
+    from app.routers.internal import refresh_instant_host_configuration
+    await refresh_instant_host_configuration(host)
+    return {"id": host.id, "draining": host.draining}
+
+
+@router.post("/instant-hosts/{host_id}/credential")
+async def rotate_instant_host_credential(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import new_stable_credential
+    host = await _load_host_or_404(host_id, db)
+    credential = new_stable_credential(host)
+    host.enabled = False
+    host.health_status = "offline"
+    await db.commit()
+    from app.routers.internal import connected_instant_hosts
+    socket = connected_instant_hosts.pop(host.id, None)
+    if socket is not None:
+        try:
+            await socket.close(code=4003, reason="Credential rotated")
+        except Exception:
+            pass
+    return {
+        "host_id": host.id,
+        "credential": credential,
+        "message": "Copy this credential now; it will not be shown again",
+    }
+
+
+@router.post("/instant-hosts/{host_id}/image")
+async def prepare_instant_host_image(
+    host_id: int,
+    request: PrepareInstantImageRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import InstantHostError, validate_image_reference
+    from app.services.settings import get_instant_settings
+    host = await _load_host_or_404(host_id, db)
+    if request.image:
+        try:
+            host.desired_image = validate_image_reference(request.image)
+        except InstantHostError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    desired = host.desired_image or (await get_instant_settings(db))["container_image"]
+    host.image_status = "preparing"
+    host.image_error = None
+    await db.commit()
+    from app.routers.internal import send_instant_command
+    if not await send_instant_command(host.id, {
+        "type": "image.prepare",
+        "protocol": 1,
+        "command_id": uuid.uuid4().hex,
+        "host_id": host.id,
+        "image": desired,
+    }):
+        raise HTTPException(status_code=503, detail="Host agent is not connected")
+    return {"id": host.id, "image": desired, "status": host.image_status}
+
+
+@router.post("/instant-hosts/{host_id}/update")
+async def update_instant_host_agent(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    host = await _load_host_or_404(host_id, db)
+    host.update_auto_drained = not host.draining
+    host.draining = True
+    host.update_status = "queued"
+    host.update_error = None
+    await db.commit()
+    from app.routers.internal import send_instant_command
+    if not await send_instant_command(host.id, {
+        "type": "agent.update",
+        "protocol": 1,
+        "command_id": uuid.uuid4().hex,
+        "host_id": host.id,
+        "manifest_url": f"{get_settings().base_url}/internal/instant-hosts/{host.id}/agent-manifest",
+        "version_pin": host.version_pin,
+    }):
+        host.update_status = "queued_offline"
+        await db.commit()
+    return {"id": host.id, "draining": True, "update_status": host.update_status}
+
+
+@router.post("/instant-hosts/{host_id}/slots/{slot_id}/clear-error")
+async def clear_instant_slot_error(
+    host_id: int,
+    slot_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    slot = await db.get(InstantSlot, slot_id)
+    if slot is None or slot.host_id != host_id:
+        raise HTTPException(status_code=404, detail="Instant slot not found")
+    open_result = await db.execute(select(InstantAssignment.id).where(
+        InstantAssignment.slot_id == slot.id, InstantAssignment.closed_at.is_(None)
+    ))
+    if open_result.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Slot is assigned")
+    slot.error_code = None
+    slot.error_message = None
+    slot.quarantined_at = None
+    await db.commit()
+    return {"id": slot.id, "cleared": True}
+
+
+@router.delete("/instant-hosts/{host_id}")
+async def deregister_instant_host(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.instant_hosts import InstantHostError, soft_delete_host
+    host = await _load_host_or_404(host_id, db)
+    try:
+        await soft_delete_host(db, host)
+    except InstantHostError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Revoke routing locally; no command is sent and the VPS is never altered.
+    from app.routers.internal import connected_instant_hosts
+    socket = connected_instant_hosts.pop(host.id, None)
+    if socket is not None:
+        try:
+            await socket.close(code=4003, reason="Host deregistered")
+        except Exception:
+            pass
+    return {"id": host.id, "deleted": True}
 
 
 # ==================== PROVIDER CRUD ====================
@@ -1196,6 +1676,9 @@ class UpdateSettingsRequest(BaseModel):
     captcha_trust_after_n: int | None = None
     captcha_min_tf2_hours: int | None = None
     captcha_min_account_age_days: int | None = None
+    # Instant host rollout and site-wide TF2 image
+    instant_hosts_enabled: bool | None = None
+    instant_container_image: str | None = None
 
 
 @router.get("/settings")
@@ -1204,8 +1687,11 @@ async def get_settings_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Get current rate limit settings."""
-    from app.services.settings import get_rate_limit_settings
-    return await get_rate_limit_settings(db)
+    from app.services.settings import get_instant_settings, get_rate_limit_settings
+    return {
+        **await get_rate_limit_settings(db),
+        "instant": await get_instant_settings(db),
+    }
 
 
 @router.put("/settings")
@@ -1305,6 +1791,34 @@ async def update_settings_endpoint(
         url = request.fastdl_url.strip()
         if url:
             await set_setting("fastdl_url", url, db)
+    if request.instant_hosts_enabled is not None:
+        await set_setting(
+            "instant_hosts_enabled",
+            "true" if request.instant_hosts_enabled else "false",
+            db,
+        )
+    if request.instant_container_image is not None:
+        image = request.instant_container_image.strip()
+        if not image or len(image) > 255 or any(ch.isspace() for ch in image):
+            raise HTTPException(status_code=400, detail="Invalid Instant container image")
+        await set_setting("instant_container_image", image, db)
+        inheriting_hosts = list((await db.execute(select(InstantHost).where(
+            InstantHost.deleted_at.is_(None),
+            InstantHost.desired_image.is_(None),
+        ))).scalars().all())
+        for host in inheriting_hosts:
+            host.image_status = "preparing"
+            host.image_error = None
+        await db.commit()
+        from app.routers.internal import send_instant_command
+        for host in inheriting_hosts:
+            await send_instant_command(host.id, {
+                "type": "image.prepare",
+                "protocol": 1,
+                "command_id": uuid.uuid4().hex,
+                "host_id": host.id,
+                "image": image,
+            })
     return {"message": "Settings updated"}
 
 

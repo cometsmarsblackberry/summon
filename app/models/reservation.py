@@ -20,6 +20,13 @@ class ReservationStatus(enum.Enum):
     NO_SHOW = "no_show"           # Ended due to no players joining
 
 
+class RuntimeKind(enum.Enum):
+    """Runtime backing a reservation."""
+
+    CLOUD = "cloud"
+    INSTANT = "instant"
+
+
 class Reservation(Base):
     """Server reservation record."""
     
@@ -45,6 +52,20 @@ class Reservation(Base):
     
     # Cloud instance (nullable until provisioned)
     instance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Runtime selection. Existing rows are migrated to cloud. Instant
+    # reservations deliberately leave instance_id unset and are linked through
+    # their active InstantAssignment instead.
+    runtime_kind: Mapped[RuntimeKind] = mapped_column(
+        Enum(
+            RuntimeKind,
+            values_callable=lambda values: [value.value for value in values],
+            native_enum=False,
+        ),
+        default=RuntimeKind.CLOUD,
+        nullable=False,
+        index=True,
+    )
     
     # Timing
     starts_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -85,6 +106,12 @@ class Reservation(Base):
     sdr_ip: Mapped[str | None] = mapped_column(String(15), nullable=True)
     sdr_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sdr_tv_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Infrastructure-neutral direct connection details. Cloud reservations
+    # normally use 27015/27020; Instant slots use their generated host ports.
+    direct_ip: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    direct_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    direct_tv_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
     
     # Current map (updated during heartbeat)
     current_map: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -115,6 +142,11 @@ class Reservation(Base):
     )
     upload_links: Mapped[list["UploadLink"]] = relationship(
         "UploadLink", back_populates="reservation", order_by="UploadLink.created_at"
+    )
+    instant_assignments: Mapped[list["InstantAssignment"]] = relationship(
+        "InstantAssignment",
+        back_populates="reservation",
+        order_by="InstantAssignment.generation",
     )
     
     def __repr__(self) -> str:

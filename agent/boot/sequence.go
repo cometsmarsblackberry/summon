@@ -4,6 +4,7 @@ package boot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/summon/agent/podman"
+	"github.com/summon/agent/s3upload"
 	"github.com/summon/agent/sdr"
 	"github.com/summon/agent/websocket"
 )
@@ -81,11 +83,26 @@ type ReservationConfig struct {
 	// Added for warm pool reconfigure - allows agent to reconnect after restart
 	AuthToken  string `json:"auth_token,omitempty"`
 	InstanceID string `json:"instance_id,omitempty"`
+	// Persistent-host runtime context. Zero values preserve cloud behavior.
+	ExternalGamePort int               `json:"external_game_port,omitempty"`
+	ExternalTVPort   int               `json:"external_tv_port,omitempty"`
+	ContainerName    string            `json:"container_name,omitempty"`
+	StateDir         string            `json:"state_dir,omitempty"`
+	Labels           map[string]string `json:"labels,omitempty"`
+}
+
+// Reporter receives lifecycle events from a boot sequence. Both the legacy
+// cloud WebSocket client and a slot-scoped host reporter implement it.
+type Reporter interface {
+	SendBootProgress(stage string, progress int, message string) error
+	SendServerReady(ip string, port, tvPort int) error
+	SendServerReadyWithSDR(info websocket.ServerReadyInfo) error
+	SendCompetitiveConfigs(configs []string, containerImage string) error
 }
 
 // Sequence manages the boot sequence
 type Sequence struct {
-	ws          *websocket.Client
+	ws          Reporter
 	podman      *podman.Client
 	config      *ReservationConfig
 	containerID string
@@ -100,7 +117,7 @@ var (
 )
 
 // NewSequence creates a new boot sequence
-func NewSequence(ws *websocket.Client) *Sequence {
+func NewSequence(ws Reporter) *Sequence {
 	return &Sequence{
 		ws:     ws,
 		podman: podman.NewClient(""),
@@ -109,12 +126,41 @@ func NewSequence(ws *websocket.Client) *Sequence {
 
 // NewSequenceWithConfig creates a new boot sequence with a pre-loaded config.
 // Used for warm pool reconfiguration where config comes from WebSocket, not disk.
-func NewSequenceWithConfig(ws *websocket.Client, config *ReservationConfig) *Sequence {
+func NewSequenceWithConfig(ws Reporter, config *ReservationConfig) *Sequence {
 	return &Sequence{
 		ws:     ws,
 		podman: podman.NewClient(""),
 		config: config,
 	}
+}
+
+// NewAttachedSequence reconstructs a sequence for a labeled container found
+// after a persistent host-agent restart. It does not start another container.
+func NewAttachedSequence(ws Reporter, config *ReservationConfig, containerID string) *Sequence {
+	return &Sequence{
+		ws:          ws,
+		podman:      podman.NewClient(""),
+		config:      config,
+		containerID: containerID,
+	}
+}
+
+// LoadReservationConfig reads the slot-local configuration persisted by
+// SaveConfig. Host mode uses this to reattach RCON and upload operations after
+// either the backend or agent restarts.
+func LoadReservationConfig(stateDir string) (*ReservationConfig, error) {
+	if stateDir == "" {
+		return nil, fmt.Errorf("state directory is required")
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "reservation.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read reservation config: %w", err)
+	}
+	var config ReservationConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("parse reservation config: %w", err)
+	}
+	return &config, nil
 }
 
 // retry executes a function with exponential backoff
@@ -213,8 +259,12 @@ func (s *Sequence) Run() error {
 	var containerID string
 	err = retry("start container", MaxRetries, func() error {
 		var startErr error
+		containerName := s.config.ContainerName
+		if containerName == "" {
+			containerName = fmt.Sprintf("tf2-reservation-%d", s.config.ReservationNumber)
+		}
 		containerID, startErr = s.podman.StartContainer(ctx, podman.ContainerConfig{
-			Name:              fmt.Sprintf("tf2-reservation-%d", s.config.ReservationNumber),
+			Name:              containerName,
 			Image:             s.config.ContainerImage,
 			ReservationNumber: s.config.ReservationNumber,
 			Location:          s.config.Location,
@@ -230,6 +280,9 @@ func (s *Sequence) Run() error {
 			FastDLURL:         s.config.ServerSettings.FastDLURL,
 			HostnameFormat:    s.config.ServerSettings.HostnameFormat,
 			AdminSteamIDs:     s.config.AdminSteamIDs,
+			GamePort:          s.config.ExternalGamePort,
+			TVPort:            s.config.ExternalTVPort,
+			Labels:            s.config.Labels,
 		})
 		return startErr
 	})
@@ -386,8 +439,12 @@ func (s *Sequence) RunReconfigure() error {
 	var containerID string
 	err := retry("start container", MaxRetries, func() error {
 		var startErr error
+		containerName := s.config.ContainerName
+		if containerName == "" {
+			containerName = fmt.Sprintf("tf2-reservation-%d", s.config.ReservationNumber)
+		}
 		containerID, startErr = s.podman.StartContainer(ctx, podman.ContainerConfig{
-			Name:              fmt.Sprintf("tf2-reservation-%d", s.config.ReservationNumber),
+			Name:              containerName,
 			Image:             s.config.ContainerImage,
 			ReservationNumber: s.config.ReservationNumber,
 			Location:          s.config.Location,
@@ -403,6 +460,9 @@ func (s *Sequence) RunReconfigure() error {
 			FastDLURL:         s.config.ServerSettings.FastDLURL,
 			HostnameFormat:    s.config.ServerSettings.HostnameFormat,
 			AdminSteamIDs:     s.config.AdminSteamIDs,
+			GamePort:          s.config.ExternalGamePort,
+			TVPort:            s.config.ExternalTVPort,
+			Labels:            s.config.Labels,
 		})
 		return startErr
 	})
@@ -741,11 +801,16 @@ func (s *Sequence) SaveConfig() error {
 		return fmt.Errorf("no config to save")
 	}
 
-	configPaths := ConfigFilePaths()
-	if len(configPaths) == 0 {
-		return fmt.Errorf("no config path available")
+	configPath := ""
+	if s.config.StateDir != "" {
+		configPath = filepath.Join(s.config.StateDir, "reservation.json")
+	} else {
+		configPaths := ConfigFilePaths()
+		if len(configPaths) == 0 {
+			return fmt.Errorf("no config path available")
+		}
+		configPath = configPaths[0]
 	}
-	configPath := configPaths[0]
 
 	data, err := json.MarshalIndent(s.config, "", "  ")
 	if err != nil {
@@ -771,6 +836,73 @@ func (s *Sequence) GetContainerID() string {
 // GetConfig returns the current reservation config
 func (s *Sequence) GetConfig() *ReservationConfig {
 	return s.config
+}
+
+// ExecuteRCON runs one command in this sequence's isolated container.
+func (s *Sequence) ExecuteRCON(ctx context.Context, command string) (string, error) {
+	if s.config == nil || s.containerID == "" {
+		return "", fmt.Errorf("container or configuration unavailable")
+	}
+	return s.podman.ExecInContainerWithOutput(ctx, s.containerID, []string{
+		"/home/tf2/server/rcon",
+		"-H", "127.0.0.1",
+		"-p", "27015",
+		"-P", s.config.RCONPassword,
+		command,
+	})
+}
+
+// CollectLogs copies volatile server logs out of the --rm container before it
+// is stopped. An empty path means S3 storage is not configured.
+func (s *Sequence) CollectLogs(ctx context.Context) (string, error) {
+	if s.config == nil || s.containerID == "" || !s.config.S3Config.Configured() {
+		return "", nil
+	}
+	temporary, err := os.MkdirTemp("", "tf2-logs-*")
+	if err != nil {
+		return "", err
+	}
+	locations := []struct{ source, target string }{
+		{"/home/tf2/server/tf/addons/sourcemod/logs/.", "sourcemod"},
+		{"/home/tf2/server/tf/logs/.", "server"},
+	}
+	var copyErrors []error
+	for _, location := range locations {
+		destination := filepath.Join(temporary, location.target)
+		if err := os.MkdirAll(destination, 0755); err != nil {
+			copyErrors = append(copyErrors, err)
+			continue
+		}
+		if err := s.podman.CopyFromContainer(
+			ctx, s.containerID, location.source, destination,
+		); err != nil {
+			copyErrors = append(copyErrors, err)
+		}
+	}
+	if len(copyErrors) == len(locations) {
+		_ = os.RemoveAll(temporary)
+		return "", fmt.Errorf("copy server logs: %w", errors.Join(copyErrors...))
+	}
+	return temporary, nil
+}
+
+// UploadCollectedLogs uploads a previously collected directory and always
+// removes the temporary copy.
+func (s *Sequence) UploadCollectedLogs(ctx context.Context, directory string) error {
+	if directory == "" {
+		return nil
+	}
+	defer os.RemoveAll(directory)
+	if s.config == nil || !s.config.S3Config.Configured() {
+		return nil
+	}
+	config := &s3upload.Config{
+		Endpoint: s.config.S3Config.Endpoint, AccessKey: s.config.S3Config.AccessKey,
+		SecretKey: s.config.S3Config.SecretKey, Bucket: s.config.S3Config.Bucket,
+		Region: s.config.S3Config.Region,
+	}
+	prefix := fmt.Sprintf("reservations/%d", s.config.ReservationNumber)
+	return s3upload.UploadDirectoryTarGz(ctx, config, directory, prefix)
 }
 
 // getLocalIP returns the local IP address

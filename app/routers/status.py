@@ -4,18 +4,20 @@ import asyncio
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import select, func
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.instance import EnabledLocation, CloudInstance, Provider, LocationProvider
+from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.services.cloud_provider import get_cloud_client
 from app.services.failure_messages import public_failure_reason
 from app.services.orchestrator import get_enabled_locations
@@ -204,6 +206,7 @@ async def _build_status(db: AsyncSession) -> dict:
     # Warm counts per location and per (provider, region)
     warm_by_location: dict[str, int] = {}
     warm_by_provider_region: dict[tuple[str, str], int] = {}
+    warm_by_provider_location: dict[tuple[str, str], int] = {}
     # IDs tracked by this deployment, used to merge local state with global
     # provider account state without double-counting the same instance.
     instance_ids_by_provider: dict[str, set[str]] = {}
@@ -225,6 +228,9 @@ async def _build_status(db: AsyncSession) -> dict:
 
         if inst.is_available:
             warm_by_location[inst.location] = warm_by_location.get(inst.location, 0) + 1
+            warm_by_provider_location[(prov, inst.location)] = (
+                warm_by_provider_location.get((prov, inst.location), 0) + 1
+            )
             if prov_region:
                 key = (prov, prov_region)
                 warm_by_provider_region[key] = warm_by_provider_region.get(key, 0) + 1
@@ -236,6 +242,50 @@ async def _build_status(db: AsyncSession) -> dict:
     # Load provider limits (only enabled providers)
     providers_result = await db.execute(select(Provider).where(Provider.enabled == True))
     providers: dict[str, Provider] = {p.code: p for p in providers_result.scalars().all()}
+
+    # Keep this after the legacy five status queries so deployments/tests with
+    # a minimal cloud-only database can degrade cleanly to zero Instant slots.
+    instant_by_location: dict[str, int] = {}
+    try:
+        from app.services.settings import get_instant_settings
+        instant_enabled = (await get_instant_settings(db))["enabled"]
+        if instant_enabled:
+            occupied = select(InstantAssignment.id).where(
+                InstantAssignment.slot_id == InstantSlot.id,
+                InstantAssignment.closed_at.is_(None),
+            ).exists()
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                seconds=get_settings().instant_host_offline_seconds
+            )
+            instant_result = await db.execute(
+                select(InstantHost.location, func.count(InstantSlot.id))
+                .join(InstantSlot, InstantSlot.host_id == InstantHost.id)
+                .where(
+                    InstantHost.enabled.is_(True),
+                    InstantHost.draining.is_(False),
+                    InstantHost.deleted_at.is_(None),
+                    InstantHost.credential_hash.is_not(None),
+                    InstantHost.last_heartbeat_at >= cutoff,
+                    InstantHost.ready_image_digest.is_not(None),
+                    InstantHost.protocol_min <= get_settings().instant_protocol_max,
+                    InstantHost.protocol_max >= get_settings().instant_protocol_min,
+                    or_(
+                        InstantHost.version_pin.is_(None),
+                        InstantHost.agent_version == InstantHost.version_pin,
+                    ),
+                    InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
+                    InstantSlot.enabled.is_(True),
+                    InstantSlot.quarantined_at.is_(None),
+                    InstantSlot.error_code.is_(None),
+                    ~occupied,
+                )
+                .group_by(InstantHost.location)
+            )
+            instant_by_location = {
+                code: int(count) for code, count in instant_result.all()
+            }
+    except Exception:
+        logger.debug("Instant capacity unavailable while building status", exc_info=True)
 
     # Vultr's instance limit is global to the API account, not to this
     # deployment's database.  Include instances created by other deployments
@@ -269,6 +319,8 @@ async def _build_status(db: AsyncSession) -> dict:
 
         # Sum available slots across all providers for this location
         total_remaining = 0
+        configured_remaining = 0
+        configured_provider_codes: set[str] = set()
         for lp in loc_providers:
             provider_record = providers.get(lp.provider_code)
             default_limit = provider_record.instance_limit if provider_record else 10
@@ -278,12 +330,36 @@ async def _build_status(db: AsyncSession) -> dict:
                 region_key = (lp.provider_code, lp.provider_region)
                 region_active = active_by_provider_region.get(region_key, 0)
                 region_warm = warm_by_provider_region.get(region_key, 0)
-                total_remaining += max(0, region_limit - region_active - region_warm)
+                remaining = max(0, region_limit - region_active - region_warm)
             else:
                 provider_in_use = provider_instance_counts.get(lp.provider_code, 0)
-                total_remaining += max(0, default_limit - provider_in_use)
+                remaining = max(0, default_limit - provider_in_use)
+            # Preserve the legacy `available` calculation exactly. The new
+            # cloud_available flag is stricter and only counts a provider the
+            # allocator can actually instantiate through.
+            total_remaining += remaining
+            try:
+                client_configured = get_cloud_client(lp.provider_code) is not None
+            except Exception:
+                # A partially configured provider must not make the public
+                # capacity endpoint fail or advertise unusable capacity.
+                client_configured = False
+                logger.debug(
+                    "Cloud provider %s is not usable while building status",
+                    lp.provider_code,
+                    exc_info=True,
+                )
+            if provider_record is not None and client_configured:
+                configured_provider_codes.add(lp.provider_code)
+                configured_remaining += remaining
 
         location_available = warm_count + total_remaining
+        configured_warm_count = sum(
+            warm_by_provider_location.get((provider_code, location.code), 0)
+            for provider_code in configured_provider_codes
+        )
+        instant_slots = instant_by_location.get(location.code, 0)
+        cloud_available = configured_warm_count + configured_remaining > 0
 
         status[location.code] = {
             "name": location.name,
@@ -298,10 +374,18 @@ async def _build_status(db: AsyncSession) -> dict:
                 subdivision=location.subdivision,
             ),
             "recommended": location.recommended,
+            # Deprecated alias: this continues to mean an existing warm cloud
+            # instance. It must not silently change to mean operator hosts.
             "instant": warm_count > 0,
+            "instant_slots_available": instant_slots,
+            "instant_available": instant_slots > 0,
+            "cloud_available": cloud_available,
+            "reservable": instant_slots > 0 or cloud_available,
+            "warm_cloud_available": configured_warm_count > 0,
             "active": active_count,
-            "available": location_available,
+            "available": location_available + instant_slots,
             "enabled": location.enabled,
+            "ping_url": getattr(location, "ping_url", None),
         }
 
     return status
@@ -381,7 +465,12 @@ async def reservation_event_generator(
             result = await db.execute(
                 select(Reservation)
                 .where(Reservation.id == reservation_id)
-                .options(selectinload(Reservation.cloud_instance))  # Eagerly load
+                .options(
+                    selectinload(Reservation.cloud_instance),
+                    selectinload(Reservation.instant_assignments)
+                    .selectinload(InstantAssignment.slot)
+                    .selectinload(InstantSlot.host),
+                )
             )
             reservation = result.scalar_one_or_none()
 
@@ -392,16 +481,25 @@ async def reservation_event_generator(
             current_status = reservation.status.value
 
             # Get boot progress from agent if available
-            from app.routers.internal import get_boot_progress
+            from app.routers.internal import get_boot_progress, get_instant_boot_progress
             progress_data = None
             if reservation.cloud_instance:
                 progress_data = get_boot_progress(reservation.cloud_instance.instance_id)
+            else:
+                active_assignment = next(
+                    (a for a in reversed(reservation.instant_assignments) if a.closed_at is None),
+                    None,
+                )
+                if active_assignment:
+                    progress_data = get_instant_boot_progress(active_assignment.id)
 
         # Send update if status changed or progress updated
         if current_status != last_status:
+            runtime_kind = getattr(reservation, "runtime_kind", "cloud")
             event_data = {
                 "type": "status_change",
                 "status": current_status,
+                "runtime_kind": getattr(runtime_kind, "value", runtime_kind),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -411,6 +509,17 @@ async def reservation_event_generator(
 
             # Include connection details when active — only for owner
             if reservation.status == ReservationStatus.ACTIVE and is_owner:
+                control_degraded = False
+                active_assignment = next(
+                    (a for a in reversed(reservation.instant_assignments) if a.closed_at is None),
+                    None,
+                )
+                if active_assignment is not None:
+                    from app.services.instant_hosts import host_is_online
+                    control_degraded = (
+                        not host_is_online(active_assignment.slot.host)
+                        or active_assignment.state == "degraded"
+                    )
                 event_data["connection"] = {
                     "sdr_ip": reservation.sdr_ip,
                     "sdr_port": reservation.sdr_port,
@@ -421,11 +530,21 @@ async def reservation_event_generator(
                     # "rcon_password": reservation.rcon_password,
                     "tv_password": reservation.tv_password,
                     "enable_direct_connect": reservation.enable_direct_connect,
+                    "runtime_kind": getattr(runtime_kind, "value", runtime_kind),
+                    "direct_ip": reservation.direct_ip,
+                    "direct_port": reservation.direct_port,
+                    "direct_tv_port": reservation.direct_tv_port,
+                    "control_degraded": control_degraded,
                 }
+                if reservation.direct_ip:
+                    event_data["connection"]["ip_address"] = reservation.direct_ip
                 if reservation.enable_direct_connect and reservation.cloud_instance:
                     ip = reservation.cloud_instance.ip_address
                     if ip and ip != "0.0.0.0":
                         event_data["connection"]["ip_address"] = ip
+                        event_data["connection"]["direct_ip"] = ip
+                        event_data["connection"]["direct_port"] = 27015
+                        event_data["connection"]["direct_tv_port"] = 27020
 
             # Include error message for failed status
             if reservation.status == ReservationStatus.FAILED:

@@ -9,26 +9,34 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/summon/agent/boot"
+	"github.com/summon/agent/host"
 	"github.com/summon/agent/podman"
-	"github.com/summon/agent/s3upload"
 	"github.com/summon/agent/sysinfo"
 	"github.com/summon/agent/websocket"
 )
 
 // Config holds agent configuration from environment
 type Config struct {
-	BackendURL    string
-	AuthToken     string
-	InstanceID    string
-	ReservationID string
-	HeartbeatSec  int
+	Mode           string
+	BackendURL     string
+	AuthToken      string
+	InstanceID     string
+	ReservationID  string
+	HostID         int
+	CredentialFile string
+	HostStateDir   string
+	HeartbeatSec   int
 }
+
+// agentVersion is injected by release builds with -X main.agentVersion=...
+var agentVersion = "0.2.0"
 
 // Global state
 var (
@@ -39,11 +47,23 @@ var (
 
 func loadConfig() *Config {
 	cfg := &Config{
-		BackendURL:    os.Getenv("BACKEND_URL"),
-		AuthToken:     os.Getenv("AUTH_TOKEN"),
-		InstanceID:    os.Getenv("INSTANCE_ID"),
-		ReservationID: os.Getenv("RESERVATION_ID"),
-		HeartbeatSec:  10,
+		Mode:           strings.ToLower(strings.TrimSpace(os.Getenv("AGENT_MODE"))),
+		BackendURL:     os.Getenv("BACKEND_URL"),
+		AuthToken:      os.Getenv("AUTH_TOKEN"),
+		InstanceID:     os.Getenv("INSTANCE_ID"),
+		ReservationID:  os.Getenv("RESERVATION_ID"),
+		CredentialFile: os.Getenv("CREDENTIAL_FILE"),
+		HostStateDir:   os.Getenv("HOST_STATE_DIR"),
+		HeartbeatSec:   10,
+	}
+	if cfg.Mode == "" {
+		cfg.Mode = "cloud"
+	}
+	if cfg.HostStateDir == "" {
+		cfg.HostStateDir = "/var/lib/summon-agent"
+	}
+	if value := os.Getenv("HOST_ID"); value != "" {
+		cfg.HostID, _ = strconv.Atoi(value)
 	}
 
 	if v := os.Getenv("HEARTBEAT_INTERVAL_SEC"); v != "" {
@@ -57,17 +77,40 @@ func loadConfig() *Config {
 	if cfg.BackendURL == "" {
 		log.Fatal("BACKEND_URL environment variable required")
 	}
-	if cfg.AuthToken == "" {
-		log.Fatal("AUTH_TOKEN environment variable required")
+	if cfg.Mode != "cloud" && cfg.Mode != "host" {
+		log.Fatalf("AGENT_MODE must be cloud or host, got %q", cfg.Mode)
 	}
-	if cfg.InstanceID == "" {
-		log.Fatal("INSTANCE_ID environment variable required")
+	if cfg.Mode == "host" {
+		if cfg.HostID <= 0 {
+			log.Fatal("HOST_ID environment variable required in host mode")
+		}
+		if cfg.CredentialFile == "" {
+			log.Fatal("CREDENTIAL_FILE environment variable required in host mode")
+		}
+		credential, err := os.ReadFile(cfg.CredentialFile)
+		if err != nil {
+			log.Fatalf("Unable to read host credential: %v", err)
+		}
+		cfg.AuthToken = strings.TrimSpace(string(credential))
+		if cfg.AuthToken == "" {
+			log.Fatal("Host credential file is empty")
+		}
+	} else {
+		if cfg.AuthToken == "" {
+			log.Fatal("AUTH_TOKEN environment variable required")
+		}
+		if cfg.InstanceID == "" {
+			log.Fatal("INSTANCE_ID environment variable required")
+		}
 	}
 
 	// Check config file for potentially updated credentials from warm pool reconfigure
 	// The config file may have newer auth_token and instance_id if the agent was
 	// reconfigured for a different reservation
 	for _, configPath := range boot.ConfigFilePaths() {
+		if cfg.Mode != "cloud" {
+			break
+		}
 		data, err := os.ReadFile(configPath)
 		if err != nil {
 			continue
@@ -98,9 +141,24 @@ func loadConfig() *Config {
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Println("TF2 Agent starting...")
+	if len(os.Args) == 2 && os.Args[1] == "--self-check" {
+		if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+			log.Fatalf("unsupported platform %s/%s", runtime.GOOS, runtime.GOARCH)
+		}
+		fmt.Printf("summon-agent %s protocol %d OK\n", agentVersion, host.ProtocolVersion)
+		return
+	}
+	log.Printf("TF2 Agent %s starting...", agentVersion)
 
 	cfg := loadConfig()
+	if cfg.Mode == "host" {
+		runHost(cfg)
+		return
+	}
+	runCloud(cfg)
+}
+
+func runCloud(cfg *Config) {
 	log.Printf("Instance ID: %s", cfg.InstanceID)
 	log.Printf("Backend URL: %s", cfg.BackendURL)
 
@@ -156,6 +214,46 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down agent...")
+}
+
+func runHost(cfg *Config) {
+	log.Printf("Instant host ID: %d", cfg.HostID)
+	log.Printf("Backend URL: %s", cfg.BackendURL)
+
+	wsClient := websocket.NewClient(cfg.BackendURL, cfg.AuthToken)
+	for {
+		if err := wsClient.Connect(); err == nil {
+			break
+		} else {
+			log.Printf("Host connection failed: %v", err)
+		}
+		if deadline, pending := host.PendingUpdateDeadline(cfg.HostStateDir); pending && time.Now().After(deadline) {
+			log.Printf("Updated agent did not complete its backend handshake; rolling back")
+			if err := host.RollbackPendingUpdate(cfg.HostStateDir); err != nil {
+				log.Fatalf("Agent update rollback failed: %v", err)
+			}
+			executable, err := os.Executable()
+			if err != nil {
+				log.Fatalf("Resolve rolled-back executable: %v", err)
+			}
+			if err := syscall.Exec(executable, []string{executable}, os.Environ()); err != nil {
+				log.Fatalf("Start rolled-back agent: %v", err)
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+	defer wsClient.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	controller := host.NewController(host.Config{
+		HostID: cfg.HostID, StateDir: cfg.HostStateDir, Credential: cfg.AuthToken,
+		AgentVersion: agentVersion, Heartbeat: time.Duration(cfg.HeartbeatSec) * time.Second,
+	}, wsClient, podman.NewClient(""))
+	if err := controller.Run(ctx); err != nil {
+		log.Fatalf("Host controller failed: %v", err)
+	}
+	log.Println("Persistent host agent stopped")
 }
 
 func handleMessages(client *websocket.Client) {
@@ -460,8 +558,15 @@ func handleReservationEnd() {
 	// Copy logs from container before stopping (container has --rm, filesystem
 	// is lost on stop). The podman cp is a fast local operation.
 	var logTmpDir string
-	if cfg != nil && cfg.S3Config.Configured() {
-		logTmpDir = copyLogsFromContainer(containerID)
+	logSequence := bootSeq
+	if cfg != nil && cfg.S3Config.Configured() && logSequence != nil {
+		copyContext, copyCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var copyErr error
+		logTmpDir, copyErr = logSequence.CollectLogs(copyContext)
+		copyCancel()
+		if copyErr != nil {
+			log.Printf("S3 log upload: failed to collect logs: %v", copyErr)
+		}
 	}
 
 	handleContainerStop()
@@ -470,63 +575,12 @@ func handleReservationEnd() {
 	// The agent still runs on the cloud instance — if the instance is destroyed
 	// before the upload finishes, we lose the logs (acceptable for rare debugging).
 	if logTmpDir != "" {
-		go uploadLogsToS3(logTmpDir, cfg)
-	}
-}
-
-// copyLogsFromContainer copies TF2 server and SourceMod logs from the
-// container to a temporary directory on the host. Returns the temp dir path
-// (caller must clean up), or "" on failure.
-func copyLogsFromContainer(containerID string) string {
-	tmpDir, err := os.MkdirTemp("", "tf2-logs-*")
-	if err != nil {
-		log.Printf("S3 log upload: failed to create temp dir: %v", err)
-		return ""
-	}
-
-	// Copy SourceMod logs
-	smDst := filepath.Join(tmpDir, "sourcemod")
-	os.MkdirAll(smDst, 0755)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := podmanClient.CopyFromContainer(ctx, containerID,
-		"/home/tf2/server/tf/addons/sourcemod/logs/.", smDst); err != nil {
-		log.Printf("S3 log upload: failed to copy sourcemod logs: %v", err)
-	}
-	cancel()
-
-	// Copy server logs
-	srvDst := filepath.Join(tmpDir, "server")
-	os.MkdirAll(srvDst, 0755)
-	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-	if err := podmanClient.CopyFromContainer(ctx, containerID,
-		"/home/tf2/server/tf/logs/.", srvDst); err != nil {
-		log.Printf("S3 log upload: failed to copy server logs: %v", err)
-	}
-	cancel()
-
-	return tmpDir
-}
-
-// uploadLogsToS3 uploads the copied log files to S3 and cleans up the temp dir.
-func uploadLogsToS3(tmpDir string, cfg *boot.ReservationConfig) {
-	defer os.RemoveAll(tmpDir)
-
-	s3Cfg := &s3upload.Config{
-		Endpoint:  cfg.S3Config.Endpoint,
-		AccessKey: cfg.S3Config.AccessKey,
-		SecretKey: cfg.S3Config.SecretKey,
-		Bucket:    cfg.S3Config.Bucket,
-		Region:    cfg.S3Config.Region,
-	}
-
-	prefix := fmt.Sprintf("reservations/%d", cfg.ReservationNumber)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	if err := s3upload.UploadDirectoryTarGz(ctx, s3Cfg, tmpDir, prefix); err != nil {
-		log.Printf("S3 log upload failed: %v", err)
-	} else {
-		log.Printf("Server logs uploaded to S3 (s3://%s/%s)", cfg.S3Config.Bucket, prefix)
+		go func() {
+			uploadContext, uploadCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer uploadCancel()
+			if err := logSequence.UploadCollectedLogs(uploadContext, logTmpDir); err != nil {
+				log.Printf("S3 log upload failed: %v", err)
+			}
+		}()
 	}
 }

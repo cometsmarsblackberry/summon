@@ -75,7 +75,7 @@ GCORE_PING_SLUGS = {
 GCORE_APPROXIMATE_REGIONS = {"68", "14", "34"}  # Chicago, Manassas, Santa Clara
 
 
-def _ping_url(provider: str, provider_region: str) -> str | None:
+def _ping_url(provider: str | None, provider_region: str | None) -> str | None:
     """Build the full ping base URL for a location, or None if unavailable."""
     if provider == "vultr":
         slug = VULTR_PING_SLUGS.get(provider_region)
@@ -90,7 +90,7 @@ def _ping_url(provider: str, provider_region: str) -> str | None:
     return None
 
 
-def _ping_approximate(provider: str, provider_region: str) -> bool:
+def _ping_approximate(provider: str | None, provider_region: str | None) -> bool:
     """Return True if the ping server is in a nearby city, not co-located."""
     return provider == "gcore" and provider_region in GCORE_APPROXIMATE_REGIONS
 
@@ -204,11 +204,14 @@ async def home(
             "locations": locations,
             "maps": maps,
             "active_reservation": active_reservation,
-            "cloud_configured": settings.cloud_configured,
+            "cloud_configured": (
+                settings.cloud_configured
+                or any(item.get("instant_available") for item in initial_status.values())
+            ),
             "beta_mode": settings.beta_mode,
             "beta_locked": beta_locked,
             "ping_urls": {loc.code: url for loc in locations
-                         if (url := _ping_url(loc.provider, loc.provider_region))},
+                         if (url := (loc.ping_url or _ping_url(loc.provider, loc.provider_region)))},
             "approximate_pings": [loc.code for loc in locations
                                   if _ping_approximate(loc.provider, loc.provider_region)],
             "location_cities": location_cities,
@@ -472,8 +475,8 @@ async def ping_page(
 
     ping_locations = []
     for loc in locations:
-        url = _ping_url(loc.provider, loc.provider_region)
-        if url and not _ping_approximate(loc.provider, loc.provider_region):
+        url = loc.ping_url or _ping_url(loc.provider, loc.provider_region)
+        if url and (loc.ping_url or not _ping_approximate(loc.provider, loc.provider_region)):
             ping_locations.append({
                 "code": loc.code,
                 "name": loc.name,

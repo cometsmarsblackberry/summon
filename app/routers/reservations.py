@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.reservation import Reservation, ReservationStatus
+from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
+from app.models.instant import InstantAssignment, InstantSlot
 from app.models.user import User
 from app.routers.auth import require_user
 from app.services.reservation import (
@@ -24,11 +25,20 @@ from app.services.reservation import (
     get_user_reservations,
 )
 from app.services.orchestrator import (
-    provision_instance_for_reservation,
-    destroy_instance,
     get_enabled_locations,
-    release_to_warm_pool,
-    is_hourly_billing,
+)
+from app.services.runtime import (
+    LocationCapacityError,
+    configure_uploads_runtime,
+    claim_instant_slot,
+    end_reservation_runtime,
+    ensure_location_capacity,
+    get_runtime_competitive_configs,
+    get_runtime_stats,
+    is_instant_reservation,
+    provision_reservation_runtime,
+    rcon_reservation_runtime,
+    restart_reservation_runtime,
 )
 from app.i18n import t
 from app.services.failure_messages import public_failure_reason
@@ -82,6 +92,7 @@ class ReservationResponse(BaseModel):
     reservation_number: int
     location: str
     status: str
+    runtime_kind: str = "cloud"
     starts_at: datetime
     ends_at: datetime
     first_map: str
@@ -101,6 +112,13 @@ class ReservationResponse(BaseModel):
     enable_logs_tf_upload: bool = True
     enable_demos_tf_upload: bool = True
     ip_address: Optional[str] = None
+    direct_ip: Optional[str] = None
+    direct_port: Optional[int] = None
+    direct_tv_port: Optional[int] = None
+    # Instant control-plane health. A disconnected host never triggers a
+    # duplicate cloud server; the lease remains active for reconciliation.
+    control_degraded: bool = False
+    runtime_health: Optional[str] = None
     # Boot progress (during provisioning)
     boot_progress: Optional[dict] = None
     # Failure details
@@ -121,6 +139,11 @@ def reservation_to_response(
         reservation_number=reservation.reservation_number,
         location=reservation.location,
         status=reservation.status.value,
+        runtime_kind=(
+            reservation.runtime_kind.value
+            if isinstance(getattr(reservation, "runtime_kind", None), RuntimeKind)
+            else str(getattr(reservation, "runtime_kind", "cloud") or "cloud").lower()
+        ),
         starts_at=reservation.starts_at,
         ends_at=reservation.ends_at,
         first_map=reservation.first_map,
@@ -146,10 +169,18 @@ def reservation_to_response(
         response.sdr_ip = reservation.sdr_ip
         response.sdr_port = reservation.sdr_port
         response.sdr_tv_port = reservation.sdr_tv_port
-        if reservation.enable_direct_connect and cloud_instance:
+        response.direct_ip = getattr(reservation, "direct_ip", None)
+        response.direct_port = getattr(reservation, "direct_port", None)
+        response.direct_tv_port = getattr(reservation, "direct_tv_port", None)
+        if response.direct_ip:
+            response.ip_address = response.direct_ip
+        elif reservation.enable_direct_connect and cloud_instance:
             ip = cloud_instance.ip_address
             if ip and ip != "0.0.0.0":
                 response.ip_address = ip
+                response.direct_ip = ip
+                response.direct_port = 27015
+                response.direct_tv_port = 27020
     
     # Include boot progress during provisioning
     if reservation.status == ReservationStatus.PROVISIONING and cloud_instance:
@@ -157,6 +188,27 @@ def reservation_to_response(
         progress = get_boot_progress(cloud_instance.instance_id)
         if progress:
             response.boot_progress = progress
+    elif reservation.status == ReservationStatus.PROVISIONING and is_instant_reservation(reservation):
+        assignments = reservation.__dict__.get("instant_assignments") or []
+        active = next((item for item in reversed(assignments) if item.closed_at is None), None)
+        if active:
+            from app.routers.internal import get_instant_boot_progress
+            response.boot_progress = get_instant_boot_progress(active.id)
+
+    if is_instant_reservation(reservation):
+        assignments = reservation.__dict__.get("instant_assignments") or []
+        active = next((item for item in reversed(assignments) if item.closed_at is None), None)
+        if active:
+            response.runtime_health = active.state
+            slot = active.__dict__.get("slot")
+            host = slot.__dict__.get("host") if slot else None
+            if host is not None:
+                from app.services.instant_hosts import host_is_online
+                response.control_degraded = (
+                    not host_is_online(host)
+                    or active.state == "degraded"
+                    or host.health_status in {"offline", "quarantined", "incompatible", "unavailable"}
+                )
     
     return response
 
@@ -196,7 +248,7 @@ async def provision_reservation_background(
             if reservation.status not in (ReservationStatus.PENDING, ReservationStatus.PROVISIONING):
                 return
 
-            result = await provision_instance_for_reservation(reservation, db)
+            result = await provision_reservation_runtime(reservation, db)
             if result:
                 return  # Success
 
@@ -259,13 +311,6 @@ async def create_reservation_endpoint(
                 detail=t("errors.captcha_failed"),
             )
 
-    # Check if any cloud provider is configured
-    if not settings.cloud_configured:
-        raise HTTPException(
-            status_code=503,
-            detail=t("errors.not_configured")
-        )
-    
     # Validate location
     locations = await get_enabled_locations(db)
     location_codes = [loc.code for loc in locations]
@@ -319,6 +364,17 @@ async def create_reservation_endpoint(
     # Serialize reservation creation so capacity, rate-limit, and single-active
     # checks stay accurate under concurrent API requests.
     async with _reservation_creation_lock:
+        # Capacity is checked before writing the reservation. This is under the
+        # same lock as the single-active and rate checks; Instant's partial
+        # unique indexes remain the cross-session final guard.
+        try:
+            capacity = await ensure_location_capacity(request.location, db)
+        except LocationCapacityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+
         # Check circuit breaker first (admins bypass)
         if not user.is_admin:
             try:
@@ -374,7 +430,26 @@ async def create_reservation_endpoint(
             enable_logs_tf_upload=request.enable_logs_tf_upload,
             enable_demos_tf_upload=request.enable_demos_tf_upload,
             db=db,
+            commit=False,
         )
+
+        # Lease an Instant slot before releasing the creation lock. This closes
+        # the check-to-claim gap and ensures an Instant-only location returns a
+        # 409 without leaving behind a failed reservation if another worker won
+        # the final slot concurrently.
+        assignment = await claim_instant_slot(reservation, db)
+        if assignment is None and not capacity.cloud_available:
+            user.reservation_count = max(0, user.reservation_count - 1)
+            await db.delete(reservation)
+            await db.commit()
+            exc = LocationCapacityError(request.location)
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            )
+        if assignment is None:
+            await db.commit()
+            await db.refresh(reservation)
 
     # Start provisioning in background
     background_tasks.add_task(
@@ -442,7 +517,12 @@ async def get_reservation(
     result = await db.execute(
         select(Reservation)
         .where(Reservation.id == reservation_id)
-        .options(selectinload(Reservation.cloud_instance))
+        .options(
+            selectinload(Reservation.cloud_instance),
+            selectinload(Reservation.instant_assignments)
+            .selectinload(InstantAssignment.slot)
+            .selectinload(InstantSlot.host),
+        )
     )
     reservation = result.scalar_one_or_none()
     
@@ -499,27 +579,7 @@ async def get_reservation_configs(
 
     _require_reservation_access_or_404(user, reservation)
 
-    if not reservation.instance_id:
-        return {
-            "available": False,
-            "configs": {},
-            "message": "Server not assigned yet. Use !config in-game once it is running.",
-        }
-
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        return {
-            "available": False,
-            "configs": {},
-            "message": "Server not assigned yet. Use !config in-game once it is running.",
-        }
-
-    from app.routers.internal import get_competitive_configs as get_instance_configs
-    cache = get_instance_configs(cloud_instance.instance_id)
+    cache = await get_runtime_competitive_configs(reservation, db)
     if not cache or not cache.get("cfg_files"):
         return {
             "available": False,
@@ -542,31 +602,25 @@ async def get_reservation_stats(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get system stats for an active reservation's server."""
-    from app.models.instance import CloudInstance, EnabledLocation, Provider
-
-    # Single query to avoid per-poll DB chatter (this endpoint is polled by the UI).
-    result = await db.execute(
-        select(Reservation, CloudInstance.instance_id, Provider.name)
-        .outerjoin(CloudInstance, CloudInstance.id == Reservation.instance_id)
-        .outerjoin(EnabledLocation, EnabledLocation.code == Reservation.location)
-        .outerjoin(Provider, Provider.code == EnabledLocation.provider)
-        .where(Reservation.id == reservation_id)
-    )
-    row = result.first()
-    if not row:
+    """Get runtime-scoped stats for an active reservation's server."""
+    reservation = await get_reservation_by_id(reservation_id, db)
+    if not reservation:
         raise HTTPException(status_code=404, detail=t("errors.reservation_not_found"))
-
-    reservation, agent_instance_id, provider_name = row
-
     _require_reservation_access_or_404(user, reservation)
 
     if reservation.status not in (ReservationStatus.PROVISIONING, ReservationStatus.ACTIVE):
         return {"stats": None}
 
-    from app.routers.internal import get_agent_stats
-    stats = get_agent_stats(agent_instance_id) if agent_instance_id else None
-
+    stats = await get_runtime_stats(reservation, db)
+    provider_name = "Instant host" if is_instant_reservation(reservation) else None
+    if not provider_name:
+        from app.models.instance import EnabledLocation, Provider
+        provider_result = await db.execute(
+            select(Provider.name)
+            .join(EnabledLocation, EnabledLocation.provider == Provider.code)
+            .where(EnabledLocation.code == reservation.location)
+        )
+        provider_name = provider_result.scalar_one_or_none()
     return {"stats": stats, "provider_name": provider_name}
 
 
@@ -602,30 +656,12 @@ async def end_reservation_endpoint(
     from app.routers.internal import clear_player_data
     clear_player_data(reservation.reservation_number)
 
-    # Handle instance based on billing model
-    if reservation.instance_id:
-        if was_active or had_started:
-            # Tell the agent to end the reservation (RCON kicks, log copy, S3 upload)
-            from app.models.instance import CloudInstance
-            from app.routers.internal import send_to_agent
-            ci_result = await db.execute(
-                select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-            )
-            cloud_instance = ci_result.scalar_one_or_none()
-            if cloud_instance:
-                await send_to_agent(cloud_instance.instance_id, {"type": "reservation.end"})
-
-        if await is_hourly_billing(reservation.location, db):
-            if was_active or had_started:
-                # Instance reached active — release to warm pool
-                await release_to_warm_pool(reservation.instance_id, db)
-            else:
-                # Still provisioning — let it complete and warm pool on server_ready.
-                # Don't destroy; the billing hour is already paid for.
-                pass
-        else:
-            # Per-second billing: destroy immediately to save costs
-            await destroy_instance(reservation.instance_id, db)
+    await end_reservation_runtime(
+        reservation,
+        db,
+        was_active=was_active,
+        had_started=had_started,
+    )
     
     return {"message": "Reservation ended", "status": reservation.status.value}
 
@@ -649,36 +685,31 @@ async def restart_reservation_endpoint(
             detail=t("errors.cannot_restart_status", status=reservation.status.value)
         )
 
-    if not reservation.instance_id:
-        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
-
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
-
-    from app.routers.internal import send_container_restart, clear_player_data
+    from app.routers.internal import clear_player_data
     from app.utils.passwords import generate_password
 
     clear_player_data(reservation.reservation_number)
-    reservation.password = generate_password(8)
-    reservation.rcon_password = generate_password(12)
-    reservation.tv_password = generate_password(8)
-    reservation.status = ReservationStatus.PROVISIONING
-    reservation.empty_since = None  # Clear during restart; reset when server is ready
+    # Do not dirty the reservation before the runtime accepts the command:
+    # Instant command bookkeeping uses its own commit, and a disconnected host
+    # must not leave new passwords or a provisioning status persisted.
+    password = generate_password(8)
+    rcon_password = generate_password(12)
+    tv_password = generate_password(8)
 
-    if not await send_container_restart(cloud_instance.instance_id, {
-        "password": reservation.password,
-        "rcon_password": reservation.rcon_password,
-        "tv_password": reservation.tv_password,
+    if not await restart_reservation_runtime(reservation, db, {
+        "password": password,
+        "rcon_password": rcon_password,
+        "tv_password": tv_password,
         "config_file": reservation.config_file or "",
         "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
         "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
     }):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
+    reservation.password = password
+    reservation.rcon_password = rcon_password
+    reservation.tv_password = tv_password
+    reservation.status = ReservationStatus.PROVISIONING
+    reservation.empty_since = None  # Clear during restart; reset when server is ready
     await db.commit()
 
     return {"message": "Server restart initiated"}
@@ -716,9 +747,6 @@ async def exec_competitive_config(
     if reservation.status != ReservationStatus.ACTIVE:
         raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
 
-    if not reservation.instance_id:
-        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
-
     cfg_file = (body.cfg_file or "").strip()
     if not _CFG_FILE_RE.fullmatch(cfg_file):
         raise HTTPException(status_code=400, detail=t("errors.invalid_config"))
@@ -731,17 +759,8 @@ async def exec_competitive_config(
     if cfg_file != "summon_reset" and not cfg_file.startswith(tuple(allowed_prefixes)):
         raise HTTPException(status_code=400, detail=t("errors.unknown_config"))
 
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
-
     # If we have a server-reported list, validate against it to avoid drift.
-    from app.routers.internal import get_competitive_configs as get_instance_configs
-    cache = get_instance_configs(cloud_instance.instance_id)
+    cache = await get_runtime_competitive_configs(reservation, db)
     if cache and cache.get("exec_cfg_files") and cfg_file != "summon_reset":
         if cfg_file not in set(cache["exec_cfg_files"]):
             raise HTTPException(
@@ -749,8 +768,7 @@ async def exec_competitive_config(
                 detail=t("errors.config_not_available"),
             )
 
-    from app.routers.internal import send_rcon_command
-    if not await send_rcon_command(cloud_instance.instance_id, f"sm_config {cfg_file}"):
+    if not await rcon_reservation_runtime(reservation, db, f"sm_config {cfg_file}"):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
     reservation.config_file = None if cfg_file == "summon_reset" else cfg_file
@@ -783,9 +801,6 @@ async def change_level(
     if reservation.status != ReservationStatus.ACTIVE:
         raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
 
-    if not reservation.instance_id:
-        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
-
     map_name = (body.map_name or "").strip()
     if not is_valid_map_name(map_name):
         raise HTTPException(status_code=400, detail=t("errors.invalid_map_name"))
@@ -802,16 +817,7 @@ async def change_level(
             detail=t("errors.invalid_map", map=map_name)
         )
 
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
-
-    from app.routers.internal import send_rcon_command
-    if not await send_rcon_command(cloud_instance.instance_id, f"changelevel {map_name}"):
+    if not await rcon_reservation_runtime(reservation, db, f"changelevel {map_name}"):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
     logger.info(
@@ -842,20 +848,9 @@ async def update_upload_settings(
     if reservation.status != ReservationStatus.ACTIVE:
         raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
 
-    if not reservation.instance_id:
-        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
-
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
-
-    from app.routers.internal import send_upload_settings
-    if not await send_upload_settings(
-        cloud_instance.instance_id,
+    if not await configure_uploads_runtime(
+        reservation,
+        db,
         logs_tf=body.enable_logs_tf_upload,
         demos_tf=body.enable_demos_tf_upload,
     ):
@@ -954,9 +949,6 @@ async def kick_player(
     if reservation.status != ReservationStatus.ACTIVE:
         raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
 
-    if not reservation.instance_id:
-        raise HTTPException(status_code=400, detail=t("errors.no_instance"))
-
     # Validate player is actually on the server
     from app.routers.internal import get_player_data
     data = get_player_data(reservation.reservation_number)
@@ -967,17 +959,8 @@ async def kick_player(
 
     steamid3 = _steamid64_to_steamid3(body.steam_id)
 
-    from app.models.instance import CloudInstance
-    instance_result = await db.execute(
-        select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-    )
-    cloud_instance = instance_result.scalar_one_or_none()
-    if not cloud_instance:
-        raise HTTPException(status_code=404, detail=t("errors.instance_not_found"))
-
-    from app.routers.internal import send_rcon_command
     command = f'sm_kick "#{steamid3}" Kicked by reservation owner'
-    if not await send_rcon_command(cloud_instance.instance_id, command):
+    if not await rcon_reservation_runtime(reservation, db, command):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
     logger.info(f"Kick sent for {body.steam_id} from reservation #{reservation.reservation_number}")

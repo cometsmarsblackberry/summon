@@ -15,22 +15,25 @@ import (
 
 // Client manages the WebSocket connection to the backend
 type Client struct {
-	url       string
-	token     string
-	conn      *websocket.Conn
-	messages  chan []byte
-	done      chan struct{}
-	mu        sync.Mutex
-	connected bool
+	url         string
+	token       string
+	conn        *websocket.Conn
+	messages    chan []byte
+	done        chan struct{}
+	connectedCh chan struct{}
+	closeOnce   sync.Once
+	mu          sync.Mutex
+	connected   bool
 }
 
 // NewClient creates a new WebSocket client
 func NewClient(backendURL, token string) *Client {
 	return &Client{
-		url:      backendURL,
-		token:    token,
-		messages: make(chan []byte, 100),
-		done:     make(chan struct{}),
+		url:         backendURL,
+		token:       token,
+		messages:    make(chan []byte, 100),
+		done:        make(chan struct{}),
+		connectedCh: make(chan struct{}, 4),
 	}
 }
 
@@ -57,9 +60,13 @@ func (c *Client) Connect() error {
 
 	c.conn = conn
 	c.connected = true
+	select {
+	case c.connectedCh <- struct{}{}:
+	default:
+	}
 
 	// Start read loop
-	go c.readLoop()
+	go c.readLoop(conn)
 
 	log.Println("Connected to backend")
 	return nil
@@ -70,11 +77,23 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	close(c.done)
+	c.closeOnce.Do(func() { close(c.done) })
 	if c.conn != nil {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// Connections emits after every successful initial connection or reconnect.
+func (c *Client) Connections() <-chan struct{} {
+	return c.connectedCh
+}
+
+// IsConnected reports whether messages can currently be sent.
+func (c *Client) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected
 }
 
 // Messages returns a channel for receiving messages from the backend
@@ -174,13 +193,13 @@ func (c *Client) SendCompetitiveConfigs(configs []string, containerImage string)
 }
 
 // readLoop continuously reads messages from the WebSocket
-func (c *Client) readLoop() {
+func (c *Client) readLoop(conn *websocket.Conn) {
 	for {
 		select {
 		case <-c.done:
 			return
 		default:
-			_, message, err := c.conn.ReadMessage()
+			_, message, err := conn.ReadMessage()
 			if err != nil {
 				log.Printf("Read error: %v", err)
 				c.reconnect()

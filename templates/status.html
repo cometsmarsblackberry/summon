@@ -14,6 +14,8 @@
 
     <div x-data="{
         status: '{{ reservation.status.value }}',
+        runtimeKind: '{{ reservation.runtime_kind.value if reservation.runtime_kind else "cloud" }}',
+        controlDegraded: false,
         locale: '{{ request.state.locale|default('en') }}',
         currentMap: '{{ reservation.first_map }}',
         endsAt: '{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:00Z') }}',
@@ -125,6 +127,8 @@
                     const data = await resp.json();
                     const prevStatus = this.status;
                     this.status = data.status;
+                    this.runtimeKind = data.runtime_kind || this.runtimeKind;
+                    this.controlDegraded = Boolean(data.control_degraded);
                     if ((this.status === 'ended' && prevStatus !== 'ended') ||
                         this.usesLegacyLayout(this.status) !== this.usesLegacyLayout(prevStatus)) {
                         window.location.reload();
@@ -137,7 +141,7 @@
                         this.resetBootProgress();
                     }
                     // Always update connection info if available
-                    if (data.sdr_ip || data.enable_direct_connect) {
+                    if (data.sdr_ip || data.direct_ip || data.enable_direct_connect) {
                         this.connection = {
                             sdr_ip: data.sdr_ip,
                             sdr_port: data.sdr_port,
@@ -149,6 +153,10 @@
                             tv_password: data.tv_password,
                             enable_direct_connect: data.enable_direct_connect,
                             ip_address: data.ip_address,
+                            direct_ip: data.direct_ip || data.ip_address,
+                            direct_port: data.direct_port || (data.ip_address ? 27015 : null),
+                            direct_tv_port: data.direct_tv_port || (data.ip_address ? 27020 : null),
+                            runtime_kind: data.runtime_kind,
                         };
                     }
                     // Show failure reason from polling (fallback if SSE missed it)
@@ -210,6 +218,8 @@
                     }
                     if (data.connection) {
                         this.connection = data.connection;
+                        this.runtimeKind = data.connection.runtime_kind || data.runtime_kind || this.runtimeKind;
+                        this.controlDegraded = Boolean(data.connection.control_degraded);
                     }
                     if (data.error) {
                         this.error = data.error;
@@ -706,7 +716,7 @@
             </h1>
             {% if is_owner %}
             <div class="flex items-center gap-2">
-                <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning'"
+                <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning' || controlDegraded"
                     class="px-2.5 py-1 text-xs rounded border transition-colors disabled:opacity-60 disabled:cursor-not-allowed bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700">
                     Restart
                 </button>
@@ -724,6 +734,11 @@
             {{ _('status.admin_viewing', owner=owner_name) }}
         </div>
         {% endif %}
+
+        <div x-show="runtimeKind === 'instant' && controlDegraded" x-cloak
+            class="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            The host is temporarily offline or degraded. Your server lease is preserved and will reconcile when the agent reconnects; controls may be unavailable meanwhile.
+        </div>
 
         <!-- Progress bar during provisioning -->
         <div x-show="status === 'pending' || status === 'provisioning'" class="mb-6">
@@ -993,17 +1008,17 @@
         {% if is_owner %}
         <div x-show="status === 'active'" x-cloak class="border-t border-slate-200 pt-5"
             x-data="{ connType: 'connect', connTypeInit: false }"
-            x-effect="if (!connTypeInit && connection && connection.enable_direct_connect && connection.ip_address) { connType = 'direct'; connTypeInit = true; }">
+            x-effect="if (!connTypeInit && connection && connection.direct_ip) { connType = 'direct'; connTypeInit = true; }">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-sm font-medium text-slate-500">{{ _('status.connection_details') }}</h2>
                 <select x-model="connType"
                     class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">
                     <option value="connect">{{ _('status.connect') }}</option>
                     <option value="stv">{{ _('status.source_tv') }}</option>
-                    <template x-if="connection && connection.enable_direct_connect && connection.ip_address">
+                    <template x-if="connection && connection.direct_ip">
                         <option value="direct">{{ _('status.direct_connect') }}</option>
                     </template>
-                    <template x-if="connection && connection.enable_direct_connect && connection.ip_address">
+                    <template x-if="connection && connection.direct_ip">
                         <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
                     </template>
                 </select>
@@ -1028,9 +1043,9 @@
             <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password : ''"></code>
+                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + connection.sdr_tv_port + '; password ' + connection.tv_password : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + (parseInt(connection.sdr_port) + 1) + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_tv_port + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1040,12 +1055,12 @@
             </div>
 
             <!-- Direct Connect -->
-            <div x-show="connType === 'direct' && connection && connection.ip_address" x-data="{ copied: false }">
+            <div x-show="connType === 'direct' && connection && connection.direct_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.ip_address + ':27015; password ' + connection.password : ''"></code>
+                        x-text="connection ? 'connect ' + connection.direct_ip + ':' + connection.direct_port + '; password ' + connection.password : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27015; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText('connect ' + connection.direct_ip + ':' + connection.direct_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1055,12 +1070,12 @@
             </div>
 
             <!-- Direct SourceTV -->
-            <div x-show="connType === 'direct_stv' && connection && connection.ip_address" x-data="{ copied: false }">
+            <div x-show="connType === 'direct_stv' && connection && connection.direct_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.ip_address + ':27020; password ' + connection.tv_password : ''"></code>
+                        x-text="connection ? 'connect ' + connection.direct_ip + ':' + connection.direct_tv_port + '; password ' + connection.tv_password : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.ip_address + ':27020; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText('connect ' + connection.direct_ip + ':' + connection.direct_tv_port + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1296,6 +1311,17 @@
 	                providerName: null,
 	                fetchingStats: false,
 	                statsPollInterval: null,
+	                get hostStats() {
+	                    return this.stats && this.stats.runtime_kind === 'instant'
+	                        ? this.stats.host : this.stats;
+	                },
+	                get containerStats() {
+	                    return this.stats && this.stats.runtime_kind === 'instant'
+	                        ? this.stats.container : null;
+	                },
+	                get usesSharedHost() {
+	                    return Boolean(this.stats && this.stats.host_shared);
+	                },
 
 	                startStatsPolling() {
 	                    this.fetchStats();
@@ -1360,38 +1386,39 @@
             <div x-show="open" x-cloak x-transition class="mt-3">
                 <div x-show="!stats" class="text-xs text-slate-400">{{ _('status.waiting_for_data') }}</div>
                 <div x-show="stats" class="space-y-2 text-xs font-mono">
+                    <p x-show="usesSharedHost" class="font-sans text-xs text-slate-500">Shared host usage (all slots)</p>
                     <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-slate-50 rounded-lg p-3">
-                        <template x-if="stats && stats.cpu_model">
+                        <template x-if="hostStats && hostStats.cpu_model">
                             <div class="contents">
                                 <div class="text-slate-400">{{ _('status.cpu_model') }}</div>
-                                <div class="text-slate-700 text-right" x-text="stats.cpu_model"></div>
+                                <div class="text-slate-700 text-right" x-text="hostStats.cpu_model"></div>
                             </div>
                         </template>
 
                         <div class="text-slate-400">{{ _('status.cpus') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? stats.num_cpus : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? hostStats.num_cpus : '--'"></div>
 
                         <div class="text-slate-400">{{ _('status.cpu') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? fmtPct(stats.cpu_percent) : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? fmtPct(hostStats.cpu_percent) : '--'"></div>
 
                         <div class="text-slate-400">{{ _('status.load_avg') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? (fmtLoad(stats.load_avg_1) + '  ' + fmtLoad(stats.load_avg_5) + '  ' + fmtLoad(stats.load_avg_15)) : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? (fmtLoad(hostStats.load_avg_1) + '  ' + fmtLoad(hostStats.load_avg_5) + '  ' + fmtLoad(hostStats.load_avg_15)) : '--'"></div>
 
                         <div class="text-slate-400">{{ _('status.ram') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? (stats.mem_used_mb + ' / ' + stats.mem_total_mb + ' MB (' + fmtPct(stats.mem_percent) + ')') : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? (hostStats.mem_used_mb + ' / ' + hostStats.mem_total_mb + ' MB (' + fmtPct(hostStats.mem_percent) + ')') : '--'"></div>
 
-                        <template x-if="stats && stats.swap_total_mb > 0">
+                        <template x-if="hostStats && hostStats.swap_total_mb > 0">
                             <div class="contents">
                                 <div class="text-slate-400">{{ _('status.swap') }}</div>
-                                <div class="text-slate-700 text-right" x-text="stats.swap_used_mb + ' / ' + stats.swap_total_mb + ' MB (' + fmtPct(stats.swap_percent) + ')'"></div>
+                                <div class="text-slate-700 text-right" x-text="hostStats.swap_used_mb + ' / ' + hostStats.swap_total_mb + ' MB (' + fmtPct(hostStats.swap_percent) + ')'"></div>
                             </div>
                         </template>
 
                         <div class="text-slate-400">{{ _('status.disk') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? (stats.disk_used_gb.toFixed(1) + ' / ' + stats.disk_total_gb.toFixed(1) + ' GB (' + fmtPct(stats.disk_percent) + ')') : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? (hostStats.disk_used_gb.toFixed(1) + ' / ' + hostStats.disk_total_gb.toFixed(1) + ' GB (' + fmtPct(hostStats.disk_percent) + ')') : '--'"></div>
 
                         <div class="text-slate-400">{{ _('status.uptime') }}</div>
-                        <div class="text-slate-700 text-right" x-text="stats ? fmtUptime(stats.uptime_sec) : '--'"></div>
+                        <div class="text-slate-700 text-right" x-text="hostStats ? fmtUptime(hostStats.uptime_sec) : '--'"></div>
 
                         <template x-if="providerName">
                             <div class="contents">
@@ -1400,8 +1427,22 @@
                             </div>
                         </template>
                     </div>
-                    <p x-show="stats && stats.updated_at" class="text-slate-400 text-right"
-                        x-text="stats && stats.updated_at ? 'Updated ' + new Date(stats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''"></p>
+                    <template x-if="usesSharedHost">
+                        <div class="rounded-lg bg-blue-50 p-3">
+                            <p class="mb-2 font-sans text-xs font-medium text-blue-800">Reservation container usage</p>
+                            <div x-show="!containerStats" class="font-sans text-xs text-blue-600">Waiting for container statistics</div>
+                            <div x-show="containerStats" class="grid grid-cols-2 gap-x-4 gap-y-1">
+                                <template x-for="entry in Object.entries(containerStats || {}).filter(([key]) => key !== 'updated_at')" :key="entry[0]">
+                                    <div class="contents">
+                                        <div class="text-blue-600" x-text="entry[0]"></div>
+                                        <div class="break-all text-right text-blue-900" x-text="typeof entry[1] === 'object' ? JSON.stringify(entry[1]) : entry[1]"></div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="hostStats && hostStats.updated_at" class="text-slate-400 text-right"
+                        x-text="hostStats && hostStats.updated_at ? 'Updated ' + new Date(hostStats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''"></p>
                 </div>
             </div>
         </div>

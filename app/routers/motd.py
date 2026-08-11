@@ -64,13 +64,22 @@ async def motd_page(
     connection = {
         "sdr_ip": reservation.sdr_ip,
         "sdr_port": reservation.sdr_port,
+        "sdr_tv_port": reservation.sdr_tv_port,
         "password": reservation.password,
         "tv_password": reservation.tv_password,
+        "direct_ip": reservation.direct_ip,
+        "direct_port": reservation.direct_port,
+        "direct_tv_port": reservation.direct_tv_port,
     }
-    if reservation.enable_direct_connect and reservation.cloud_instance:
+    if reservation.direct_ip:
+        connection["ip_address"] = reservation.direct_ip
+    elif reservation.enable_direct_connect and reservation.cloud_instance:
         ip = reservation.cloud_instance.ip_address
         if ip and ip != "0.0.0.0":
             connection["ip_address"] = ip
+            connection["direct_ip"] = ip
+            connection["direct_port"] = 27015
+            connection["direct_tv_port"] = 27020
 
     response = templates.TemplateResponse(
         request,

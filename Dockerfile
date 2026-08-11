@@ -5,8 +5,9 @@ WORKDIR /build/agent
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
+ARG AGENT_VERSION=0.2.0
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags "-s -w" -o /tf2-agent .
+    go build -trimpath -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tf2-agent .
 
 # Stage 2: Build Tailwind CSS
 FROM debian:bookworm-slim AS css-builder

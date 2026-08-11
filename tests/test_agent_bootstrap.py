@@ -30,6 +30,7 @@ class AgentBootstrapTests(unittest.TestCase):
 
         digest = hashlib.sha256(Path("static/tf2-agent").read_bytes()).hexdigest()
         self.assertIn("StartLimitIntervalSec=0", agent_unit)
+        self.assertIn("Environment=AGENT_MODE=cloud", agent_unit)
         self.assertIn("/usr/bin/curl --fail --location", agent_unit)
         self.assertIn("--retry 5 --retry-connrefused --retry-delay 5", agent_unit)
         self.assertIn("--output /home/core/tf2-agent.download", agent_unit)

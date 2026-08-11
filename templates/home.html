@@ -313,7 +313,7 @@
         this.savePingCache(true);
     },
     async openModal(code, loc) {
-        if (!loc.enabled || loc.available <= 0) return;
+        if (!loc.enabled || !loc.reservable) return;
         this.loc = { code, ...loc };
         this.enableDirectConnect = !loc.recommended;
         this.enableLogsTFUpload = true;
@@ -497,7 +497,7 @@
                     <template x-if="item.type === 'row'">
                         <div class="flex items-center justify-between py-2 border-b border-slate-200 -mx-1 px-1 rounded transition-colors"
                             {% if can_reserve %} @click="openModal(item.entry[0], item.entry[1])"
-                            :class="item.entry[1].enabled && item.entry[1].available > 0 ? 'cursor-pointer hover:bg-slate-100' : 'opacity-50'"
+                            :class="item.entry[1].enabled && item.entry[1].reservable ? 'cursor-pointer hover:bg-slate-100' : 'opacity-50'"
                             {% endif %}>
                             <div class="flex items-center gap-2">
                                 <template x-if="item.entry[1].flag">
@@ -513,6 +513,9 @@
                                 <span x-show="item.entry[1].instant"
                                     class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded cursor-help"
                                     title="{{ _('home.instant_tooltip') }}">⚡ {{ _('home.instant') }}</span>
+                                <span x-show="item.entry[1].instant_available"
+                                    class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded cursor-help"
+                                    title="Available on an operator-owned persistent host">Host</span>
                                 <span x-show="item.entry[1].recommended"
                                     class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded cursor-help"
                                     title="{{ _('home.sdr_tooltip') }}">🛡️ {{ _('home.sdr') }}</span>
@@ -587,6 +590,8 @@
                 <div class="flex gap-1.5 mt-1">
                     <span x-show="loc && loc.instant"
                         class="text-xs px-1.5 py-0.5 bg-green-100 text-green-800 rounded">⚡ {{ _('home.instant') }}</span>
+                    <span x-show="loc && loc.instant_available"
+                        class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded">Host</span>
                     <span x-show="loc && loc.recommended"
                         class="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">🛡️ {{ _('home.sdr') }}</span>
                 </div>

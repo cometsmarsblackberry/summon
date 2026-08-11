@@ -94,3 +94,17 @@ async def get_fastdl_url(db: AsyncSession) -> str:
     """Return the FastDL URL, falling back to config default."""
     cfg = get_settings()
     return await get_setting("fastdl_url", db, cfg.fastdl_url)
+
+
+async def get_instant_settings(db: AsyncSession) -> dict:
+    """Return the Instant-host rollout and shared image settings."""
+    cfg = get_settings()
+    enabled_default = "true" if cfg.instant_hosts_enabled else "false"
+    return {
+        "enabled": (
+            await get_setting("instant_hosts_enabled", db, enabled_default)
+        ).strip().lower() == "true",
+        "container_image": await get_setting(
+            "instant_container_image", db, cfg.instant_container_image
+        ),
+    }

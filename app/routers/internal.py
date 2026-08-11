@@ -3,16 +3,20 @@
 import asyncio
 import hmac
 import logging
+import uuid
 from typing import Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.database import async_session_maker
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.instance import CloudInstance
+from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.utils.upload_links import is_allowed_upload_url
 
 
@@ -39,6 +43,15 @@ agent_stats: dict[str, dict] = {}
 
 # Track competitive config lists reported by agents (instance_id -> data)
 competitive_configs: dict[str, dict] = {}
+
+# Persistent-host connections and per-assignment observations. Host-wide and
+# container stats stay separate so shared load is never presented as a single
+# reservation's resource usage.
+connected_instant_hosts: dict[int, WebSocket] = {}
+instant_host_send_locks: dict[int, asyncio.Lock] = {}
+instant_boot_progress: dict[int, dict] = {}
+instant_container_stats: dict[int, dict] = {}
+instant_fallback_tasks: set[asyncio.Task] = set()
 
 
 def _extract_agent_token(websocket: WebSocket) -> str | None:
@@ -78,6 +91,40 @@ def get_agent_stats(instance_id: str) -> Optional[dict]:
 def get_competitive_configs(instance_id: str) -> Optional[dict]:
     """Get the last reported competitive configs for an instance."""
     return competitive_configs.get(instance_id)
+
+
+def get_instant_boot_progress(assignment_id: int) -> Optional[dict]:
+    return instant_boot_progress.get(assignment_id)
+
+
+def get_instant_container_stats(assignment_id: int) -> Optional[dict]:
+    return instant_container_stats.get(assignment_id)
+
+
+async def send_instant_command(host_id: int, message: dict) -> bool:
+    """Send a versioned command to a connected persistent host agent."""
+    websocket = connected_instant_hosts.get(host_id)
+    if websocket is None:
+        return False
+    return await _send_instant_message(host_id, websocket, message)
+
+
+async def _send_instant_message(
+    host_id: int, websocket: WebSocket, message: dict
+) -> bool:
+    """Serialize writes to one host while allowing different hosts in parallel."""
+    lock = instant_host_send_locks.setdefault(host_id, asyncio.Lock())
+    try:
+        async with lock:
+            if connected_instant_hosts.get(host_id) is not websocket:
+                return False
+            await websocket.send_json(message)
+        return True
+    except Exception as exc:
+        logger.warning("Failed to send command to Instant host %s: %s", host_id, exc)
+        if connected_instant_hosts.get(host_id) is websocket:
+            connected_instant_hosts.pop(host_id, None)
+        return False
 
 
 def get_player_data(reservation_number: int) -> Optional[dict]:
@@ -182,6 +229,695 @@ async def agent_websocket(
         connected_agents.pop(effective_id, None)
         boot_progress.pop(effective_id, None)
         agent_stats.pop(effective_id, None)
+
+
+def _host_token(websocket: WebSocket) -> str | None:
+    auth_header = websocket.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        return auth_header[7:].strip() or None
+    return None
+
+
+async def _send_host_configuration(host: InstantHost, websocket: WebSocket) -> None:
+    from app.services.settings import get_instant_settings
+
+    async with async_session_maker() as db:
+        instant_settings = await get_instant_settings(db)
+        slots = list((await db.execute(
+            select(InstantSlot)
+            .where(InstantSlot.host_id == host.id, InstantSlot.enabled.is_(True))
+            .order_by(InstantSlot.slot_index)
+        )).scalars().all())
+    desired_image = host.desired_image or instant_settings["container_image"]
+    sent = await _send_instant_message(host.id, websocket, {
+        "type": "host.configure",
+        "protocol": 1,
+        "host_id": host.id,
+        "heartbeat_interval_seconds": 10,
+        "desired_image": desired_image,
+        "force_image_prepare": host.image_status == "preparing",
+        "version_pin": host.version_pin,
+        "slots": [
+            {
+                "slot_id": slot.id,
+                "slot_index": slot.slot_index,
+                "game_port": slot.game_port,
+                "tv_port": slot.tv_port,
+            }
+            for slot in slots
+        ],
+        "agent_manifest_url": (
+            f"{settings.base_url}/internal/instant-hosts/{host.id}/agent-manifest"
+        ),
+        "update_check_interval_seconds": 900,
+    })
+    if not sent:
+        raise RuntimeError("Instant host disconnected before configuration was sent")
+
+
+async def refresh_instant_host_configuration(host: InstantHost) -> bool:
+    """Push current slots/image/version policy to a connected host."""
+    websocket = connected_instant_hosts.get(host.id)
+    if websocket is None:
+        return False
+    try:
+        await _send_host_configuration(host, websocket)
+        return True
+    except Exception:
+        logger.exception("Failed to refresh configuration for Instant host %s", host.id)
+        if connected_instant_hosts.get(host.id) is websocket:
+            connected_instant_hosts.pop(host.id, None)
+        return False
+
+
+@router.websocket("/ws/instant-host/{host_id}")
+async def instant_host_websocket(websocket: WebSocket, host_id: int):
+    """Authenticated multi-slot protocol endpoint for persistent hosts."""
+    token = _host_token(websocket)
+    if not token:
+        await websocket.close(code=4001, reason="Credential required")
+        return
+
+    from app.services.instant_hosts import verify_host_secret
+    async with async_session_maker() as db:
+        host = await db.get(InstantHost, host_id)
+        if (
+            host is None
+            or host.deleted_at is not None
+            or not verify_host_secret(token, host.credential_hash)
+        ):
+            await websocket.close(code=4003, reason="Invalid credential")
+            return
+        host.last_heartbeat_at = datetime.now(timezone.utc)
+        # A reconnect must not inherit a previously compatible protocol or
+        # preflight result. Keep it out of scheduling until this connection's
+        # host.hello inventory has been validated below.
+        host.health_status = "connecting"
+        await db.commit()
+
+    await websocket.accept()
+    previous = connected_instant_hosts.get(host_id)
+    connected_instant_hosts[host_id] = websocket
+    if previous is not None and previous is not websocket:
+        # Replacing an old in-memory route does not issue any host command.
+        try:
+            await previous.close(code=4000, reason="Superseded connection")
+        except Exception:
+            pass
+    logger.info("Instant host %s connected", host_id)
+    await _send_host_configuration(host, websocket)
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if not isinstance(data, dict):
+                continue
+            await handle_instant_host_message(host_id, data, websocket)
+    except WebSocketDisconnect:
+        logger.info("Instant host %s disconnected", host_id)
+    except Exception:
+        logger.exception("Instant host %s WebSocket error", host_id)
+    finally:
+        if connected_instant_hosts.get(host_id) is websocket:
+            connected_instant_hosts.pop(host_id, None)
+
+
+def _parse_protocol_range(data: dict) -> tuple[int | None, int | None, int | None]:
+    value = data.get("protocol_version")
+    lower = data.get("protocol_min", value)
+    upper = data.get("protocol_max", value)
+    try:
+        version = int(value) if value is not None else None
+        minimum = int(lower) if lower is not None else None
+        maximum = int(upper) if upper is not None else None
+    except (TypeError, ValueError):
+        return None, None, None
+    return version, minimum, maximum
+
+
+async def handle_instant_host_message(
+    host_id: int, data: dict, websocket: WebSocket | None = None
+) -> None:
+    """Validate and apply one host protocol event."""
+    message_type = str(data.get("type") or "")
+    if message_type in {"host.hello", "host.status"}:
+        await _handle_host_status(host_id, data, hello=message_type == "host.hello")
+        return
+    if message_type in {
+        "host.image", "host.update", "host.competitive_configs",
+        "server.progress", "server.ready", "server.stopped", "server.failed",
+        "server.rcon.result",
+    }:
+        try:
+            event_protocol = int(data.get("protocol"))
+        except (TypeError, ValueError):
+            event_protocol = -1
+        if not settings.instant_protocol_min <= event_protocol <= settings.instant_protocol_max:
+            logger.warning(
+                "Rejected incompatible %s event from Instant host %s",
+                message_type, host_id,
+            )
+            return
+    if message_type == "host.image":
+        await _handle_host_image(host_id, data)
+        return
+    if message_type == "host.update":
+        await _handle_host_update(host_id, data)
+        return
+    if message_type == "host.competitive_configs":
+        configs = data.get("configs")
+        if isinstance(configs, list):
+            from app.services.competitive_configs import filter_user_selectable
+            cfg_files = [str(item)[:128] for item in configs[:500]]
+            exec_cfg_files = sorted(set(
+                filter_user_selectable(cfg_files) + ["summon_reset"]
+            ))
+            competitive_configs[f"instant:{host_id}"] = {
+                "cfg_files": sorted(set(cfg_files)),
+                "exec_cfg_files": exec_cfg_files,
+                "container_image": str(data.get("container_image") or "")[:255],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        return
+    if message_type not in {
+        "server.progress", "server.ready", "server.stopped", "server.failed",
+        "server.rcon.result",
+    }:
+        logger.warning("Unknown event %r from Instant host %s", message_type, host_id)
+        return
+
+    required = ("command_id", "reservation_id", "assignment_id", "slot_id", "generation")
+    if any(data.get(field) is None for field in required):
+        logger.warning("Incomplete %s event from Instant host %s", message_type, host_id)
+        return
+
+    try:
+        assignment_id = int(data["assignment_id"])
+        reservation_id = int(data["reservation_id"])
+        slot_id = int(data["slot_id"])
+        generation = int(data["generation"])
+    except (TypeError, ValueError):
+        logger.warning("Invalid identifiers in %s from Instant host %s", message_type, host_id)
+        return
+
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(InstantAssignment)
+            .options(
+                selectinload(InstantAssignment.slot).selectinload(InstantSlot.host),
+                selectinload(InstantAssignment.reservation),
+            )
+            .where(InstantAssignment.id == assignment_id)
+        )
+        assignment = result.scalar_one_or_none()
+        if (
+            assignment is None
+            or assignment.reservation_id != reservation_id
+            or assignment.slot_id != slot_id
+            or assignment.generation != generation
+            or assignment.slot.host_id != host_id
+        ):
+            logger.warning(
+                "Rejected stale/conflicting %s event from host %s assignment %s generation %s",
+                message_type, host_id, assignment_id, generation,
+            )
+            return
+
+        reservation = assignment.reservation
+        if message_type == "server.progress":
+            instant_boot_progress[assignment.id] = {
+                "stage": data.get("stage"),
+                "progress": int(data.get("progress") or 0),
+                "message": str(data.get("message") or "")[:512],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            return
+        if message_type == "server.rcon.result":
+            logger.debug(
+                "Instant assignment %s RCON result for command %s: %s",
+                assignment.id, data.get("command_id"), data.get("output"),
+            )
+            return
+        if message_type == "server.ready":
+            await _handle_instant_ready(assignment, reservation, data, db)
+            return
+        if message_type == "server.stopped":
+            await _handle_instant_stopped(assignment, data, db)
+            return
+        if message_type == "server.failed":
+            failure_class = str(data.get("failure_class") or "infrastructure")
+            failure_code = str(data.get("failure_code") or "start_failed")
+            failure_message = str(data.get("message") or "Server start failed")
+            # Only an initial start failure participates in bounded
+            # Instant-to-Instant retry and cloud fallback. Control-operation or
+            # restart failures must never duplicate an existing reservation on
+            # another runtime.
+            if assignment.state not in {"claimed", "starting"}:
+                assignment.state = "degraded"
+                assignment.failure_class = failure_class[:64]
+                assignment.failure_code = failure_code[:64]
+                assignment.failure_message = failure_message[:4000]
+                assignment.slot.error_code = failure_code[:64]
+                assignment.slot.error_message = failure_message[:4000]
+                assignment.slot.quarantined_at = datetime.now(timezone.utc)
+                if reservation.status == ReservationStatus.PROVISIONING:
+                    reservation.status = ReservationStatus.FAILED
+                    reservation.failure_reason = "The assigned server could not be restarted."
+                await db.commit()
+                return
+            # Release this session before any cloud provider fallback can wait
+            # on network I/O.
+            from app.services.runtime import handle_instant_start_failure
+            provision_cloud = await handle_instant_start_failure(
+                assignment, reservation, db,
+                failure_class=failure_class,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                defer_cloud=True,
+            )
+            if provision_cloud:
+                from app.routers.reservations import provision_reservation_background
+                task = asyncio.create_task(provision_reservation_background(
+                    reservation.id, settings.database_url
+                ))
+                instant_fallback_tasks.add(task)
+                task.add_done_callback(instant_fallback_tasks.discard)
+
+
+async def _handle_host_status(host_id: int, data: dict, *, hello: bool) -> None:
+    now = datetime.now(timezone.utc)
+    async with async_session_maker() as db:
+        host = await db.get(InstantHost, host_id)
+        if host is None or host.deleted_at is not None:
+            return
+        version, minimum, maximum = _parse_protocol_range(data)
+        if data.get("agent_version") is not None:
+            host.agent_version = str(data.get("agent_version") or "unknown")[:64]
+        if version is not None:
+            host.protocol_version = version
+        if minimum is not None:
+            host.protocol_min = minimum
+        if maximum is not None:
+            host.protocol_max = maximum
+        if hello:
+            capabilities = data.get("capabilities")
+            host.capabilities = capabilities if isinstance(capabilities, (dict, list)) else []
+            host.platform = str(data.get("platform") or "")[:64] or None
+            host.architecture = str(data.get("architecture") or "")[:32] or None
+        host.last_heartbeat_at = now
+        if isinstance(data.get("sysinfo"), dict):
+            host.system_stats = {**data["sysinfo"], "updated_at": now.isoformat()}
+        if isinstance(data.get("preflight"), dict):
+            host.preflight_report = data["preflight"]
+        if data.get("health_error") is not None:
+            host.health_error = str(data.get("health_error") or "")[:4000] or None
+
+        image = data.get("image") if isinstance(data.get("image"), dict) else {}
+        if image:
+            if image.get("ready_digest"):
+                host.ready_image_digest = str(image["ready_digest"])[:255]
+            host.image_status = str(image.get("status") or host.image_status)[:32]
+            host.image_error = str(image.get("error") or "")[:4000] or None
+
+        effective_minimum = minimum if minimum is not None else host.protocol_min
+        effective_maximum = maximum if maximum is not None else host.protocol_max
+        compatible = (
+            effective_minimum is not None and effective_maximum is not None
+            and effective_minimum <= settings.instant_protocol_max
+            and effective_maximum >= settings.instant_protocol_min
+        )
+        preflight_ok = data.get("preflight_ok") is True
+        # A periodic status frame cannot substitute for the connection's
+        # identity/capability handshake. This also prevents stale persisted
+        # compatibility data from reopening capacity during reconnect.
+        if host.health_status == "connecting" and not hello:
+            pass
+        elif not compatible:
+            host.health_status = "incompatible"
+            host.health_error = "Agent protocol is not compatible with this Summon release"
+        elif not preflight_ok:
+            host.health_status = "preflight_failed"
+        elif host.image_status == "failed" and host.ready_image_digest:
+            host.health_status = "degraded"
+        elif host.image_status == "failed":
+            host.health_status = "unavailable"
+        elif host.ready_image_digest:
+            host.health_status = "ready"
+        else:
+            host.health_status = "preparing"
+        await db.commit()
+
+        inventory = data.get("slots")
+        if isinstance(inventory, list):
+            await _reconcile_host_inventory(host, inventory, db)
+
+    # A hello may report no image yet; configuration tells the agent what to
+    # prepare, while the last-known-good digest remains usable after failures.
+    socket = connected_instant_hosts.get(host_id)
+    if hello and socket is not None:
+        await _send_host_configuration(host, socket)
+
+
+async def _handle_host_image(host_id: int, data: dict) -> None:
+    async with async_session_maker() as db:
+        host = await db.get(InstantHost, host_id)
+        if host is None:
+            return
+        status_value = str(data.get("status") or "unknown")[:32]
+        host.image_status = status_value
+        if data.get("ready_digest"):
+            host.ready_image_digest = str(data["ready_digest"])[:255]
+        host.image_error = str(data.get("error") or "")[:4000] or None
+        if status_value == "ready" and host.health_status != "preflight_failed":
+            host.health_status = "ready"
+        elif status_value == "failed":
+            # Keep ready_image_digest as last-known-good.
+            host.health_status = "degraded" if host.ready_image_digest else "unavailable"
+        await db.commit()
+        logger.info(
+            "instant_event=image_status host_id=%s status=%s ready_digest=%s error=%s",
+            host_id, status_value, host.ready_image_digest or "none",
+            host.image_error or "none",
+        )
+
+
+async def _handle_host_update(host_id: int, data: dict) -> None:
+    async with async_session_maker() as db:
+        host = await db.get(InstantHost, host_id)
+        if host is None:
+            return
+        host.update_status = str(data.get("status") or "unknown")[:32]
+        host.update_error = str(data.get("error") or "")[:4000] or None
+        if data.get("draining") is True:
+            if not host.draining:
+                host.update_auto_drained = True
+            host.draining = True
+        elif (
+            data.get("draining") is False
+            and host.update_auto_drained
+            and host.update_status in {
+                "ready", "current", "rolled_back", "failed", "retry_required",
+            }
+        ):
+            host.draining = False
+            host.update_auto_drained = False
+        if data.get("agent_version"):
+            host.agent_version = str(data["agent_version"])[:64]
+        await db.commit()
+
+
+async def _reconcile_host_inventory(
+    host: InstantHost, inventory: list, db
+) -> None:
+    """Reconcile complete labeled Podman inventory with persisted leases."""
+    assignment_result = await db.execute(
+        select(InstantAssignment)
+        .options(
+            selectinload(InstantAssignment.slot).selectinload(InstantSlot.host),
+            selectinload(InstantAssignment.reservation),
+        )
+        .join(InstantSlot, InstantAssignment.slot_id == InstantSlot.id)
+        .where(InstantSlot.host_id == host.id, InstantAssignment.closed_at.is_(None))
+    )
+    open_assignments = {item.id: item for item in assignment_result.scalars().all()}
+    seen: set[int] = set()
+    conflicts: list[str] = []
+    now = datetime.now(timezone.utc)
+
+    for item in inventory:
+        if not isinstance(item, dict):
+            continue
+        try:
+            assignment_id = int(item.get("assignment_id"))
+            slot_id = int(item.get("slot_id"))
+            generation = int(item.get("generation"))
+        except (TypeError, ValueError):
+            conflicts.append("unlabeled managed container")
+            continue
+        assignment = open_assignments.get(assignment_id)
+        if (
+            assignment is None
+            or assignment.slot_id != slot_id
+            or assignment.generation != generation
+        ):
+            conflicts.append(f"container references stale assignment {assignment_id}")
+            slot = await db.get(InstantSlot, slot_id)
+            if slot and slot.host_id == host.id:
+                slot.error_code = "reconciliation_conflict"
+                slot.error_message = conflicts[-1]
+                slot.quarantined_at = now
+            continue
+        if assignment_id in seen:
+            conflicts.append(f"duplicate containers for assignment {assignment_id}")
+            assignment.slot.error_code = "duplicate_container"
+            assignment.slot.quarantined_at = now
+            continue
+        seen.add(assignment_id)
+        if item.get("container_id"):
+            assignment.container_id = str(item["container_id"])[:128]
+        if isinstance(item.get("stats"), dict):
+            instant_container_stats[assignment.id] = {
+                **item["stats"], "updated_at": now.isoformat(),
+            }
+        inventory_ends_at = assignment.reservation.ends_at
+        if inventory_ends_at.tzinfo is None:
+            inventory_ends_at = inventory_ends_at.replace(tzinfo=timezone.utc)
+        reservation_terminal = assignment.reservation.status in {
+            ReservationStatus.ENDED,
+            ReservationStatus.CANCELLED,
+            ReservationStatus.NO_SHOW,
+            ReservationStatus.FAILED,
+        }
+        if (
+            inventory_ends_at <= now
+            or reservation_terminal
+            or assignment.state == "stopping"
+        ):
+            await send_instant_command(
+                host.id,
+                _instant_reconcile_command(
+                    "server.stop",
+                    assignment,
+                    reason="expired" if inventory_ends_at <= now else "not_desired",
+                ),
+            )
+
+    # A desired assignment with no labeled container is safe to reissue because
+    # command IDs and generations are idempotency keys on the agent.
+    for assignment_id, assignment in open_assignments.items():
+        if assignment_id in seen:
+            continue
+        reservation = assignment.reservation
+        ends_at = reservation.ends_at
+        if ends_at.tzinfo is None:
+            ends_at = ends_at.replace(tzinfo=timezone.utc)
+        if ends_at <= now or reservation.status in {
+            ReservationStatus.ENDED, ReservationStatus.CANCELLED,
+            ReservationStatus.NO_SHOW, ReservationStatus.FAILED,
+        }:
+            await send_instant_command(
+                host.id,
+                _instant_reconcile_command("server.stop", assignment, reason="not_desired"),
+            )
+        elif assignment.state in {
+            "claimed", "starting", "ready", "restarting", "degraded",
+        }:
+            from app.services.runtime import dispatch_instant_start
+            await dispatch_instant_start(reservation, assignment, db)
+
+    host.reconciliation_error = "; ".join(conflicts)[:4000] if conflicts else None
+    if conflicts:
+        # Complete inventory conflicts make slot ownership ambiguous. Keep the
+        # host out of scheduling until a later clean inventory or admin action
+        # resolves them; never silently allocate around an unknown container.
+        host.health_status = "quarantined"
+    await db.commit()
+    if conflicts:
+        logger.warning(
+            "instant_event=reconciliation_conflict host_id=%s conflicts=%s",
+            host.id, len(conflicts),
+        )
+
+
+def _instant_reconcile_command(
+    command_type: str, assignment: InstantAssignment, **extra
+) -> dict:
+    return {
+        "type": command_type,
+        "protocol": 1,
+        "command_id": str(uuid.uuid4()),
+        "reservation_id": assignment.reservation_id,
+        "assignment_id": assignment.id,
+        "slot_id": assignment.slot_id,
+        "slot_index": assignment.slot.slot_index,
+        "generation": assignment.generation,
+        **extra,
+    }
+
+
+async def _handle_instant_ready(
+    assignment: InstantAssignment, reservation: Reservation, data: dict, db
+) -> None:
+    if assignment.closed_at is not None:
+        # A start and a terminal lifecycle action may cross on the wire. Even
+        # though the historical lease is already closed, a late readiness
+        # frame proves that a container exists and must be stopped explicitly.
+        await send_instant_command(
+            assignment.slot.host_id,
+            _instant_reconcile_command(
+                "server.stop", assignment, reason="closed_assignment"
+            ),
+        )
+        return
+    now = datetime.now(timezone.utc)
+    terminal = reservation.status in {
+        ReservationStatus.ENDED,
+        ReservationStatus.CANCELLED,
+        ReservationStatus.NO_SHOW,
+        ReservationStatus.FAILED,
+    }
+    if assignment.state == "stopping" or terminal:
+        # Start and stop commands can cross on the wire. A late ready event must
+        # never resurrect a reservation that the user/backend already ended.
+        assignment.container_id = (
+            str(data.get("container_id") or "")[:128] or assignment.container_id
+        )
+        assignment.state = "stopping"
+        assignment.stop_requested_at = assignment.stop_requested_at or now
+        command = _instant_reconcile_command(
+            "server.stop", assignment, reason="not_desired"
+        )
+        assignment.last_command_id = command["command_id"]
+        await db.commit()
+        await send_instant_command(assignment.slot.host_id, command)
+        return
+    assignment.state = "ready"
+    assignment.ready_at = assignment.ready_at or now
+    assignment.container_id = str(data.get("container_id") or "")[:128] or assignment.container_id
+    reservation.status = ReservationStatus.ACTIVE
+    reservation.started_at = reservation.started_at or now
+    reservation.empty_since = now
+    reservation.direct_ip = assignment.slot.host.public_ipv4
+    reservation.direct_port = assignment.slot.game_port
+    reservation.direct_tv_port = assignment.slot.tv_port
+
+    sdr_ip = data.get("sdr_ip")
+    if isinstance(sdr_ip, str) and sdr_ip.startswith("169.254."):
+        reservation.sdr_ip = sdr_ip
+        reservation.sdr_port = int(data.get("sdr_port") or assignment.slot.game_port)
+        reservation.sdr_tv_port = int(data.get("sdr_tv_port") or assignment.slot.tv_port)
+    else:
+        reservation.sdr_ip = assignment.slot.host.public_ipv4
+        reservation.sdr_port = assignment.slot.game_port
+        reservation.sdr_tv_port = assignment.slot.tv_port
+    if data.get("map"):
+        reservation.current_map = str(data["map"])[:64]
+    await db.commit()
+    from app.services.timer import schedule_expiry_timer
+    schedule_expiry_timer(
+        reservation.id, reservation.reservation_number, reservation.ends_at, None
+    )
+    claimed_at = assignment.claimed_at or now
+    if claimed_at.tzinfo is None:
+        claimed_at = claimed_at.replace(tzinfo=timezone.utc)
+    logger.info(
+        "instant_event=server_ready reservation=%s host_id=%s slot_index=%s start_latency_seconds=%.3f",
+        reservation.reservation_number, assignment.slot.host_id, assignment.slot.slot_index,
+        max(0.0, (now - claimed_at).total_seconds()),
+    )
+
+
+async def _handle_instant_stopped(
+    assignment: InstantAssignment, data: dict, db
+) -> None:
+    if assignment.closed_at is not None:
+        return
+    now = datetime.now(timezone.utc)
+    assignment.state = "stopped"
+    assignment.stopped_at = now
+    assignment.closed_at = now
+    assignment.container_id = None
+    assignment.slot.last_used_at = now
+    instant_container_stats.pop(assignment.id, None)
+    instant_boot_progress.pop(assignment.id, None)
+    await db.commit()
+
+
+class InstantEnrollmentRequest(BaseModel):
+    token: str
+
+
+@router.post("/instant-hosts/enroll")
+async def enroll_instant_host(request: InstantEnrollmentRequest):
+    """Exchange one copy-once enrollment token for a stable agent credential."""
+    from app.services.instant_hosts import InstantHostError, exchange_enrollment_token
+    async with async_session_maker() as db:
+        try:
+            host, credential = await exchange_enrollment_token(db, request.token)
+        except InstantHostError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        from app.services.orchestrator import _agent_binary_sha256
+        agent_digest = _agent_binary_sha256()
+        return {
+            "host_id": host.id,
+            "credential": credential,
+            "websocket_url": (
+                settings.base_url.replace("https://", "wss://").replace("http://", "ws://")
+                + f"/internal/ws/instant-host/{host.id}"
+            ),
+            "agent_url": (
+                f"{settings.base_url}/static/tf2-agent?sha256={agent_digest}"
+            ),
+            "agent_sha256": agent_digest,
+            "credential_file": "/var/lib/summon-agent/credential",
+            "slots": [
+                {
+                    "slot_index": slot.slot_index,
+                    "game_port": slot.game_port,
+                    "tv_port": slot.tv_port,
+                }
+                for slot in (
+                    await db.execute(
+                        select(InstantSlot)
+                        .where(InstantSlot.host_id == host.id, InstantSlot.enabled.is_(True))
+                        .order_by(InstantSlot.slot_index)
+                    )
+                ).scalars().all()
+            ],
+        }
+
+
+def _bearer_value(authorization: str | None) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        return ""
+    return authorization[7:].strip()
+
+
+@router.get("/instant-hosts/{host_id}/agent-manifest")
+async def instant_agent_manifest(
+    host_id: int,
+    authorization: str | None = Header(None),
+):
+    """Return the authenticated update manifest for the deployed agent binary."""
+    from app.services.instant_hosts import verify_host_secret
+    from app.services.orchestrator import _agent_binary_sha256
+    async with async_session_maker() as db:
+        host = await db.get(InstantHost, host_id)
+        if (
+            host is None
+            or host.deleted_at is not None
+            or not verify_host_secret(_bearer_value(authorization), host.credential_hash)
+        ):
+            raise HTTPException(status_code=403, detail="Invalid host credential")
+    digest = _agent_binary_sha256()
+    return {
+        "version": settings.agent_version,
+        "protocol_min": settings.instant_protocol_min,
+        "protocol_max": settings.instant_protocol_max,
+        "download_url": f"{settings.base_url}/static/tf2-agent?sha256={digest}",
+        "sha256": digest,
+        "rollback_timeout_seconds": 90,
+    }
 
 
 async def _send_initial_config(instance_id: str, cloud_instance: CloudInstance, websocket):
@@ -424,6 +1160,10 @@ async def handle_server_ready(instance_id: str, data: dict):
         reservation.sdr_ip = connect_ip
         reservation.sdr_port = connect_port
         reservation.sdr_tv_port = connect_tv_port
+        if reservation.enable_direct_connect and real_ip:
+            reservation.direct_ip = real_ip
+            reservation.direct_port = real_port
+            reservation.direct_tv_port = real_tv_port
 
         if current_map:
             reservation.current_map = current_map
@@ -711,29 +1451,13 @@ async def end_reservation_from_plugin(
         # Clear in-memory player data
         clear_player_data(reservation_number)
 
-        # Notify agent to stop the container
-        instance_id_for_agent = None
-        if reservation.instance_id:
-            instance_result = await db.execute(
-                select(CloudInstance).where(CloudInstance.id == reservation.instance_id)
-            )
-            cloud_instance = instance_result.scalar_one_or_none()
-
-            if cloud_instance:
-                instance_id_for_agent = cloud_instance.instance_id
-                await send_to_agent(cloud_instance.instance_id, {
-                    "type": "reservation.end",
-                })
-
-            # Handle instance cleanup based on billing model
-            from app.services.orchestrator import release_to_warm_pool, destroy_instance, is_hourly_billing
-
-            if await is_hourly_billing(reservation.location, db):
-                if was_active or had_started:
-                    await release_to_warm_pool(reservation.instance_id, db)
-                # If still provisioning, let it complete and warm pool on server_ready
-            else:
-                await destroy_instance(reservation.instance_id, db)
+        from app.services.runtime import end_reservation_runtime
+        await end_reservation_runtime(
+            reservation,
+            db,
+            was_active=was_active,
+            had_started=had_started,
+        )
 
         return EndResponse(
             success=True,

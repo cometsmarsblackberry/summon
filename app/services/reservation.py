@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reservation import Reservation, ReservationStatus
+from app.models.instant import InstantAssignment, InstantSlot
 from app.models.user import User
 from app.utils.passwords import generate_motd_token, generate_password, generate_logsecret
 
@@ -35,6 +37,7 @@ async def create_reservation(
     config_file: str | None = None,
     enable_logs_tf_upload: bool = True,
     enable_demos_tf_upload: bool = True,
+    commit: bool = True,
 ) -> Reservation:
     """Create a new reservation.
 
@@ -91,8 +94,14 @@ async def create_reservation(
     # Increment user reservation count
     user.reservation_count += 1
     
-    await db.commit()
-    await db.refresh(reservation)
+    if commit:
+        await db.commit()
+        await db.refresh(reservation)
+    else:
+        # Reservation creation and runtime-capacity leasing share one request
+        # transaction. Flush obtains the FK identity without leaving a pending
+        # row behind if the final atomic Instant claim loses a race.
+        await db.flush()
     
     logger.info(
         f"Created reservation #{reservation_number} for user {user.steam_id} "
@@ -174,6 +183,11 @@ async def get_user_reservations(
     result = await db.execute(
         select(Reservation)
         .where(Reservation.user_id == user.id)
+        .options(
+            selectinload(Reservation.instant_assignments)
+            .selectinload(InstantAssignment.slot)
+            .selectinload(InstantSlot.host)
+        )
         .order_by(Reservation.created_at.desc())
         .limit(limit)
     )

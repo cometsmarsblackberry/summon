@@ -1,6 +1,6 @@
 # Summon
 
-On-demand Team Fortress 2 server reservation system. Reserve temporary game servers across multiple cloud providers (Vultr, Gcore) through a web UI.
+On-demand Team Fortress 2 server reservation system. Reserve temporary game servers across multiple cloud providers or operator-owned Instant hosts through a web UI.
 
 ## Quick Start
 
@@ -42,6 +42,7 @@ login route.
 
 - Steam OAuth login
 - Multi-provider server provisioning (Vultr, Gcore)
+- Multi-slot operator-owned hosts with Instant-first, cloud-overflow scheduling
 - Real-time server status via heartbeats from a Go agent
 - Auto-expiry and cleanup of unused servers
 - hCaptcha integration
