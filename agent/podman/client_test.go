@@ -1,10 +1,40 @@
 package podman
 
 import (
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestRunPodmanCommandKeepsWarningsOutOfMachineOutput(t *testing.T) {
+	cmd := exec.Command(
+		"sh", "-c",
+		`printf '[{"Id":"container-id"}]'; printf 'time="now" level=warning msg="fallback"\n' >&2`,
+	)
+	output, err := runPodmanCommand(cmd)
+	if err != nil {
+		t.Fatalf("successful command returned an error: %v", err)
+	}
+	if got, want := string(output), `[{"Id":"container-id"}]`; got != want {
+		t.Fatalf("stdout was contaminated by stderr: got %q, want %q", got, want)
+	}
+}
+
+func TestRunPodmanCommandPreservesDiagnosticsOnFailure(t *testing.T) {
+	cmd := exec.Command(
+		"sh", "-c",
+		`printf 'partial stdout'; printf 'podman stderr' >&2; exit 7`,
+	)
+	output, err := runPodmanCommand(cmd)
+	if err == nil {
+		t.Fatal("failed command unexpectedly succeeded")
+	}
+	text := string(output)
+	if !strings.Contains(text, "partial stdout") || !strings.Contains(text, "podman stderr") {
+		t.Fatalf("failure diagnostics were lost: %q", text)
+	}
+}
 
 func TestBuildRunArgsUsesSlotPortsAndKeepsRCONPrivate(t *testing.T) {
 	args := BuildRunArgs(ContainerConfig{

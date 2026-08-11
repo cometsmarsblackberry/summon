@@ -2,6 +2,7 @@
 package podman
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -105,6 +106,28 @@ func buildPodmanCmd(ctx context.Context, args ...string) *exec.Cmd {
 	}
 
 	return cmd
+}
+
+// runPodmanCommand keeps diagnostic warnings on stderr out of stdout. Podman
+// can emit warnings even when a command succeeds; callers often parse stdout
+// as JSON, a digest, a boolean, or a container ID.
+func runPodmanCommand(cmd *exec.Cmd) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		combined := append([]byte(nil), stdout.Bytes()...)
+		if len(combined) > 0 && len(stderr.Bytes()) > 0 && combined[len(combined)-1] != '\n' {
+			combined = append(combined, '\n')
+		}
+		combined = append(combined, stderr.Bytes()...)
+		return combined, err
+	}
+	if warning := strings.TrimSpace(stderr.String()); warning != "" {
+		log.Printf("Podman warning: %s", warning)
+	}
+	return stdout.Bytes(), nil
 }
 
 // Client provides access to podman via API and CLI
@@ -502,7 +525,7 @@ func (c *Client) StartContainer(ctx context.Context, cfg ContainerConfig) (strin
 	args := BuildRunArgs(cfg)
 
 	cmd := buildPodmanCmd(ctx, args...)
-	output, err := cmd.CombinedOutput()
+	output, err := runPodmanCommand(cmd)
 	if err != nil {
 		log.Printf("Container start failed: %s", string(output))
 		return "", fmt.Errorf("podman run failed: %w (output: %s)", err, string(output))
@@ -552,7 +575,7 @@ type ManagedContainer struct {
 // ListManagedContainers returns complete Instant container inventory from labels.
 func (c *Client) ListManagedContainers(ctx context.Context) ([]ManagedContainer, error) {
 	cmd := buildPodmanCmd(ctx, "ps", "-a", "--filter", "label=summon.runtime=instant", "--format", "json")
-	output, err := cmd.CombinedOutput()
+	output, err := runPodmanCommand(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("podman ps: %w (output: %s)", err, string(output))
 	}
@@ -594,7 +617,7 @@ func (c *Client) ListManagedContainers(ctx context.Context) ([]ManagedContainer,
 // ContainerStats returns one no-stream Podman stats sample.
 func (c *Client) ContainerStats(ctx context.Context, containerID string) (map[string]any, error) {
 	cmd := buildPodmanCmd(ctx, "stats", "--no-stream", "--format", "json", containerID)
-	output, err := cmd.CombinedOutput()
+	output, err := runPodmanCommand(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("podman stats: %w (output: %s)", err, string(output))
 	}
@@ -611,7 +634,7 @@ func (c *Client) ContainerStats(ctx context.Context, containerID string) (map[st
 // ImageDigest resolves a prepared mutable image reference to its immutable digest.
 func (c *Client) ImageDigest(ctx context.Context, image string) (string, error) {
 	cmd := buildPodmanCmd(ctx, "image", "inspect", "--format", "{{.Digest}}", image)
-	output, err := cmd.CombinedOutput()
+	output, err := runPodmanCommand(cmd)
 	if err != nil {
 		return "", fmt.Errorf("podman image inspect: %w (output: %s)", err, string(output))
 	}
@@ -625,7 +648,7 @@ func (c *Client) ImageDigest(ctx context.Context, image string) (string, error) 
 // GetContainerStatus returns whether the container is running using podman CLI
 func (c *Client) GetContainerStatus(ctx context.Context, containerID string) (bool, error) {
 	cmd := buildPodmanCmd(ctx, "inspect", "--format", "{{.State.Running}}", containerID)
-	output, err := cmd.CombinedOutput()
+	output, err := runPodmanCommand(cmd)
 	if err != nil {
 		// Container might not exist
 		return false, nil
