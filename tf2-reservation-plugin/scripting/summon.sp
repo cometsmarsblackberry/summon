@@ -16,7 +16,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.3.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -25,6 +25,7 @@
 #define MAX_OWNER_COMMAND_NAME 64
 #define MAX_OWNER_COMMAND_LINE 512
 #define MAX_OWNER_COMMAND_RESPONSE 4096
+#define OWNER_COMMAND_RESULT_MARKER "SUMMON_OWNER_COMMAND_RESULT"
 
 // ConVars - set by agent RCON at boot
 ConVar g_cvOwnerSteamID;
@@ -127,6 +128,11 @@ public void OnPluginStart()
     // Register RCON commands (called by agent)
     RegServerCmd("sm_reservation_warning", Command_ReservationWarning);
     RegServerCmd("sm_reservation_ending", Command_ReservationEnding);
+    RegServerCmd(
+        "sm_summon_owner_command",
+        Command_ServerOwnerCommand,
+        "Run one restricted reservation-owner command for the web console"
+    );
     LogMessage("[summon] Plugin loaded v%s", PLUGIN_VERSION);
 }
 
@@ -319,10 +325,9 @@ bool IsOwner(int client)
     return StrEqual(clientSteamID, ownerSteamID, false);
 }
 
-bool CanUseOwnerServerCommands(int client)
+bool ReservationAllowsOwnerServerCommands()
 {
-    return IsOwner(client)
-        && g_cvReservationNumber.IntValue > 0
+    return g_cvReservationNumber.IntValue > 0
         && !g_bExpiryKickDone
         && GetTimeRemaining() > 0;
 }
@@ -524,22 +529,24 @@ bool IsSafeTournamentWhitelistPath(const char[] path)
     return FileExists(path, true);
 }
 
-bool AreOwnerCommandArgumentsAllowed(const char[] operation, int args)
+bool AreOwnerCommandArgumentsAllowed(
+    const char[] operation,
+    int valueArgumentCount,
+    const char[] whitelistPath
+)
 {
     if (!StrEqual(operation, "mp_tournament_whitelist"))
         return true;
 
     // Reading the current value takes no value argument. Setting it takes one
     // path argument; accepting more would make the native parsing ambiguous.
-    if (args == 1)
+    if (valueArgumentCount == 0)
         return true;
 
-    if (args != 2)
+    if (valueArgumentCount != 1)
         return false;
 
-    char path[PLATFORM_MAX_PATH];
-    GetCmdArg(2, path, sizeof(path));
-    return IsSafeTournamentWhitelistPath(path);
+    return IsSafeTournamentWhitelistPath(whitelistPath);
 }
 
 bool TryConsumeOwnerCommandCooldown()
@@ -554,19 +561,29 @@ bool TryConsumeOwnerCommandCooldown()
     return true;
 }
 
-void LogOwnerCommand(int client, const char[] commandLine)
+void LogOwnerCommand(
+    const char[] actorSteamID,
+    const char[] commandLine,
+    const char[] outcome
+)
 {
-    char steamID[32];
-    if (!GetClientAuthId(client, AuthId_SteamID64, steamID, sizeof(steamID)))
+    char safeCommand[MAX_OWNER_COMMAND_LINE];
+    strcopy(safeCommand, sizeof(safeCommand), commandLine);
+    for (int i = 0; safeCommand[i] != '\0'; i++)
     {
-        strcopy(steamID, sizeof(steamID), "unknown");
+        int character = safeCommand[i];
+        if ((character > 0 && character < 32) || character == 127)
+            safeCommand[i] = ' ';
+        else if (character == '"')
+            safeCommand[i] = '\'';
     }
 
     LogMessage(
-        "[summon] Owner command reservation=%d actor=%s command=\"%s\" outcome=dispatched",
+        "[summon] Owner command reservation=%d actor=%s command=\"%s\" outcome=%s",
         g_cvReservationNumber.IntValue,
-        steamID,
-        commandLine
+        actorSteamID,
+        safeCommand,
+        outcome
     );
 }
 
@@ -585,7 +602,7 @@ public Action Command_OwnerServerCommand(int client, int args)
     if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
         return Plugin_Stop;
 
-    if (!CanUseOwnerServerCommands(client))
+    if (!IsOwner(client))
     {
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
         return Plugin_Stop;
@@ -620,7 +637,7 @@ public Action Listener_OwnerRcon(int client, const char[] command, int args)
     if (CheckCommandAccess(client, command, ADMFLAG_RCON, false))
         return Plugin_Continue;
 
-    if (!CanUseOwnerServerCommands(client))
+    if (!IsOwner(client))
     {
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
         return Plugin_Stop;
@@ -644,61 +661,43 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
         return Plugin_Handled;
     }
 
-    // This larger read buffer lets NormalizeOwnerCommandName enforce the
-    // configured identifier limit without treating a valid boundary-length
-    // name as potentially truncated input.
     char operation[256];
     int operationLength = GetCmdArg(1, operation, sizeof(operation));
-    if (operationLength <= 0
-        || operationLength >= sizeof(operation) - 1
-        || !NormalizeOwnerCommandName(operation)
-        || g_mOwnerCommandAllowlist == null
-        || !g_mOwnerCommandAllowlist.ContainsKey(operation))
-    {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That server command is not allowed.");
-        return Plugin_Handled;
-    }
-
-    if (!CommandExists(operation))
-    {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That server command is unavailable.");
-        return Plugin_Handled;
-    }
-
-    char commandLine[MAX_OWNER_COMMAND_LINE];
+    char commandLine[MAX_OWNER_COMMAND_LINE + 1];
     int commandLength = GetCmdArgString(commandLine, sizeof(commandLine));
-    if (commandLength <= 0
-        || commandLength >= sizeof(commandLine) - 1
-        || !IsSafeOwnerCommandLine(commandLine))
-    {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666That command line is not safe to run.");
-        return Plugin_Handled;
-    }
+    char actorSteamID[32];
+    if (!GetClientAuthId(client, AuthId_SteamID64, actorSteamID, sizeof(actorSteamID)))
+        strcopy(actorSteamID, sizeof(actorSteamID), "unknown");
 
-    if (!AreOwnerCommandArgumentsAllowed(operation, args))
-    {
-        PrintToChat(
-            client,
-            "\x01[\x07FF6600Reserve\x01] \x07FF6666That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files."
-        );
-        return Plugin_Handled;
-    }
-
-    if (!TryConsumeOwnerCommandCooldown())
-    {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Please wait before running another server command.");
-        return Plugin_Handled;
-    }
-
-    // Match stock sm_rcon's synchronous execution/output behavior, while the
-    // fixed format string prevents user input from becoming format directives.
-    // Capture the actor before execution because an allowlisted command may
-    // synchronously disconnect the caller or otherwise invalidate the client.
-    LogOwnerCommand(client, commandLine);
+    char whitelistPath[PLATFORM_MAX_PATH];
+    if (args >= 2)
+        GetCmdArg(2, whitelistPath, sizeof(whitelistPath));
 
     char response[MAX_OWNER_COMMAND_RESPONSE];
-    ServerCommandEx(response, sizeof(response), "%s", commandLine);
-    TrimString(response);
+    char errorCode[64];
+    char errorMessage[256];
+    bool succeeded = ExecuteOwnerServerCommand(
+        actorSteamID,
+        operation,
+        operationLength,
+        commandLine,
+        commandLength,
+        args - 1,
+        whitelistPath,
+        response,
+        sizeof(response),
+        errorCode,
+        sizeof(errorCode),
+        errorMessage,
+        sizeof(errorMessage)
+    );
+
+    if (!succeeded)
+    {
+        if (IsClientConnected(client))
+            PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666%s", errorMessage);
+        return Plugin_Handled;
+    }
 
     if (!IsClientConnected(client))
         return Plugin_Handled;
@@ -712,6 +711,209 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Command \x0799FF99%s\x01 dispatched.", operation);
     }
 
+    return Plugin_Handled;
+}
+
+bool OwnerCommandFailure(
+    const char[] actorSteamID,
+    const char[] commandLine,
+    const char[] code,
+    const char[] message,
+    char[] errorCode,
+    int errorCodeSize,
+    char[] errorMessage,
+    int errorMessageSize
+)
+{
+    strcopy(errorCode, errorCodeSize, code);
+    strcopy(errorMessage, errorMessageSize, message);
+    LogOwnerCommand(actorSteamID, commandLine, code);
+    return false;
+}
+
+bool ExecuteOwnerServerCommand(
+    const char[] actorSteamID,
+    char[] operation,
+    int operationLength,
+    const char[] commandLine,
+    int commandLength,
+    int valueArgumentCount,
+    const char[] whitelistPath,
+    char[] response,
+    int responseSize,
+    char[] errorCode,
+    int errorCodeSize,
+    char[] errorMessage,
+    int errorMessageSize
+)
+{
+    response[0] = '\0';
+    errorCode[0] = '\0';
+    errorMessage[0] = '\0';
+
+    if (!ReservationAllowsOwnerServerCommands())
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "reservation_inactive",
+            "The reservation is not active.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+
+    if (operationLength <= 0
+        || operationLength >= 255
+        || !NormalizeOwnerCommandName(operation))
+    {
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "invalid_command_name",
+            "That server command name is invalid.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+    }
+
+    if (g_mOwnerCommandAllowlist == null || g_iOwnerCommandCount <= 0)
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "allowlist_unavailable",
+            "The server command allowlist is unavailable.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+
+    if (!g_mOwnerCommandAllowlist.ContainsKey(operation))
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "command_not_allowed",
+            "That server command is not allowed.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+
+    if (!CommandExists(operation))
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "command_unavailable",
+            "That server command is unavailable.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+
+    if (commandLength <= 0
+        || commandLength >= MAX_OWNER_COMMAND_LINE
+        || !IsSafeOwnerCommandLine(commandLine))
+    {
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "unsafe_command",
+            "That command line is not safe to run.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+    }
+
+    if (!AreOwnerCommandArgumentsAllowed(
+        operation, valueArgumentCount, whitelistPath
+    ))
+    {
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "invalid_arguments",
+            "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+    }
+
+    if (!TryConsumeOwnerCommandCooldown())
+        return OwnerCommandFailure(
+            actorSteamID, commandLine, "cooldown",
+            "Please wait before running another server command.",
+            errorCode, errorCodeSize, errorMessage, errorMessageSize
+        );
+
+    // Match stock sm_rcon's synchronous execution/output behavior. The fixed
+    // format string prevents user input from becoming format directives.
+    ServerCommandEx(response, responseSize, "%s", commandLine);
+    TrimString(response);
+    LogOwnerCommand(actorSteamID, commandLine, "ok");
+    return true;
+}
+
+bool IsValidOwnerCommandActor(const char[] actorSteamID)
+{
+    if (strlen(actorSteamID) != 17)
+        return false;
+    for (int i = 0; actorSteamID[i] != '\0'; i++)
+    {
+        if (actorSteamID[i] < '0' || actorSteamID[i] > '9')
+            return false;
+    }
+    return true;
+}
+
+bool ExtractServerOwnerCommandLine(char[] commandLine, int commandLineSize)
+{
+    char allArguments[MAX_OWNER_COMMAND_LINE + 64];
+    int length = GetCmdArgString(allArguments, sizeof(allArguments));
+    if (length <= 0 || length >= sizeof(allArguments) - 1)
+        return false;
+
+    int index = 0;
+    while (allArguments[index] == ' ')
+        index++;
+    while (allArguments[index] != '\0' && allArguments[index] != ' ')
+        index++;
+    while (allArguments[index] == ' ')
+        index++;
+
+    int commandLength = strlen(allArguments[index]);
+    if (commandLength <= 0 || commandLength >= commandLineSize)
+        return false;
+    strcopy(commandLine, commandLineSize, allArguments[index]);
+    TrimString(commandLine);
+    return commandLine[0] != '\0';
+}
+
+public Action Command_ServerOwnerCommand(int args)
+{
+    char actorSteamID[32];
+    if (args >= 1)
+        GetCmdArg(1, actorSteamID, sizeof(actorSteamID));
+
+    char commandLine[MAX_OWNER_COMMAND_LINE];
+    if (args < 2
+        || !IsValidOwnerCommandActor(actorSteamID)
+        || !ExtractServerOwnerCommandLine(commandLine, sizeof(commandLine)))
+    {
+        PrintToServer("%s ERROR invalid_request", OWNER_COMMAND_RESULT_MARKER);
+        PrintToServer("The owner command request is invalid.");
+        LogOwnerCommand(actorSteamID, "<invalid>", "invalid_request");
+        return Plugin_Handled;
+    }
+
+    char operation[256];
+    int operationLength = GetCmdArg(2, operation, sizeof(operation));
+    char whitelistPath[PLATFORM_MAX_PATH];
+    if (args >= 3)
+        GetCmdArg(3, whitelistPath, sizeof(whitelistPath));
+
+    char response[MAX_OWNER_COMMAND_RESPONSE];
+    char errorCode[64];
+    char errorMessage[256];
+    bool succeeded = ExecuteOwnerServerCommand(
+        actorSteamID,
+        operation,
+        operationLength,
+        commandLine,
+        strlen(commandLine),
+        args - 2,
+        whitelistPath,
+        response,
+        sizeof(response),
+        errorCode,
+        sizeof(errorCode),
+        errorMessage,
+        sizeof(errorMessage)
+    );
+
+    if (!succeeded)
+    {
+        PrintToServer("%s ERROR %s", OWNER_COMMAND_RESULT_MARKER, errorCode);
+        PrintToServer("%s", errorMessage);
+        return Plugin_Handled;
+    }
+
+    PrintToServer("%s OK", OWNER_COMMAND_RESULT_MARKER);
+    if (response[0] != '\0')
+        PrintToServer("%s", response);
     return Plugin_Handled;
 }
 
