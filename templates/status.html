@@ -1242,7 +1242,7 @@
                                 @mousedown.prevent="selectCommandSuggestion(suggestion)"
                                 :aria-selected="index === commandSuggestionIndex"
                                 :class="index === commandSuggestionIndex ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'"
-                                class="block w-full px-3 py-1.5 text-left font-mono text-sm"
+                                class="block w-full px-3 py-1.5 text-left font-sans text-sm"
                                 x-text="suggestion"></button>
                         </template>
                     </div>
@@ -1263,7 +1263,7 @@
                         x-text="commandResult?.ok ? {{ _('status.command_succeeded') | tojson | forceescape }} : {{ _('status.command_failed') | tojson | forceescape }}"></span>
                     <code class="min-w-0 truncate text-xs text-slate-500" x-text="commandResult?.command || ''"></code>
                 </div>
-                <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-xs text-slate-700"
+                <pre class="mt-2 whitespace-pre-wrap break-words font-sans text-xs text-slate-700"
                     x-text="commandResult?.output || {{ _('status.command_no_output') | tojson | forceescape }}"></pre>
             </div>
         </div>
