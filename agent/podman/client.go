@@ -212,8 +212,10 @@ func (c *Client) ensureService(ctx context.Context) error {
 	}
 }
 
-// StallTimeout is how long we wait without any output before considering the pull stalled.
-const StallTimeout = 90 * time.Second
+// StallTimeout is how long we wait without any output before considering the
+// pull stalled. Podman can legitimately be silent for several minutes while a
+// large layer is unpacked on slow disks or heavily oversubscribed CPUs.
+const StallTimeout = 5 * time.Minute
 
 // pullEvent represents a Docker-compatible image pull progress event.
 type pullEvent struct {

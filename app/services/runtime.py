@@ -144,7 +144,9 @@ async def count_available_instant_slots(location: str, db: AsyncSession) -> int:
             InstantHost.last_heartbeat_at.is_not(None),
             InstantHost.last_heartbeat_at >= _host_cutoff(),
             InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
+            InstantHost.health_error.is_(None),
             InstantHost.ready_image_digest.is_not(None),
+            InstantHost.image_status.in_(("ready", "failed")),
             InstantHost.protocol_min <= settings.instant_protocol_max,
             InstantHost.protocol_max >= settings.instant_protocol_min,
             or_(
@@ -314,7 +316,9 @@ async def claim_instant_slot(
             InstantHost.credential_hash.is_not(None),
             InstantHost.last_heartbeat_at >= _host_cutoff(),
             InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
+            InstantHost.health_error.is_(None),
             InstantHost.ready_image_digest.is_not(None),
+            InstantHost.image_status.in_(("ready", "failed")),
             InstantHost.protocol_min <= settings.instant_protocol_max,
             InstantHost.protocol_max >= settings.instant_protocol_min,
             or_(

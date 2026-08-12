@@ -97,6 +97,7 @@ type Controller struct {
 	versionPin      string
 	configured      bool
 	healthError     string
+	inventoryError  string
 	preflight       map[string]any
 	basePreflightOK bool
 	preflightOK     bool
@@ -190,7 +191,7 @@ func (c *Controller) Run(parent context.Context) error {
 	c.loadImageState()
 	c.runPreflight()
 	if err := c.reconcileLocalContainers(c.ctx); err != nil {
-		c.setHealthError(err.Error())
+		c.setInventoryError(err.Error())
 		log.Printf("Host inventory reconciliation failed: %v", err)
 	}
 
@@ -251,7 +252,7 @@ func (c *Controller) heartbeatLoop() {
 			desired := c.desiredImage
 			c.imageMu.Unlock()
 			if desired != "" {
-				go c.prepareImage(desired, true)
+				go c.refreshImageIfIdle(desired)
 			}
 		case <-updateCheck.C:
 			c.configurationMu.RLock()
@@ -1044,10 +1045,6 @@ func (c *Controller) waitForSlotOperationBarrier() {
 }
 
 func (c *Controller) sendStatus(messageType string) {
-	inventory, err := c.containerInventory(context.Background())
-	if err != nil {
-		c.setHealthError(err.Error())
-	}
 	c.imageMu.Lock()
 	image := map[string]any{
 		"desired":      c.desiredImage,
@@ -1055,9 +1052,29 @@ func (c *Controller) sendStatus(messageType string) {
 		"status":       c.imageStatus,
 		"error":        c.imageError,
 	}
+	imagePreparing := c.imageStatus == "preparing"
 	c.imageMu.Unlock()
+	var inventory []map[string]any
+	if imagePreparing {
+		// Pulling or unpacking an image takes Podman's storage lock. A concurrent
+		// `podman ps` can then block until our inventory deadline and be killed,
+		// even though the host and its containers are healthy. A null inventory
+		// explicitly tells the backend to defer reconciliation for this heartbeat.
+		c.setInventoryError("")
+	} else {
+		var err error
+		inventory, err = c.containerInventory(context.Background())
+		if err != nil {
+			c.setInventoryError(err.Error())
+		} else {
+			c.setInventoryError("")
+		}
+	}
 	c.configurationMu.RLock()
 	healthError := c.healthError
+	if healthError == "" {
+		healthError = c.inventoryError
+	}
 	preflight := make(map[string]any, len(c.preflight))
 	for key, value := range c.preflight {
 		preflight[key] = value
@@ -1377,6 +1394,15 @@ func (c *Controller) setHealthError(message string) {
 	c.configurationMu.Unlock()
 }
 
+// setInventoryError tracks transient Podman inventory failures separately
+// from configuration and preflight failures. A later successful inventory can
+// clear this error without hiding an unrelated, actionable health problem.
+func (c *Controller) setInventoryError(message string) {
+	c.configurationMu.Lock()
+	c.inventoryError = message
+	c.configurationMu.Unlock()
+}
+
 type imageState struct {
 	DesiredImage string    `json:"desired_image"`
 	ReadyDigest  string    `json:"ready_digest"`
@@ -1425,7 +1451,30 @@ func (c *Controller) prepareImage(image string, force bool) {
 	}
 	c.imagePrepareMu.Lock()
 	defer c.imagePrepareMu.Unlock()
+	c.prepareImageLocked(image, force)
+}
 
+// refreshImageIfIdle is used only by the periodic mutable-tag refresh. Manual
+// image preparation remains explicit and is allowed to run immediately.
+func (c *Controller) refreshImageIfIdle(image string) {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return
+	}
+	if !c.imagePrepareMu.TryLock() {
+		log.Printf("Skipping periodic image refresh because image preparation is already running")
+		return
+	}
+	defer c.imagePrepareMu.Unlock()
+	if !c.isIdle() {
+		log.Printf("Skipping periodic image refresh while an instant-host slot is occupied")
+		return
+	}
+	c.prepareImageLocked(image, true)
+}
+
+// prepareImageLocked performs image preparation while imagePrepareMu is held.
+func (c *Controller) prepareImageLocked(image string, force bool) {
 	c.imageMu.Lock()
 	if !force && image == c.desiredImage && c.readyImageDigest != "" {
 		c.imageMu.Unlock()

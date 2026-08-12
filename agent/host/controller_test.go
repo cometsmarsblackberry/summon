@@ -78,12 +78,15 @@ func waitForUpdateStatus(t *testing.T, transport *fakeTransport, status string, 
 
 type fakePodman struct {
 	pullErr     error
+	listErr     error
 	networkErr  error
 	digest      string
 	containers  []podman.ManagedContainer
 	stopped     chan string
 	listStarted chan struct{}
 	listRelease chan struct{}
+	pullCalls   atomic.Int32
+	listCalls   atomic.Int32
 }
 
 func (f *fakePodman) CheckRootlessNetwork() error { return f.networkErr }
@@ -91,6 +94,7 @@ func (f *fakePodman) CheckRootlessNetwork() error { return f.networkErr }
 func (f *fakePodman) PullImage(
 	_ context.Context, _ string, callback podman.ProgressCallback,
 ) error {
+	f.pullCalls.Add(1)
 	callback("pulling_container", 50, "halfway")
 	return f.pullErr
 }
@@ -102,6 +106,7 @@ func (f *fakePodman) ImageDigest(context.Context, string) (string, error) {
 }
 
 func (f *fakePodman) ListManagedContainers(ctx context.Context) ([]podman.ManagedContainer, error) {
+	f.listCalls.Add(1)
 	if f.listStarted != nil {
 		f.listStarted <- struct{}{}
 	}
@@ -111,6 +116,9 @@ func (f *fakePodman) ListManagedContainers(ctx context.Context) ([]podman.Manage
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if f.listErr != nil {
+		return nil, f.listErr
 	}
 	return f.containers, nil
 }
@@ -401,6 +409,94 @@ func TestFailedImageRefreshRetainsLastKnownGoodDigest(t *testing.T) {
 	}
 	if controller.imageStatus != "failed" {
 		t.Fatalf("expected degraded image status, got %q", controller.imageStatus)
+	}
+}
+
+func TestPeriodicImageRefreshRunsOnlyWhileHostIsIdle(t *testing.T) {
+	harness := &sequenceHarness{}
+	runtime := &fakePodman{digest: "sha256:refreshed"}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, _, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	if calls := runtime.pullCalls.Load(); calls != 1 {
+		t.Fatalf("idle periodic refresh made %d pulls, want 1", calls)
+	}
+
+	command := startCommand(definition, 91, 1, time.Now().Add(time.Hour))
+	controller.executeSlotCommand(controller.slotForCommand(command), command)
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	if calls := runtime.pullCalls.Load(); calls != 1 {
+		t.Fatalf("occupied periodic refresh made an image pull; total calls = %d", calls)
+	}
+}
+
+func TestStatusDefersPodmanInventoryWhileImageIsPreparing(t *testing.T) {
+	runtime := &fakePodman{}
+	controller, transport, cleanup := configuredController(
+		t, nil, &sequenceHarness{}, runtime,
+	)
+	defer cleanup()
+	controller.imageMu.Lock()
+	controller.imageStatus = "preparing"
+	controller.imageMu.Unlock()
+	before := runtime.listCalls.Load()
+
+	controller.sendStatus("host.status")
+
+	if calls := runtime.listCalls.Load(); calls != before {
+		t.Fatalf("image preparation triggered Podman inventory: calls %d -> %d", before, calls)
+	}
+	transport.mu.Lock()
+	message := transport.sent[len(transport.sent)-1]
+	transport.mu.Unlock()
+	if message["slots"] != nil {
+		t.Fatalf("deferred inventory should be null, got %#v", message["slots"])
+	}
+}
+
+func TestTransientInventoryHealthErrorClearsAfterSuccessfulProbe(t *testing.T) {
+	runtime := &fakePodman{}
+	controller, transport, cleanup := configuredController(
+		t, nil, &sequenceHarness{}, runtime,
+	)
+	defer cleanup()
+	runtime.listErr = errors.New("podman ps: signal: killed")
+	controller.sendStatus("host.status")
+	transport.mu.Lock()
+	failed := transport.sent[len(transport.sent)-1]
+	transport.mu.Unlock()
+	if failed["health_error"] != "podman ps: signal: killed" {
+		t.Fatalf("inventory error was not reported: %#v", failed["health_error"])
+	}
+
+	runtime.listErr = nil
+	controller.sendStatus("host.status")
+	transport.mu.Lock()
+	recovered := transport.sent[len(transport.sent)-1]
+	transport.mu.Unlock()
+	if recovered["health_error"] != "" {
+		t.Fatalf("successful inventory retained transient error: %#v", recovered["health_error"])
+	}
+}
+
+func TestInventoryRecoveryDoesNotClearConfigurationHealthError(t *testing.T) {
+	runtime := &fakePodman{listErr: errors.New("podman unavailable")}
+	controller, transport, cleanup := configuredController(
+		t, nil, &sequenceHarness{}, runtime,
+	)
+	defer cleanup()
+	controller.setHealthError("configuration invalid")
+	controller.sendStatus("host.status")
+	runtime.listErr = nil
+	controller.sendStatus("host.status")
+
+	transport.mu.Lock()
+	message := transport.sent[len(transport.sent)-1]
+	transport.mu.Unlock()
+	if message["health_error"] != "configuration invalid" {
+		t.Fatalf("inventory recovery hid configuration error: %#v", message["health_error"])
 	}
 }
 
