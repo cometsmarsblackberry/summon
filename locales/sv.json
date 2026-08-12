@@ -141,7 +141,6 @@
         "download_map": "Ladda ner karta",
         "change_map": "Ändra karta",
         "server_commands": "Serverkommandon",
-        "command_placeholder": "t.ex. mp_timelimit 30",
         "run_command": "Kör",
         "command_running": "Kör…",
         "command_succeeded": "Kommandot slutfördes",
