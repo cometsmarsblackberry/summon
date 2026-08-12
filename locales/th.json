@@ -141,7 +141,6 @@
         "download_map": "ดาวน์โหลดแผนที่",
         "change_map": "เปลี่ยนแผนที่",
         "server_commands": "คำสั่งเซิร์ฟเวอร์",
-        "command_hint": "เรียกใช้คำสั่งหรือ CVAR ที่อนุญาต โดยแสดงเฉพาะผลล่าสุด",
         "command_placeholder": "เช่น mp_timelimit 30",
         "run_command": "เรียกใช้",
         "command_running": "กำลังเรียกใช้…",

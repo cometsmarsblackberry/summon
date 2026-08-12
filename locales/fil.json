@@ -141,7 +141,6 @@
         "download_map": "I-download ang mapa",
         "change_map": "Baguhin ang mapa",
         "server_commands": "Mga command ng server",
-        "command_hint": "Magpatakbo ng pinapayagang command o CVAR. Pinakabagong resulta lang ang ipinapakita.",
         "command_placeholder": "hal. mp_timelimit 30",
         "run_command": "Patakbuhin",
         "command_running": "Tumatakbo…",

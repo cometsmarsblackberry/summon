@@ -141,7 +141,6 @@
         "download_map": "Baixar mapa",
         "change_map": "Mudar mapa",
         "server_commands": "Comandos do servidor",
-        "command_hint": "Execute um comando ou CVAR permitido. Apenas o resultado mais recente é exibido.",
         "command_placeholder": "ex.: mp_timelimit 30",
         "run_command": "Executar",
         "command_running": "Executando…",

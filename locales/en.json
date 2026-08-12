@@ -152,7 +152,6 @@
         "download_map": "Download map",
         "change_map": "Change map",
         "server_commands": "Server Commands",
-        "command_hint": "Run an allowlisted command or CVAR. Only the latest result is shown.",
         "command_placeholder": "e.g. mp_timelimit 30",
         "run_command": "Run",
         "command_running": "Running…",
