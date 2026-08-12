@@ -141,7 +141,6 @@
         "download_map": "Tải xuống bản đồ",
         "change_map": "Đổi bản đồ",
         "server_commands": "Lệnh máy chủ",
-        "command_hint": "Chạy lệnh hoặc CVAR được cho phép. Chỉ hiển thị kết quả mới nhất.",
         "command_placeholder": "ví dụ: mp_timelimit 30",
         "run_command": "Chạy",
         "command_running": "Đang chạy…",

@@ -141,7 +141,6 @@
         "download_map": "Muat turun peta",
         "change_map": "Tukar peta",
         "server_commands": "Arahan pelayan",
-        "command_hint": "Jalankan arahan atau CVAR yang dibenarkan. Hanya hasil terkini dipaparkan.",
         "command_placeholder": "cth. mp_timelimit 30",
         "run_command": "Jalankan",
         "command_running": "Sedang berjalan…",

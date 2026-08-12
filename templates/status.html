@@ -1221,8 +1221,7 @@
         <!-- Restricted server command console -->
         {% if is_owner %}
         <div x-show="status === 'active'" x-cloak class="border-t border-slate-200 pt-5">
-            <h2 class="mb-1 text-sm font-medium text-slate-500">{{ _('status.server_commands') }}</h2>
-            <p class="mb-3 text-xs text-slate-400">{{ _('status.command_hint') }}</p>
+            <h2 class="mb-3 text-sm font-medium text-slate-500">{{ _('status.server_commands') }}</h2>
             <div class="flex items-start gap-2">
                 <div class="relative min-w-0 flex-1" @click.outside="commandSuggestionsOpen = false">
                     <input type="text" x-ref="serverCommandInput" x-model="commandInput"
