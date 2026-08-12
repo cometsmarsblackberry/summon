@@ -367,7 +367,7 @@
         "tf2_ownership_private": "Vi kunde inte verifiera TF2-ägande från Steam (ofta på grund av privata speldetaljer). Gör din Steam-profil och speldetaljer offentliga och försök igen.",
         "tf2_ownership_required": "Du måste äga Team Fortress 2 för att skapa reservationer.",
         "vac_banned": "Användare med VAC-banningar kan inte skapa reservationer.",
-        "command_interface_unavailable": "Det begränsade serverkommandogränssnittet är inte tillgängligt.",
+        "command_interface_unavailable": "Serverns kommandogränssnitt är inte tillgängligt.",
         "command_in_progress": "Ett annat serverkommando körs redan för bokningen.",
         "command_transport_failed": "Spelservern kunde inte köra kommandot.",
         "command_timed_out": "Serverkommandot tog för lång tid.",

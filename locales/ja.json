@@ -367,7 +367,7 @@
         "tf2_ownership_private": "SteamからTF2の所有を確認できませんでした（ゲームの詳細が非公開のことが多い）。Steamプロフィールとゲーム詳細を公開に設定してから再試行してください。",
         "tf2_ownership_required": "予約を作成するにはTeam Fortress 2を所有している必要があります。",
         "vac_banned": "VACバンを受けているユーザーは予約を作成できません。",
-        "command_interface_unavailable": "制限付きサーバーコマンドインターフェースを利用できません。",
+        "command_interface_unavailable": "サーバーコマンドインターフェースを利用できません。",
         "command_in_progress": "この予約では別のサーバーコマンドを実行中です。",
         "command_transport_failed": "ゲームサーバーでコマンドを実行できませんでした。",
         "command_timed_out": "サーバーコマンドがタイムアウトしました。",

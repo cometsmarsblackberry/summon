@@ -367,7 +367,7 @@
         "tf2_ownership_private": "Chúng tôi không thể xác minh quyền sở hữu TF2 từ Steam (thường do chi tiết game riêng tư). Hãy công khai hồ sơ Steam và chi tiết game của bạn, sau đó thử lại.",
         "tf2_ownership_required": "Bạn phải sở hữu Team Fortress 2 để tạo đặt chỗ.",
         "vac_banned": "Người dùng bị cấm VAC không thể tạo đặt chỗ.",
-        "command_interface_unavailable": "Giao diện lệnh máy chủ hạn chế không khả dụng.",
+        "command_interface_unavailable": "Giao diện lệnh máy chủ không khả dụng.",
         "command_in_progress": "Một lệnh máy chủ khác đang chạy cho đặt chỗ này.",
         "command_transport_failed": "Máy chủ trò chơi không thể chạy lệnh.",
         "command_timed_out": "Lệnh máy chủ đã hết thời gian chờ.",

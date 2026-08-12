@@ -367,7 +367,7 @@
         "tf2_ownership_private": "Emme voineet vahvistaa TF2:n omistusta Steamistä (usein johtuu yksityisistä pelitiedoista). Aseta Steam-profiilisi ja pelitiedot julkisiksi ja yritä uudelleen.",
         "tf2_ownership_required": "Sinun täytyy omistaa Team Fortress 2 luodaksesi varauksia.",
         "vac_banned": "VAC-kiellon saaneet käyttäjät eivät voi luoda varauksia.",
-        "command_interface_unavailable": "Rajoitettu palvelinkomentojen käyttöliittymä ei ole saatavilla.",
+        "command_interface_unavailable": "Palvelinkomentojen käyttöliittymä ei ole saatavilla.",
         "command_in_progress": "Tälle varaukselle suoritetaan jo toista palvelinkomentoa.",
         "command_transport_failed": "Pelipalvelin ei voinut suorittaa komentoa.",
         "command_timed_out": "Palvelinkomennon aikakatkaisu ylittyi.",
