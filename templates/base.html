@@ -24,7 +24,7 @@
     {% if og_image_url %}<meta name="twitter:image" content="{{ og_image_url }}">{% endif %}
 
     <!-- Tailwind CSS -->
-    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <link rel="stylesheet" href="{{ static_asset('css/tailwind.css') }}">
 
     <!-- Apply the saved/system theme before first paint to avoid a flash. -->
     <script>

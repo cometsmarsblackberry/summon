@@ -10,7 +10,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import StarletteHTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -22,6 +21,13 @@ from app.models.steam_trust_snapshot import SteamTrustSnapshot  # noqa: F401 —
 from app.models.trivia import TriviaFact  # noqa: F401 — registers table with Base
 from app.models.upload_link import UploadLink  # noqa: F401 — registers table with Base
 from app.services.orchestrator import seed_default_locations
+from app.static_assets import (
+    FingerprintedStaticFiles,
+    MUTABLE_STATIC_ASSET_PATHS,
+    STABLE_STATIC_CACHE_CONTROL,
+    STATIC_ROOT,
+    static_asset_url,
+)
 from app.routers import auth, reservations, status, internal, admin, pages, ping, motd
 from app.i18n import (
     get_locale,
@@ -299,7 +305,11 @@ app = FastAPI(
 )
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount(
+    "/static",
+    FingerprintedStaticFiles(directory=STATIC_ROOT),
+    name="static",
+)
 
 # Include routers
 app.include_router(auth.router)
@@ -329,26 +339,26 @@ class LocaleMiddleware(BaseHTTPMiddleware):
 
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
-    """Cache successful static assets, never dynamic responses or errors."""
-
-    _MUTABLE_BOOTSTRAP_ASSETS = {
-        "/static/install-instant-host.sh",
-        "/static/tf2-agent",
-    }
+    """Revalidate stable assets and never cache dynamic responses or errors."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         if "cache-control" not in response.headers:
-            is_successful_static = (
+            is_static_response = (
                 request.url.path.startswith("/static/")
-                and 200 <= response.status_code < 300
-                and request.url.path not in self._MUTABLE_BOOTSTRAP_ASSETS
+                and (
+                    200 <= response.status_code < 300
+                    or response.status_code == 304
+                )
             )
-            response.headers["Cache-Control"] = (
-                "public, max-age=2592000, immutable"
-                if is_successful_static
-                else "no-store"
-            )
+            logical_path = request.url.path.removeprefix("/static/")
+            if (
+                is_static_response
+                and logical_path not in MUTABLE_STATIC_ASSET_PATHS
+            ):
+                response.headers["Cache-Control"] = STABLE_STATIC_CACHE_CONTROL
+            else:
+                response.headers["Cache-Control"] = "no-store"
         return response
 
 
@@ -486,6 +496,7 @@ def _install_i18n_globals(templates: Jinja2Templates) -> None:
     env.globals["login_image_url"] = settings.login_image_url
     env.globals["login_image_wide_url"] = settings.login_image_wide_url
     env.globals["privacy_available"] = Path("templates/privacy.html").exists()
+    env.globals["static_asset"] = static_asset_url
 
 
 # Install on all Jinja2Templates instances used across the app

@@ -59,6 +59,12 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+Frontend assets referenced by templates should use the
+`{{ static_asset('path/to/asset') }}` helper. It gives each asset a
+content-fingerprinted URL that can be cached long-term without serving an
+older file after a deployment. Stable `/static/...` URLs are retained for
+downloads and compatibility, but browsers must revalidate them.
+
 ## Container Images
 
 GitHub Actions builds and publishes the Summon application image to GitHub
