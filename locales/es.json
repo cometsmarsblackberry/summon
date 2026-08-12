@@ -367,7 +367,7 @@
         "tf2_ownership_private": "No pudimos verificar la propiedad de TF2 desde Steam (generalmente debido a detalles de juego privados). Haz que tu perfil de Steam y los detalles del juego sean públicos, luego inténtalo de nuevo.",
         "tf2_ownership_required": "Debes tener Team Fortress 2 para crear reservas.",
         "vac_banned": "Los usuarios con bans VAC no pueden crear reservas.",
-        "command_interface_unavailable": "La interfaz restringida de comandos del servidor no está disponible.",
+        "command_interface_unavailable": "La interfaz de comandos del servidor no está disponible.",
         "command_in_progress": "Ya se está ejecutando otro comando para esta reserva.",
         "command_transport_failed": "El servidor de juego no pudo ejecutar el comando.",
         "command_timed_out": "El comando del servidor agotó el tiempo de espera.",

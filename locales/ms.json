@@ -367,7 +367,7 @@
         "tf2_ownership_private": "Kami tidak dapat mengesahkan pemilikan TF2 daripada Steam (sering disebabkan butiran permainan peribadi). Jadikan profil Steam dan butiran permainan anda awam, kemudian cuba lagi.",
         "tf2_ownership_required": "Anda mesti memiliki Team Fortress 2 untuk membuat tempahan.",
         "vac_banned": "Pengguna dengan VAC ban tidak boleh membuat tempahan.",
-        "command_interface_unavailable": "Antara muka arahan pelayan terhad tidak tersedia.",
+        "command_interface_unavailable": "Antara muka arahan pelayan tidak tersedia.",
         "command_in_progress": "Arahan pelayan lain sedang berjalan untuk tempahan ini.",
         "command_transport_failed": "Pelayan permainan tidak dapat menjalankan arahan.",
         "command_timed_out": "Arahan pelayan tamat masa.",

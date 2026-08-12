@@ -367,7 +367,7 @@
         "tf2_ownership_private": "Hindi namin ma-verify ang pagmamay-ari ng TF2 mula sa Steam (madalas dahil sa pribadong mga detalye ng laro). Gawing pampubliko ang iyong Steam profile at mga detalye ng laro, pagkatapos ay subukang muli.",
         "tf2_ownership_required": "Dapat ay may-ari ka ng Team Fortress 2 para gumawa ng mga reserbasyon.",
         "vac_banned": "Ang mga user na may VAC ban ay hindi maaaring gumawa ng mga reserbasyon.",
-        "command_interface_unavailable": "Hindi available ang restricted server command interface.",
+        "command_interface_unavailable": "Hindi available ang interface ng server command.",
         "command_in_progress": "May isa pang server command na tumatakbo para sa reservation na ito.",
         "command_transport_failed": "Hindi naisagawa ng game server ang command.",
         "command_timed_out": "Nag-timeout ang server command.",
