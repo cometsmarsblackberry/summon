@@ -316,6 +316,32 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(location["warm_cloud_available"])
         self.assertFalse(location["instant"])
 
+    async def test_image_preparation_temporarily_removes_host_from_scheduling(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.30", "refreshing-host")
+            reservation = self.reservation(180)
+            db.add(reservation)
+            host.image_status = "preparing"
+            await db.commit()
+
+            self.assertEqual(
+                0, await count_available_instant_slots("instant-only", db)
+            )
+            self.assertIsNone(await claim_instant_slot(reservation, db))
+            snapshot = await _build_status(db)
+            self.assertEqual(
+                0, snapshot["instant-only"]["instant_slots_available"]
+            )
+
+            # A failed refresh may continue serving its preserved known-good
+            # digest; only an in-progress storage operation is excluded.
+            host.image_status = "failed"
+            await db.commit()
+            self.assertEqual(
+                1, await count_available_instant_slots("instant-only", db)
+            )
+            self.assertIsNotNone(await claim_instant_slot(reservation, db))
+
     async def test_version_pin_removes_mismatched_host_from_capacity(self):
         async with self.sessions() as db:
             host = await self.add_ready_host(db, "203.0.113.29", "pinned-host")
@@ -331,6 +357,26 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 1, await count_available_instant_slots("instant-only", db)
             )
+
+    async def test_agent_health_error_removes_host_until_recovery(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.33", "unhealthy-host")
+            reservation = self.reservation(181)
+            db.add(reservation)
+            host.health_error = "podman ps: signal: killed"
+            await db.commit()
+
+            self.assertEqual(
+                0, await count_available_instant_slots("instant-only", db)
+            )
+            self.assertIsNone(await claim_instant_slot(reservation, db))
+
+            host.health_error = None
+            await db.commit()
+            self.assertEqual(
+                1, await count_available_instant_slots("instant-only", db)
+            )
+            self.assertIsNotNone(await claim_instant_slot(reservation, db))
 
     async def test_host_websocket_writes_are_serialized_per_host(self):
         class FakeWebSocket:

@@ -267,6 +267,7 @@ async def _build_status(db: AsyncSession) -> dict:
                     InstantHost.credential_hash.is_not(None),
                     InstantHost.last_heartbeat_at >= cutoff,
                     InstantHost.ready_image_digest.is_not(None),
+                    InstantHost.image_status.in_(("ready", "failed")),
                     InstantHost.protocol_min <= get_settings().instant_protocol_max,
                     InstantHost.protocol_max >= get_settings().instant_protocol_min,
                     or_(
@@ -274,6 +275,7 @@ async def _build_status(db: AsyncSession) -> dict:
                         InstantHost.agent_version == InstantHost.version_pin,
                     ),
                     InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
+                    InstantHost.health_error.is_(None),
                     InstantSlot.enabled.is_(True),
                     InstantSlot.quarantined_at.is_(None),
                     InstantSlot.error_code.is_(None),
