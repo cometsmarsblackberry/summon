@@ -28,6 +28,9 @@ const (
 	RetryDelay = 5 * time.Second
 	// RCONReadyTimeout is the max time to wait for RCON to become available
 	RCONReadyTimeout = 60 * time.Second
+	// RCONProbeTimeout bounds one readiness check so an unresponsive RCON
+	// process cannot prevent the overall readiness deadline from being observed.
+	RCONProbeTimeout = 2 * time.Second
 	// RCONPollInterval is the delay between RCON readiness checks
 	RCONPollInterval = 1 * time.Second
 )
@@ -689,27 +692,65 @@ func (s *Sequence) maybeReportCompetitiveConfigsAsync() {
 // is reached. This replaces hard-coded time.Sleep calls so the boot sequence
 // proceeds as soon as the server is actually ready.
 func (s *Sequence) waitForRCON(ctx context.Context) error {
-	deadline := time.After(RCONReadyTimeout)
-	for {
-		select {
-		case <-deadline:
-			return fmt.Errorf("RCON not ready after %v", RCONReadyTimeout)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			_, err := s.podman.ExecInContainerWithOutput(ctx, s.containerID, []string{
+	return waitForRCONWithProbe(
+		ctx,
+		RCONReadyTimeout,
+		RCONProbeTimeout,
+		RCONPollInterval,
+		func(probeCtx context.Context) error {
+			_, err := s.podman.ExecInContainerWithOutput(probeCtx, s.containerID, []string{
 				"/home/tf2/server/rcon",
 				"-H", "127.0.0.1",
 				"-p", "27015",
 				"-P", s.config.RCONPassword,
 				"status",
 			})
-			if err == nil {
-				return nil
+			return err
+		},
+	)
+}
+
+func waitForRCONWithProbe(
+	ctx context.Context,
+	readyTimeout time.Duration,
+	probeTimeout time.Duration,
+	pollInterval time.Duration,
+	probe func(context.Context) error,
+) error {
+	waitCtx, cancelWait := context.WithTimeout(ctx, readyTimeout)
+	defer cancelWait()
+
+	for {
+		probeCtx, cancelProbe := context.WithTimeout(waitCtx, probeTimeout)
+		err := probe(probeCtx)
+		cancelProbe()
+		if err == nil && waitCtx.Err() == nil {
+			return nil
+		}
+		if waitCtx.Err() != nil {
+			return rconWaitError(ctx, readyTimeout)
+		}
+
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-timer.C:
+		case <-waitCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
-			time.Sleep(RCONPollInterval)
+			return rconWaitError(ctx, readyTimeout)
 		}
 	}
+}
+
+func rconWaitError(ctx context.Context, readyTimeout time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("RCON not ready after %v", readyTimeout)
 }
 
 func (s *Sequence) execRCONCommand(ctx context.Context, command string) error {
