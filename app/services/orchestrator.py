@@ -926,10 +926,46 @@ async def sync_cloud_instances() -> int:
             for instance in instances:
                 cloud_inst = cloud_by_id.get(instance.id)
                 if not cloud_inst:
-                    logger.warning(f"Instance {instance.id} not found in {provider_code}, removing from database")
-                    await db.delete(instance)
-                    removed += 1
-                    continue
+                    # Provider list endpoints can be temporarily incomplete even
+                    # when they return HTTP 200. Confirm the individual instance
+                    # is gone before dropping our only local lifecycle record.
+                    try:
+                        cloud_inst = await client.get_instance(instance.id)
+                    except CloudProviderError as exc:
+                        if exc.status_code == 404:
+                            logger.warning(
+                                "Instance %s missing from %s list and confirmed "
+                                "deleted by direct lookup; removing from database",
+                                instance.id,
+                                provider_code,
+                            )
+                            await db.delete(instance)
+                            removed += 1
+                        else:
+                            logger.warning(
+                                "Instance %s missing from %s list, but direct "
+                                "lookup failed (%s); preserving database record",
+                                instance.id,
+                                provider_code,
+                                exc,
+                            )
+                        continue
+                    except Exception as exc:
+                        logger.warning(
+                            "Instance %s missing from %s list, but direct lookup "
+                            "failed (%s); preserving database record",
+                            instance.id,
+                            provider_code,
+                            exc,
+                        )
+                        continue
+
+                    logger.warning(
+                        "Instance %s missing from %s list, but direct lookup "
+                        "succeeded; preserving database record",
+                        instance.id,
+                        provider_code,
+                    )
 
                 # Refresh IP/status in DB (some providers return main_ip empty during create)
                 provider_ip = (cloud_inst.main_ip or "").strip()
