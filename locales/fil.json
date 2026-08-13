@@ -174,6 +174,7 @@
         "cmd_changemap": "Binabago ang server sa tinukoy na mapa. Kung hindi naka-install ang mapa sa server, awtomatiko itong ida-download.",
         "cmd_config": "Naglo-load ng league config sa server. Gamitin nang wala pang args para buksan ang menu na may mga available na opsyon (RGL, ETF2L, FBTF, o i-reset sa mga default), o tukuyin nang direkta ang pangalan ng config.",
         "cmd_restart": "Nagbubukas ng menu para i-restart ang tournament, laro, o round.",
+        "cmd_server": "Nagpapatakbo ng server command na may mga opsyonal na argument.",
         "cmd_sdr": "Muling kumonekta sa server gamit ang SDR.",
         "owner_only": "May-ari lamang",
         "open_source_title": "Open Source",

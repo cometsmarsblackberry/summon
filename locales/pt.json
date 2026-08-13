@@ -174,6 +174,7 @@
         "cmd_changemap": "Muda o servidor para o mapa especificado. Se o mapa não estiver instalado no servidor, ele será baixado automaticamente.",
         "cmd_config": "Carrega uma configuração de liga no servidor. Use sem argumentos para abrir um menu com as opções disponíveis (RGL, ETF2L, FBTF, ou redefinir para os padrões), ou especifique um nome de configuração diretamente.",
         "cmd_restart": "Abre um menu para reiniciar o torneio, o jogo ou a rodada.",
+        "cmd_server": "Executa um comando do servidor com argumentos opcionais.",
         "cmd_sdr": "Reconecta-se ao servidor usando SDR.",
         "owner_only": "Apenas proprietário",
         "open_source_title": "Código Aberto",
