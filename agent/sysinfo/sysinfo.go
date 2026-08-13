@@ -155,18 +155,24 @@ func readMemory() (totalMB, usedMB int, percent float64, swapTotalMB, swapUsedMB
 }
 
 func readDisk() (totalGB, usedGB, percent float64) {
+	return readDiskWith(statfs)
+}
+
+func readDiskWith(statfsFn func(string, *statfsT) error) (totalGB, usedGB, percent float64) {
 	// Use syscall-free approach: parse /proc/mounts then stat the filesystem
 	// Simpler: use Statfs via syscall on /
 	// On Fedora CoreOS / ostree, / is a tiny read-only composefs overlay.
-	// The real disk is at /sysroot. Try / first, fall back to /sysroot if
-	// the result looks empty (zero available blocks).
+	// The real disk is at /sysroot. Prefer that filesystem when it exists and
+	// / reports no available blocks. If /sysroot does not exist (as on Ubuntu),
+	// retain the full-root result instead of turning a 100%-used disk into zeros.
 	var stat statfsT
-	if err := statfs("/", &stat); err != nil {
+	if err := statfsFn("/", &stat); err != nil {
 		return 0, 0, 0
 	}
 	if stat.Bavail == 0 {
-		if err := statfs("/sysroot", &stat); err != nil {
-			return 0, 0, 0
+		var sysroot statfsT
+		if err := statfsFn("/sysroot", &sysroot); err == nil && sysroot.Blocks > 0 {
+			stat = sysroot
 		}
 	}
 	bsize := uint64(stat.Bsize)

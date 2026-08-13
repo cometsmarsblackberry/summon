@@ -1,10 +1,13 @@
 package podman
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunPodmanCommandKeepsWarningsOutOfMachineOutput(t *testing.T) {
@@ -33,6 +36,54 @@ func TestRunPodmanCommandPreservesDiagnosticsOnFailure(t *testing.T) {
 	text := string(output)
 	if !strings.Contains(text, "partial stdout") || !strings.Contains(text, "podman stderr") {
 		t.Fatalf("failure diagnostics were lost: %q", text)
+	}
+}
+
+func TestCleanupStaleImageStagingUsesStrictNameOwnerAndAgeChecks(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	old := now.Add(-2 * time.Hour)
+
+	stale := filepath.Join(root, "container_images_storage123")
+	recent := filepath.Join(root, "container_images_storage456")
+	malformed := filepath.Join(root, "container_images_storageABC")
+	target := filepath.Join(root, "unrelated-target")
+	for _, directory := range []string{stale, recent, malformed, target} {
+		if err := os.Mkdir(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "layer"), []byte("data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(malformed, old, old); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(root, "container_images_storage789")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(symlink, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := cleanupStaleImageStaging(root, now.Add(-time.Hour), os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed %d staging directories, want 1", removed)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale staging directory remains: %v", err)
+	}
+	for _, path := range []string{recent, malformed, symlink, target} {
+		if _, err := os.Lstat(path); err != nil {
+			t.Fatalf("cleanup removed protected path %s: %v", path, err)
+		}
 	}
 }
 

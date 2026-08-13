@@ -115,7 +115,12 @@ func (c *Controller) requestUpdate(manifestURL, versionPin string, forced bool) 
 		c.sendUpdateStatus("failed", false, fmt.Errorf("pinned version %q is not present in the deployed release", versionPin))
 		return
 	}
-	if manifest.Version == "" || manifest.Version == c.config.AgentVersion {
+	current, err := currentAgentMatchesManifest(c.config.AgentVersion, manifest)
+	if err != nil {
+		c.sendUpdateStatus("failed", false, fmt.Errorf("verify current agent: %w", err))
+		return
+	}
+	if current {
 		c.sendUpdateStatus("current", false, nil)
 		return
 	}
@@ -206,14 +211,53 @@ func allowedUpdateURL(parsed *url.URL) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-func (c *Controller) stageAndActivate(manifest *agentManifest) error {
+// currentAgentMatchesManifest verifies both the release label and the binary
+// digest. Release images can be rebuilt without changing the configured agent
+// version, so comparing only version strings can strand a host on stale code.
+func currentAgentMatchesManifest(currentVersion string, manifest *agentManifest) (bool, error) {
+	if manifest == nil || manifest.Version != currentVersion {
+		return false, nil
+	}
+	digest, err := currentExecutableSHA256()
+	if err != nil {
+		return false, err
+	}
+	return digest == strings.ToLower(manifest.SHA256), nil
+}
+
+func currentExecutablePath() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve current executable: %w", err)
+		return "", fmt.Errorf("resolve current executable: %w", err)
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return fmt.Errorf("resolve executable symlink: %w", err)
+		return "", fmt.Errorf("resolve executable symlink: %w", err)
+	}
+	return executable, nil
+}
+
+func currentExecutableSHA256() (string, error) {
+	executable, err := currentExecutablePath()
+	if err != nil {
+		return "", err
+	}
+	file, err := os.Open(executable)
+	if err != nil {
+		return "", fmt.Errorf("open current executable: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("hash current executable: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (c *Controller) stageAndActivate(manifest *agentManifest) error {
+	executable, err := currentExecutablePath()
+	if err != nil {
+		return err
 	}
 	stagePath := executable + ".next"
 	backupPath := executable + ".previous"

@@ -5,7 +5,7 @@ WORKDIR /build/agent
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
-ARG AGENT_VERSION=0.2.5
+ARG AGENT_VERSION=0.2.6
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tf2-agent .
 
