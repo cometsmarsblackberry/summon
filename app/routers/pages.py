@@ -289,6 +289,9 @@ async def reservation_status_page(
             fastdl = fastdl[:-5]  # strip trailing maps/ to avoid duplication
         map_download_url = f"{fastdl}maps/{reservation.first_map}.bsp"
 
+    from app.services.settings import get_reservation_settings
+    reservation_settings = await get_reservation_settings(db)
+
     return templates.TemplateResponse(
         request,
         "status.html",
@@ -299,6 +302,7 @@ async def reservation_status_page(
             "owner_name": owner_name,
             "location_display": location_display,
             "map_download_url": map_download_url,
+            "reservation_settings": reservation_settings,
         }
     )
 
