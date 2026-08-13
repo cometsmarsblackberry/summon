@@ -169,7 +169,7 @@
         "commands_title": "Varauskomennot",
         "commands_intro": "Käytä näitä chatissa varauksen aikana. Vain omistajille tarkoitetut komennot vaativat, että varauksen omistaja ajaa ne.",
         "cmd_reservation": "Näyttää varaustunnuksen, omistajan ja jäljellä olevan ajan.",
-        "cmd_end": "Aloittaa 30 sekunnin lähtölaskennan varauksen päättämiseksi.",
+        "cmd_end": "Aloittaa 10 sekunnin lähtölaskennan varauksen päättämiseksi.",
         "cmd_cancel": "Peruuttaa aktiivisen lopetuslähtölaskennan, jos se aloitettiin vahingossa.",
         "cmd_changemap": "Vaihtaa palvelimen määritettyyn karttaan. Jos karttaa ei ole asennettu palvelimelle, se ladataan automaattisesti.",
         "cmd_config": "Lataa liiga-asetuksen palvelimelle. Käytä ilman argumentteja avataksesi valikon saatavilla olevista vaihtoehdoista (RGL, ETF2L, FBTF tai nollaa oletusarvoihin) tai määritä asetuksen nimi suoraan.",

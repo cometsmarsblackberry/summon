@@ -169,7 +169,7 @@
         "commands_title": "Reservationskommandon",
         "commands_intro": "Använd dessa i chatten under din reservation. Ägarspecifika kommandon kräver att reservationsägaren kör dem.",
         "cmd_reservation": "Visar reservationsnumret, ägaren och återstående tid.",
-        "cmd_end": "Startar en 30-sekunders nedräkning för att avsluta reservationen.",
+        "cmd_end": "Startar en 10-sekunders nedräkning för att avsluta reservationen.",
         "cmd_cancel": "Avbryter en aktiv avslutningsnedräkning om den startades av misstag.",
         "cmd_changemap": "Byter servern till den angivna kartan. Om kartan inte är installerad på servern laddas den ned automatiskt.",
         "cmd_config": "Laddar en ligakonfiguration på servern. Använd utan argument för att öppna en meny med tillgängliga alternativ (RGL, ETF2L, FBTF eller återställ till standard), eller ange ett konfigurationsnamn direkt.",

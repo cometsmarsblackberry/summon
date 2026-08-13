@@ -43,7 +43,7 @@ command begins with `sm_`.
 | Chat command | Description |
 | --- | --- |
 | `!admin` | Open the Summon menu for reservation information, maps, configs, restarts, and ending or cancelling the reservation. |
-| `!end` | Start a 30-second countdown, notify the backend, and then remove all players. |
+| `!end` | Start a 10-second countdown, notify the backend, and then remove all players. |
 | `!cancel` | Cancel an active `!end` countdown. |
 | `!changemap <map>`, `!map <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
 | `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, open the league/config menu. |

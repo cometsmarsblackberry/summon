@@ -169,7 +169,7 @@
         "commands_title": "Lệnh đặt chỗ",
         "commands_intro": "Sử dụng các lệnh này trong chat khi đặt chỗ. Lệnh chỉ dành cho chủ sở hữu yêu cầu người đặt chỗ thực hiện.",
         "cmd_reservation": "Hiển thị số đặt chỗ, chủ sở hữu và thời gian còn lại.",
-        "cmd_end": "Bắt đầu đếm ngược 30 giây để kết thúc đặt chỗ.",
+        "cmd_end": "Bắt đầu đếm ngược 10 giây để kết thúc đặt chỗ.",
         "cmd_cancel": "Hủy đếm ngược kết thúc đang chạy nếu bị kích hoạt nhầm.",
         "cmd_changemap": "Thay đổi máy chủ sang bản đồ được chỉ định. Nếu bản đồ chưa được cài, nó sẽ tự động tải xuống.",
         "cmd_config": "Tải cấu hình giải đấu lên máy chủ. Dùng không có đối số để mở menu với các tùy chọn có sẵn (RGL, ETF2L, FBTF hoặc đặt lại về mặc định), hoặc chỉ định trực tiếp tên cấu hình.",

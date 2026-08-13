@@ -169,7 +169,7 @@
         "commands_title": "Mga command ng reserbasyon",
         "commands_intro": "Gamitin ang mga ito sa chat sa panahon ng iyong reserbasyon. Ang mga command na para sa may-ari lamang ay nangangailangan ng may-ari ng reserbasyon na patakbuhin ang mga ito.",
         "cmd_reservation": "Nagpapakita ng numero ng reserbasyon, may-ari, at natitirang oras.",
-        "cmd_end": "Nagsisimula ng 30-segundong countdown para tapusin ang reserbasyon.",
+        "cmd_end": "Nagsisimula ng 10-segundong countdown para tapusin ang reserbasyon.",
         "cmd_cancel": "Kinakansela ang aktibong countdown ng pagtatapos kung nasimulan ito nang hindi sinasadya.",
         "cmd_changemap": "Binabago ang server sa tinukoy na mapa. Kung hindi naka-install ang mapa sa server, awtomatiko itong ida-download.",
         "cmd_config": "Naglo-load ng league config sa server. Gamitin nang wala pang args para buksan ang menu na may mga available na opsyon (RGL, ETF2L, FBTF, o i-reset sa mga default), o tukuyin nang direkta ang pangalan ng config.",

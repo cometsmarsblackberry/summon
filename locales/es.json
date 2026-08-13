@@ -169,7 +169,7 @@
         "commands_title": "Comandos de reserva",
         "commands_intro": "Úsalos en el chat durante tu reserva. Los comandos solo para el propietario requieren que el dueño de la reserva los ejecute.",
         "cmd_reservation": "Muestra el número de reserva, el propietario y el tiempo restante.",
-        "cmd_end": "Inicia una cuenta regresiva de 30 segundos para terminar la reserva.",
+        "cmd_end": "Inicia una cuenta regresiva de 10 segundos para terminar la reserva.",
         "cmd_cancel": "Cancela una cuenta regresiva de fin activa si fue iniciada por error.",
         "cmd_changemap": "Cambia el servidor al mapa especificado. Si el mapa no está instalado en el servidor, se descargará automáticamente.",
         "cmd_config": "Carga una configuración de liga en el servidor. Úsalo sin argumentos para abrir un menú con las opciones disponibles (RGL, ETF2L, FBTF, o restablecer a los valores predeterminados), o especifica un nombre de configuración directamente.",
