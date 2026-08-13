@@ -31,7 +31,7 @@
         playerSnapshotStaleSeconds: 25,
         emptySince: null,
         playerPollInterval: null,
-        autoEndSeconds: 30 * 60,
+        autoEndSeconds: {{ reservation_settings.auto_end_minutes }} * 60,
         countdownInterval: null,
         _tick: 0,
 
@@ -935,7 +935,7 @@
             {% if not is_ended %}
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500">{{ _('status.auto_end_when_empty') }}</span>
-                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default') }}</span>
+                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default', minutes=reservation_settings.auto_end_minutes) }}</span>
                 <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800" x-text="formatAutoEnd(autoEndRemaining)"></span>
             </div>
             {% endif %}
@@ -1128,7 +1128,7 @@
             </div>
             <div class="flex items-center justify-between gap-4 text-sm text-slate-500">
                 <span>{{ _('status.auto_end_when_empty') }}</span>
-                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default') }}</span>
+                <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default', minutes=reservation_settings.auto_end_minutes) }}</span>
                 <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800" x-text="formatAutoEnd(autoEndRemaining)"></span>
             </div>
         </div>
