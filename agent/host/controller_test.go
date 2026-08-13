@@ -432,6 +432,35 @@ func TestPeriodicImageRefreshRunsOnlyWhileHostIsIdle(t *testing.T) {
 	}
 }
 
+func TestFailedPeriodicImageRefreshUsesExponentialBackoff(t *testing.T) {
+	runtime := &fakePodman{pullErr: errors.New("registry unavailable")}
+	controller, _, cleanup := configuredController(
+		t, nil, &sequenceHarness{}, runtime,
+	)
+	defer cleanup()
+	now := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	controller.now = func() time.Time { return now }
+
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	if calls := runtime.pullCalls.Load(); calls != 1 {
+		t.Fatalf("immediate retry made %d pulls, want 1", calls)
+	}
+
+	now = now.Add(imageRefreshInterval + time.Second)
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	if calls := runtime.pullCalls.Load(); calls != 2 {
+		t.Fatalf("second backoff window made %d pulls, want 2", calls)
+	}
+
+	now = now.Add(2*imageRefreshInterval + time.Second)
+	controller.refreshImageIfIdle("registry.example/tf2:latest")
+	if calls := runtime.pullCalls.Load(); calls != 3 {
+		t.Fatalf("third backoff window made %d pulls, want 3", calls)
+	}
+}
+
 func TestStatusDefersPodmanInventoryWhileImageIsPreparing(t *testing.T) {
 	runtime := &fakePodman{}
 	controller, transport, cleanup := configuredController(
@@ -517,6 +546,30 @@ func TestFailedAgentVersionRequiresExplicitRetry(t *testing.T) {
 	}
 	if got := failedUpdateVersion(directory); got != "0.3.0" {
 		t.Fatalf("failed update version = %q, want 0.3.0", got)
+	}
+}
+
+func TestCurrentAgentRequiresMatchingVersionAndDigest(t *testing.T) {
+	digest, err := currentExecutableSHA256()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := &agentManifest{Version: "same", SHA256: digest}
+	current, err := currentAgentMatchesManifest("same", manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current {
+		t.Fatal("matching version and executable digest was not current")
+	}
+
+	manifest.SHA256 = strings.Repeat("0", 64)
+	current, err = currentAgentMatchesManifest("same", manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current {
+		t.Fatal("matching version hid a stale executable digest")
 	}
 }
 

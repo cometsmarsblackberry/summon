@@ -24,7 +24,11 @@ import (
 	wsprotocol "github.com/summon/agent/websocket"
 )
 
-const maxRememberedCommands = 128
+const (
+	maxRememberedCommands  = 128
+	imageRefreshInterval   = 15 * time.Minute
+	maxImageRefreshBackoff = 6 * time.Hour
+)
 
 // Transport is the authenticated backend connection used by host mode.
 type Transport interface {
@@ -85,6 +89,8 @@ type Controller struct {
 	imageStatus          string
 	imageError           string
 	lastImageCheck       time.Time
+	imageRefreshFailures int
+	nextImageRefresh     time.Time
 	updateMu             sync.Mutex
 	updateDraining       atomic.Bool
 	updateStatusMu       sync.Mutex
@@ -236,7 +242,7 @@ func (c *Controller) messageLoop() {
 func (c *Controller) heartbeatLoop() {
 	defer c.wg.Done()
 	heartbeat := time.NewTicker(c.config.Heartbeat)
-	imageCheck := time.NewTicker(15 * time.Minute)
+	imageCheck := time.NewTicker(imageRefreshInterval)
 	updateCheck := time.NewTicker(15 * time.Minute)
 	defer heartbeat.Stop()
 	defer imageCheck.Stop()
@@ -1470,7 +1476,38 @@ func (c *Controller) refreshImageIfIdle(image string) {
 		log.Printf("Skipping periodic image refresh while an instant-host slot is occupied")
 		return
 	}
+	now := c.now()
+	c.imageMu.Lock()
+	nextRefresh := c.nextImageRefresh
+	c.imageMu.Unlock()
+	if !nextRefresh.IsZero() && now.Before(nextRefresh) {
+		log.Printf("Skipping periodic image refresh until %s after earlier failures", nextRefresh.Format(time.RFC3339))
+		return
+	}
 	c.prepareImageLocked(image, true)
+}
+
+func imageRefreshBackoff(failures int) time.Duration {
+	if failures < 1 {
+		return 0
+	}
+	delay := imageRefreshInterval
+	for attempt := 1; attempt < failures && delay < maxImageRefreshBackoff; attempt++ {
+		delay *= 2
+		if delay >= maxImageRefreshBackoff {
+			return maxImageRefreshBackoff
+		}
+	}
+	return delay
+}
+
+// recordImageFailureLocked updates periodic retry policy while imageMu is held.
+// Manual image preparation bypasses this schedule and remains available for an
+// operator who has corrected the underlying problem.
+func (c *Controller) recordImageFailureLocked(checkedAt time.Time) {
+	c.lastImageCheck = checkedAt
+	c.imageRefreshFailures++
+	c.nextImageRefresh = checkedAt.Add(imageRefreshBackoff(c.imageRefreshFailures))
 }
 
 // prepareImageLocked performs image preparation while imagePrepareMu is held.
@@ -1511,7 +1548,7 @@ func (c *Controller) prepareImageLocked(image string, force bool) {
 	checkedAt := c.now()
 	if err != nil {
 		c.imageMu.Lock()
-		c.lastImageCheck = checkedAt
+		c.recordImageFailureLocked(checkedAt)
 		c.imageStatus = "failed"
 		c.imageError = err.Error()
 		lastKnownGood = c.readyImageDigest
@@ -1526,7 +1563,7 @@ func (c *Controller) prepareImageLocked(image string, force bool) {
 		DesiredImage: image, ReadyDigest: resolvedDigest, CheckedAt: checkedAt,
 	}); err != nil {
 		c.imageMu.Lock()
-		c.lastImageCheck = checkedAt
+		c.recordImageFailureLocked(checkedAt)
 		c.imageStatus = "failed"
 		c.imageError = err.Error()
 		lastKnownGood = c.readyImageDigest
@@ -1540,6 +1577,8 @@ func (c *Controller) prepareImageLocked(image string, force bool) {
 	c.imageMu.Lock()
 	c.readyImageDigest = resolvedDigest
 	c.lastImageCheck = checkedAt
+	c.imageRefreshFailures = 0
+	c.nextImageRefresh = time.Time{}
 	c.imageStatus = "ready"
 	c.imageError = ""
 	c.imageMu.Unlock()

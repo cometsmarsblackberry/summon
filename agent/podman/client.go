@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -212,10 +213,19 @@ func (c *Client) ensureService(ctx context.Context) error {
 	}
 }
 
-// StallTimeout is how long we wait without any output before considering the
-// pull stalled. Podman can legitimately be silent for several minutes while a
-// large layer is unpacked on slow disks or heavily oversubscribed CPUs.
-const StallTimeout = 5 * time.Minute
+const (
+	// StallTimeout is how long we wait without any output before considering the
+	// pull stalled. Podman can legitimately be silent for several minutes while a
+	// large layer is unpacked on slow disks or heavily oversubscribed CPUs.
+	StallTimeout = 5 * time.Minute
+
+	// Podman's API transport stages large image layers in directories named
+	// container_images_storage* under /var/tmp. Interrupted requests can leave
+	// those directories behind, so clear only this user's old staging data before
+	// starting another serialized pull.
+	staleImageStagingAge = time.Hour
+	imageStagingPrefix   = "container_images_storage"
+)
 
 // pullEvent represents a Docker-compatible image pull progress event.
 type pullEvent struct {
@@ -236,6 +246,13 @@ type progressDetail struct {
 func (c *Client) PullImage(ctx context.Context, image string, progressCb ProgressCallback) error {
 	log.Printf("Pulling image via API: %s", image)
 	progressCb("pulling_container", 0, "Downloading container image...")
+	if removed, err := cleanupStaleImageStaging(
+		"/var/tmp", time.Now().Add(-staleImageStagingAge), os.Getuid(),
+	); err != nil {
+		log.Printf("Warning: stale Podman image staging cleanup was incomplete: %v", err)
+	} else if removed > 0 {
+		log.Printf("Removed %d stale Podman image staging directories", removed)
+	}
 
 	if err := c.ensureService(ctx); err != nil {
 		return fmt.Errorf("ensure podman service: %w", err)
@@ -411,6 +428,61 @@ func (c *Client) PullImage(ctx context.Context, image string, progressCb Progres
 			return ctx.Err()
 		}
 	}
+}
+
+func cleanupStaleImageStaging(root string, cutoff time.Time, uid int) (int, error) {
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	removed := 0
+	var cleanupErrors []error
+	for _, entry := range entries {
+		if !imageStagingDirectoryName(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		// Re-read metadata immediately before removal. In addition to the strict
+		// name, require a real directory owned by the agent and old enough that it
+		// cannot belong to the preceding pull request.
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			if !os.IsNotExist(statErr) {
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("inspect %s: %w", path, statErr))
+			}
+			continue
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || !info.IsDir() || int(stat.Uid) != uid || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if removeErr := os.RemoveAll(path); removeErr != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("remove %s: %w", path, removeErr))
+			continue
+		}
+		removed++
+	}
+	return removed, errors.Join(cleanupErrors...)
+}
+
+func imageStagingDirectoryName(name string) bool {
+	if !strings.HasPrefix(name, imageStagingPrefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, imageStagingPrefix)
+	if suffix == "" {
+		return false
+	}
+	for _, character := range suffix {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // formatBytes formats a byte count as a human-readable string.
