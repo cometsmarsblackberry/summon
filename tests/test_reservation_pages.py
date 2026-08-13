@@ -127,6 +127,28 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("{minutes}", label)
                     self.assertNotIn("{minutes}", explanation)
 
+    def test_stats_label_identifies_logical_cpus(self):
+        with patch(
+            "app.config.get_settings",
+            return_value=SimpleNamespace(site_name="Summon"),
+        ):
+            for locale in SUPPORTED_LOCALES:
+                with self.subTest(locale=locale):
+                    label = translate("status.logical_cpus", locale)
+                    self.assertNotEqual("status.logical_cpus", label)
+                    self.assertNotIn("vCPU", label)
+
+            self.assertEqual(
+                "Logical CPUs",
+                translate("status.logical_cpus", "en"),
+            )
+
+        template = (
+            Path(__file__).resolve().parents[1] / "templates" / "status.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("_('status.logical_cpus')", template)
+        self.assertNotIn("_('status.cpus')", template)
+
 
 if __name__ == "__main__":
     unittest.main()

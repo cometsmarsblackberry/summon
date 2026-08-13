@@ -129,7 +129,7 @@
         "stats_for_nerds": "Statistik terperinci",
         "waiting_for_data": "Menunggu data...",
         "cpu_model": "Model CPU",
-        "cpus": "CPU",
+        "logical_cpus": "CPU logik",
         "cpu": "CPU",
         "load_avg": "Purata beban",
         "ram": "RAM",
