@@ -17,7 +17,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.4.1"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -557,12 +557,35 @@ bool IsSafeTournamentWhitelistPath(const char[] path)
     return FileExists(path, true);
 }
 
+bool IsSafeMapName(const char[] mapName)
+{
+    int length = strlen(mapName);
+    if (length <= 0 || length > 64)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = mapName[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        if (!isLetter && !isDigit && character != '_')
+            return false;
+    }
+
+    return true;
+}
+
 bool AreOwnerCommandArgumentsAllowed(
     const char[] operation,
     int valueArgumentCount,
-    const char[] whitelistPath
+    const char[] firstValue
 )
 {
+    if (StrEqual(operation, "changelevel"))
+        return valueArgumentCount == 1 && IsSafeMapName(firstValue);
+
     if (!StrEqual(operation, "mp_tournament_whitelist"))
         return true;
 
@@ -574,7 +597,7 @@ bool AreOwnerCommandArgumentsAllowed(
     if (valueArgumentCount != 1)
         return false;
 
-    return IsSafeTournamentWhitelistPath(whitelistPath);
+    return IsSafeTournamentWhitelistPath(firstValue);
 }
 
 bool TryConsumeOwnerCommandCooldown()
@@ -891,9 +914,27 @@ bool ExecuteOwnerServerCommand(
         operation, valueArgumentCount, whitelistPath
     ))
     {
+        char argumentError[256];
+        if (StrEqual(operation, "changelevel"))
+        {
+            strcopy(
+                argumentError,
+                sizeof(argumentError),
+                "Changelevel requires exactly one map name containing only letters, numbers, or underscores."
+            );
+        }
+        else
+        {
+            strcopy(
+                argumentError,
+                sizeof(argumentError),
+                "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files."
+            );
+        }
+
         return OwnerCommandFailure(
             actorSteamID, commandLine, "invalid_arguments",
-            "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files.",
+            argumentError,
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
     }

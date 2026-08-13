@@ -118,6 +118,30 @@ class OwnerCommandPolicyTests(unittest.TestCase):
                 with self.assertRaises(OwnerCommandValidationError):
                     validate_owner_command_line(command, allowed)
 
+    def test_changelevel_requires_one_safe_map_name(self):
+        allowed = ("changelevel",)
+        self.assertEqual(
+            "changelevel cp_process_f12",
+            validate_owner_command_line(" changelevel cp_process_f12 ", allowed),
+        )
+
+        rejected = (
+            "changelevel",
+            "changelevel cp_process_f12 extra",
+            "changelevel ../cp_process_f12",
+            "changelevel workshop/cp_process_f12",
+            "changelevel cp-process-f12",
+            "changelevel " + "a" * 65,
+        )
+        for command in rejected:
+            with self.subTest(command=command):
+                with self.assertRaises(OwnerCommandValidationError) as invalid:
+                    validate_owner_command_line(command, allowed)
+                self.assertEqual("invalid_arguments", invalid.exception.code)
+
+    def test_checked_in_allowlist_includes_changelevel(self):
+        self.assertIn("changelevel", get_owner_commands())
+
     def test_plugin_result_parser_requires_marker_and_caps_utf8_output(self):
         self.assertIsNone(parse_plugin_command_result("Unknown command"))
         success = parse_plugin_command_result(
