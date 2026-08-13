@@ -174,6 +174,7 @@
         "cmd_changemap": "Byter servern till den angivna kartan. Om kartan inte är installerad på servern laddas den ned automatiskt.",
         "cmd_config": "Laddar en ligakonfiguration på servern. Använd utan argument för att öppna en meny med tillgängliga alternativ (RGL, ETF2L, FBTF eller återställ till standard), eller ange ett konfigurationsnamn direkt.",
         "cmd_restart": "Öppnar en meny för att starta om turneringen, spelet eller rundan.",
+        "cmd_server": "Kör ett serverkommando med valfria argument.",
         "cmd_sdr": "Återanslut till servern med SDR.",
         "owner_only": "Endast ägare",
         "open_source_title": "Öppen källkod",

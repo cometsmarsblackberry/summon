@@ -174,6 +174,7 @@
         "cmd_changemap": "Thay đổi máy chủ sang bản đồ được chỉ định. Nếu bản đồ chưa được cài, nó sẽ tự động tải xuống.",
         "cmd_config": "Tải cấu hình giải đấu lên máy chủ. Dùng không có đối số để mở menu với các tùy chọn có sẵn (RGL, ETF2L, FBTF hoặc đặt lại về mặc định), hoặc chỉ định trực tiếp tên cấu hình.",
         "cmd_restart": "Mở menu để khởi động lại giải đấu, trò chơi hoặc vòng.",
+        "cmd_server": "Chạy lệnh máy chủ với các đối số tùy chọn.",
         "cmd_sdr": "Kết nối lại máy chủ bằng SDR.",
         "owner_only": "Chỉ chủ sở hữu",
         "open_source_title": "Mã nguồn mở",

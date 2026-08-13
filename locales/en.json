@@ -174,6 +174,7 @@
         "cmd_changemap": "Changes the server to the specified map. If the map isn't installed on the server, it will be downloaded automatically.",
         "cmd_config": "Loads a league config on the server. Use without arguments to open a menu with available options (RGL, ETF2L, FBTF, or reset to defaults), or specify a config name directly.",
         "cmd_restart": "Opens a menu to restart the tournament, game, or round.",
+        "cmd_server": "Runs a server command with optional arguments.",
         "cmd_sdr": "Re-connect to the server using SDR.",
         "owner_only": "Owner only",
         "open_source_title": "Open Source",
