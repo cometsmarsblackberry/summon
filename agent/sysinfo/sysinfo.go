@@ -98,6 +98,7 @@ func readLoadAvg() (float64, float64, float64) {
 	return a1, a5, a15
 }
 
+// readNumCPUs counts logical processors visible to the operating system.
 func readNumCPUs() int {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {

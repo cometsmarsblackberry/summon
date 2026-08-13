@@ -129,7 +129,7 @@
         "stats_for_nerds": "Estadísticas técnicas",
         "waiting_for_data": "Esperando datos...",
         "cpu_model": "Modelo de CPU",
-        "cpus": "CPUs",
+        "logical_cpus": "CPU lógicas",
         "cpu": "CPU",
         "load_avg": "Carga promedio",
         "ram": "RAM",

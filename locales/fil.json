@@ -129,7 +129,7 @@
         "stats_for_nerds": "Istatistika para sa mga nerd",
         "waiting_for_data": "Naghihintay ng data...",
         "cpu_model": "Model ng CPU",
-        "cpus": "Mga CPU",
+        "logical_cpus": "Mga lohikal na CPU",
         "cpu": "CPU",
         "load_avg": "Average na load",
         "ram": "RAM",

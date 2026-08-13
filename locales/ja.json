@@ -129,7 +129,7 @@
         "stats_for_nerds": "詳細統計",
         "waiting_for_data": "データ待ち...",
         "cpu_model": "CPUモデル",
-        "cpus": "CPU数",
+        "logical_cpus": "論理CPU数",
         "cpu": "CPU",
         "load_avg": "平均負荷",
         "ram": "RAM",

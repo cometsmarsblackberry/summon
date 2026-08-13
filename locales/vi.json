@@ -129,7 +129,7 @@
         "stats_for_nerds": "Thống kê chi tiết",
         "waiting_for_data": "Đang chờ dữ liệu...",
         "cpu_model": "Model CPU",
-        "cpus": "CPU",
+        "logical_cpus": "CPU logic",
         "cpu": "CPU",
         "load_avg": "Tải trung bình",
         "ram": "RAM",

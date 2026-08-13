@@ -129,7 +129,7 @@
         "stats_for_nerds": "Tekniset tilastot",
         "waiting_for_data": "Odotetaan dataa...",
         "cpu_model": "CPU-malli",
-        "cpus": "CPU:t",
+        "logical_cpus": "Loogiset CPU:t",
         "cpu": "CPU",
         "load_avg": "Keskimääräinen kuorma",
         "ram": "RAM",
