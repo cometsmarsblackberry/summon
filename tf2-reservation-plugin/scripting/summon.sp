@@ -2,7 +2,8 @@
  * Summon - SourceMod Reservation Plugin
  *
  * Provides in-game reservation management for TF2 servers
- * Commands: !reservation, !end, !cancel, !changemap, !restart, !command, !cmd, !rcon
+ * Commands: !admin, !reservation, !res, !who, !end, !cancel,
+ *           !changemap, !map, !config, !cfg, !restart, !command, !cmd, !rcon
  */
 
 #include <sourcemod>
@@ -16,7 +17,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.3.0"
+#define PLUGIN_VERSION "1.4.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -125,6 +126,21 @@ public void OnPluginStart()
         LogError("[summon] Failed to register sm_rcon command listener; owners can still use !command or !cmd");
     }
 
+    // These names are registered by SourceMod. Listen instead of registering
+    // duplicate callbacks so callers with stock access retain stock behavior.
+    if (!AddCommandListener(Listener_OwnerAdmin, "sm_admin"))
+    {
+        LogError("[summon] Failed to register sm_admin command listener; owner menu alias disabled");
+    }
+    if (!AddCommandListener(Listener_ReservationWho, "sm_who"))
+    {
+        LogError("[summon] Failed to register sm_who command listener; reservation info alias disabled");
+    }
+    if (!AddCommandListener(Listener_OwnerMap, "sm_map"))
+    {
+        LogError("[summon] Failed to register sm_map command listener; owners must use !changemap");
+    }
+
     // Register RCON commands (called by agent)
     RegServerCmd("sm_reservation_warning", Command_ReservationWarning);
     RegServerCmd("sm_reservation_ending", Command_ReservationEnding);
@@ -141,6 +157,18 @@ public void OnAllPluginsLoaded()
     if (!CommandExists("sm_rcon"))
     {
         LogError("[summon] sm_rcon is not registered; owners must use !command or !cmd");
+    }
+    if (!CommandExists("sm_admin"))
+    {
+        LogError("[summon] sm_admin is not registered; owner menu alias unavailable");
+    }
+    if (!CommandExists("sm_who"))
+    {
+        LogError("[summon] sm_who is not registered; reservation info alias unavailable");
+    }
+    if (!CommandExists("sm_map"))
+    {
+        LogError("[summon] sm_map is not registered; owners must use !changemap");
     }
 }
 
@@ -649,6 +677,64 @@ public Action Listener_OwnerRcon(int client, const char[] command, int args)
     return Plugin_Stop;
 }
 
+public Action Listener_OwnerAdmin(int client, const char[] command, int args)
+{
+    if (client == 0)
+        return Plugin_Continue;
+
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Stop;
+
+    // SourceMod administrators keep the stock admin menu. Command overrides
+    // are honored because override_only is false.
+    if (CheckCommandAccess(client, command, ADMFLAG_GENERIC, false))
+        return Plugin_Continue;
+
+    if (!IsOwner(client))
+    {
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can open the Summon menu.");
+        return Plugin_Stop;
+    }
+
+    ShowOwnerAdminMenu(client);
+    return Plugin_Stop;
+}
+
+public Action Listener_ReservationWho(int client, const char[] command, int args)
+{
+    if (client == 0)
+        return Plugin_Continue;
+
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Stop;
+
+    // Keep SourceMod's admin-identification command for callers who can use
+    // it; everyone else gets Summon's public reservation information.
+    if (CheckCommandAccess(client, command, ADMFLAG_GENERIC, false))
+        return Plugin_Continue;
+
+    Command_Reservation(client, args);
+    return Plugin_Stop;
+}
+
+public Action Listener_OwnerMap(int client, const char[] command, int args)
+{
+    if (client == 0)
+        return Plugin_Continue;
+
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Stop;
+
+    // Preserve stock sm_map for administrators with map-change access. An
+    // owner without that access is routed through Summon's permission gate
+    // and map-downloader forward instead.
+    if (CheckCommandAccess(client, command, ADMFLAG_CHANGEMAP, false))
+        return Plugin_Continue;
+
+    HandleOwnerMapCommand(client, args, "map");
+    return Plugin_Stop;
+}
+
 Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
 {
     if (args < 1)
@@ -995,6 +1081,61 @@ public Action Command_Reservation(int client, int args)
     return Plugin_Handled;
 }
 
+void ShowOwnerAdminMenu(int client)
+{
+    Menu menu = new Menu(OwnerAdminMenuHandler);
+
+    char title[64];
+    Format(title, sizeof(title), "Summon - Reservation #%d", g_cvReservationNumber.IntValue);
+    menu.SetTitle(title);
+    menu.AddItem("reservation", "Reservation Information");
+    menu.AddItem("map", "Change Map");
+    menu.AddItem("config", "Load Competitive Config");
+    menu.AddItem("restart", "Restart Match");
+
+    if (g_bEndCountdownActive)
+        menu.AddItem("cancel", "Cancel Reservation End");
+    else
+        menu.AddItem("end", "End Reservation");
+
+    menu.Display(client, 30);
+}
+
+public int OwnerAdminMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_Select)
+    {
+        // Menu callbacks can run after the active reservation changes. Check
+        // ownership again before exposing or executing an owner function.
+        if (!IsOwner(param1))
+        {
+            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can use this menu.");
+            return 0;
+        }
+
+        char info[32];
+        menu.GetItem(param2, info, sizeof(info));
+
+        if (StrEqual(info, "reservation"))
+            Command_Reservation(param1, 0);
+        else if (StrEqual(info, "map"))
+            ShowOwnerMapMenu(param1);
+        else if (StrEqual(info, "config"))
+            ShowLeagueMenu(param1);
+        else if (StrEqual(info, "restart"))
+            ShowRestartMenu(param1);
+        else if (StrEqual(info, "end"))
+            Command_End(param1, 0);
+        else if (StrEqual(info, "cancel"))
+            Command_Cancel(param1, 0);
+    }
+    else if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+    return 0;
+}
+
 public Action Command_End(int client, int args)
 {
     if (!IsOwner(client))
@@ -1149,6 +1290,11 @@ public Action Command_Map(int client, int args)
         return Plugin_Continue;
     }
 
+    return HandleOwnerMapCommand(client, args, "changemap");
+}
+
+Action HandleOwnerMapCommand(int client, int args, const char[] trigger)
+{
     if (!IsOwner(client))
     {
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can change the map.");
@@ -1157,28 +1303,87 @@ public Action Command_Map(int client, int args)
 
     if (args < 1)
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Usage: !changemap <mapname>");
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Usage: !%s <mapname>", trigger);
         return Plugin_Handled;
     }
 
-    // Fire forward so mapdownloader (or other plugins) can act on it
     char mapName[PLATFORM_MAX_PATH];
     GetCmdArg(1, mapName, sizeof(mapName));
 
+    RequestOwnerMapChange(client, mapName);
+    return Plugin_Handled;
+}
+
+void RequestOwnerMapChange(int client, const char[] mapName)
+{
+    // Fire forward so mapdownloader (or other plugins) can act on it.
     Action result;
     Call_StartForward(g_fwdOnMapChangeRequested);
     Call_PushCell(client);
     Call_PushString(mapName);
     Call_Finish(result);
+}
 
-    if (result >= Plugin_Handled)
+void ShowOwnerMapMenu(int client)
+{
+    int serial = -1;
+    Handle mapList = ReadMapList(
+        INVALID_HANDLE,
+        serial,
+        "sm_map menu",
+        MAPLIST_FLAG_CLEARARRAY | MAPLIST_FLAG_MAPSFOLDER
+    );
+
+    if (mapList == INVALID_HANDLE || GetArraySize(mapList) == 0)
     {
-        // A listener blocked it (shouldn't normally happen after owner check,
-        // but allows other plugins to veto if needed)
-        return Plugin_Handled;
+        if (mapList != INVALID_HANDLE)
+            delete mapList;
+        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666No local map list is available. Use \x0799FF99!map <mapname>\x01 instead.");
+        return;
     }
 
-    return Plugin_Handled;
+    Menu menu = new Menu(OwnerMapMenuHandler);
+    menu.SetTitle("Change Map");
+    menu.ExitBackButton = true;
+
+    char mapName[PLATFORM_MAX_PATH];
+    char displayName[PLATFORM_MAX_PATH];
+    int mapCount = GetArraySize(mapList);
+    for (int i = 0; i < mapCount; i++)
+    {
+        GetArrayString(mapList, i, mapName, sizeof(mapName));
+        GetMapDisplayName(mapName, displayName, sizeof(displayName));
+        menu.AddItem(mapName, displayName);
+    }
+
+    delete mapList;
+    menu.Display(client, 30);
+}
+
+public int OwnerMapMenuHandler(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_Select)
+    {
+        if (!IsOwner(param1))
+        {
+            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can change the map.");
+            return 0;
+        }
+
+        char mapName[PLATFORM_MAX_PATH];
+        menu.GetItem(param2, mapName, sizeof(mapName));
+        RequestOwnerMapChange(param1, mapName);
+    }
+    else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+    {
+        if (IsOwner(param1))
+            ShowOwnerAdminMenu(param1);
+    }
+    else if (action == MenuAction_End)
+    {
+        delete menu;
+    }
+    return 0;
 }
 
 // ============================================================================
@@ -1204,6 +1409,7 @@ void ShowRestartMenu(int client)
 {
     Menu menu = new Menu(RestartMenuHandler);
     menu.SetTitle("Restart Options");
+    menu.ExitBackButton = true;
     menu.AddItem("tournament", "Restart Tournament");
     menu.AddItem("game", "Restart Game");
     menu.AddItem("round", "Restart Round");
@@ -1214,6 +1420,12 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
 {
     if (action == MenuAction_Select)
     {
+        if (!IsOwner(param1))
+        {
+            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can restart.");
+            return 0;
+        }
+
         char info[32];
         menu.GetItem(param2, info, sizeof(info));
 
@@ -1232,6 +1444,11 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
             ServerCommand("mp_restartround 5");
             PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Round restarting in 5 seconds...");
         }
+    }
+    else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+    {
+        if (IsOwner(param1))
+            ShowOwnerAdminMenu(param1);
     }
     else if (action == MenuAction_End)
     {
@@ -1430,6 +1647,7 @@ void ShowLeagueMenu(int client)
 {
     Menu menu = new Menu(LeagueMenuHandler);
     menu.SetTitle("Select League");
+    menu.ExitBackButton = true;
 
     // Scan cfg/ directory and collect leagues that have at least one config file
     ArrayList leagues = new ArrayList(ByteCountToCells(32));
@@ -1505,6 +1723,12 @@ public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param
 {
     if (action == MenuAction_Select)
     {
+        if (!IsOwner(param1))
+        {
+            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can load configs.");
+            return 0;
+        }
+
         char info[32];
         menu.GetItem(param2, info, sizeof(info));
 
@@ -1518,6 +1742,11 @@ public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param
             ShowConfigMenu(param1, info);
         }
     }
+    else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+    {
+        if (IsOwner(param1))
+            ShowOwnerAdminMenu(param1);
+    }
     else if (action == MenuAction_End)
     {
         delete menu;
@@ -1529,6 +1758,7 @@ void ShowConfigMenu(int client, const char[] league)
 {
     Menu menu = new Menu(ConfigMenuHandler);
     menu.SetTitle("Select Config");
+    menu.ExitBackButton = true;
 
     // Build prefix to match (e.g. "rgl_", "etf2l_", "fbtf_")
     char prefix[32];
@@ -1584,6 +1814,12 @@ public int ConfigMenuHandler(Menu menu, MenuAction action, int param1, int param
 {
     if (action == MenuAction_Select)
     {
+        if (!IsOwner(param1))
+        {
+            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can load configs.");
+            return 0;
+        }
+
         char cfgFile[64];
         menu.GetItem(param2, cfgFile, sizeof(cfgFile));
 
@@ -1592,6 +1828,11 @@ public int ConfigMenuHandler(Menu menu, MenuAction action, int param1, int param
             ExecuteConfig(cfgFile);
             PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
         }
+    }
+    else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
+    {
+        if (IsOwner(param1))
+            ShowLeagueMenu(param1);
     }
     else if (action == MenuAction_End)
     {

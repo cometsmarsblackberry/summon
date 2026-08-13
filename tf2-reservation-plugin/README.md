@@ -36,26 +36,31 @@ command begins with `sm_`.
 
 | Chat command | Description |
 | --- | --- |
-| `!reservation`, `!res` | Show the reservation number, owner, and time remaining. |
+| `!reservation`, `!res`, `!who` | Show the reservation number, owner, and time remaining. |
 
 ### Reservation owner
 
 | Chat command | Description |
 | --- | --- |
+| `!admin` | Open the Summon menu for reservation information, maps, configs, restarts, and ending or cancelling the reservation. |
 | `!end` | Start a 30-second countdown, notify the backend, and then remove all players. |
 | `!cancel` | Cancel an active `!end` countdown. |
-| `!changemap <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
+| `!changemap <map>`, `!map <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
 | `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, open the league/config menu. |
 | `!restart` | Open a menu to restart the tournament, game, or round. |
 | `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. |
 
-`!rcon` is restricted only for reservation owners who do not already have the
-SourceMod RCON admin flag. Existing administrators retain the normal,
-unrestricted `sm_rcon` behavior. If another plugin has already registered
-`sm_command` or `sm_cmd`, Summon leaves that entry point to the other plugin;
-the remaining aliases continue to work. Summon listens for `sm_rcon` but does
-not register it, so use `!command` or `!cmd` if the server does not provide the
-standard SourceMod command.
+`!admin`, `!who`, `!map`, and `!rcon` overlap standard SourceMod commands.
+Summon listens for these commands without registering duplicate callbacks. A
+caller who has access to the corresponding SourceMod command retains its stock
+behavior; otherwise, `!who` shows reservation information and the other aliases
+are routed through Summon's reservation-owner checks. The aliases therefore
+require the standard SourceMod plugins that register them. Use `!reservation`,
+`!changemap`, or `!command`/`!cmd` as the collision-free alternatives.
+
+If another plugin has already registered `sm_command` or `sm_cmd`, Summon leaves
+that entry point to the other plugin and the remaining command aliases continue
+to work.
 
 Competitive config names must match an existing `cfg/<name>.cfg` file and
 start with one of these prefixes:
@@ -151,9 +156,10 @@ plugin's protected `sm_map_download_base` ConVar:
 | `SM_MAP_DOWNLOAD_BASE` | `https://fastdl.serveme.tf/maps` | Base URL containing uncompressed `<map>.bsp` files. A trailing slash is optional. |
 
 When Summon is loaded, it owns the player-facing `!changemap` permission check
-and forwards approved requests to the downloader. In standalone mode, the
-downloader follows SourceMod's `ADMFLAG_CHANGEMAP` access check. Server-console
-and RCON `changelevel` requests can also download missing maps.
+and the fallback behavior for `!map`, then forwards approved requests to the
+downloader. In standalone mode, the downloader follows SourceMod's
+`ADMFLAG_CHANGEMAP` access check. Server-console and RCON `changelevel` requests
+can also download missing maps.
 
 Downloads time out after five minutes, reject non-200 responses and files
 smaller than 1 KiB, and are saved under the server's `maps/` directory before
