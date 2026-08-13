@@ -248,25 +248,28 @@ def truncate_command_output(value: object, limit: int = MAX_OUTPUT_BYTES) -> str
 
 
 def parse_plugin_command_result(output: object) -> PluginCommandResult | None:
-    """Parse the updated plugin's first-line result marker.
+    """Parse the updated plugin's result marker and subsequent output.
 
     ``None`` means the RCON request reached something that is not the expected
     restricted command interface (normally an old or missing plugin).
+
+    SourceMod log messages emitted while the wrapped command runs can precede
+    the marker in the same RCON response, so ignore that preamble.  Output is
+    accepted only after the plugin's marker has still been observed.
     """
     text = "" if output is None else str(output)
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
-    while lines and not lines[0]:
-        lines.pop(0)
-    if not lines:
-        return None
-
-    header = lines.pop(0)
     prefix = OWNER_COMMAND_RESULT_MARKER + " "
-    if not header.startswith(prefix):
+    marker_index = next(
+        (index for index, line in enumerate(lines) if line.startswith(prefix)),
+        None,
+    )
+    if marker_index is None:
         return None
+    header = lines[marker_index]
     status = header[len(prefix) :]
-    body = truncate_command_output("\n".join(lines).strip())
+    body = truncate_command_output("\n".join(lines[marker_index + 1 :]).strip())
     if status == "OK":
         return PluginCommandResult(ok=True, output=body)
     error_prefix = "ERROR "

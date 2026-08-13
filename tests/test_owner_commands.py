@@ -145,10 +145,12 @@ class OwnerCommandPolicyTests(unittest.TestCase):
     def test_plugin_result_parser_requires_marker_and_caps_utf8_output(self):
         self.assertIsNone(parse_plugin_command_result("Unknown command"))
         success = parse_plugin_command_result(
-            "SUMMON_OWNER_COMMAND_RESULT OK\r\nvalue = 30"
+            "L 08/13/2026 - 19:46:25: [summon.smx] [summon] Owner command "
+            'reservation=16 outcome=ok\r\nSUMMON_OWNER_COMMAND_RESULT OK\r\n'
+            '"mp_timelimit" = "30"'
         )
         self.assertTrue(success.ok)
-        self.assertEqual("value = 30", success.output)
+        self.assertEqual('"mp_timelimit" = "30"', success.output)
         failure = parse_plugin_command_result(
             "SUMMON_OWNER_COMMAND_RESULT ERROR cooldown\nWait a moment."
         )
