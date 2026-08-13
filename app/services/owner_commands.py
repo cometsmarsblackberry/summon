@@ -14,6 +14,8 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.utils.maps import is_valid_map_name
+
 
 OWNER_COMMAND_CONFIG_PATH = (
     Path(__file__).resolve().parents[2]
@@ -226,6 +228,13 @@ def validate_owner_command_line(
         raise OwnerCommandValidationError(
             "command_not_allowed", "That server command is not allowed."
         )
+    if operation.lower() == "changelevel":
+        arguments = [argument for argument in command.split(" ")[1:] if argument]
+        if len(arguments) != 1 or not is_valid_map_name(arguments[0]):
+            raise OwnerCommandValidationError(
+                "invalid_arguments",
+                "Changelevel requires exactly one valid map name.",
+            )
     return command
 
 

@@ -135,6 +135,8 @@ Owner-command execution has the following safeguards:
   duplicate, or empty allowlist disables the feature.
 - Semicolons, line breaks, control characters, and command lines of 512 bytes
   or more are rejected.
+- `changelevel` requires exactly one map name containing only letters, numbers,
+  or underscores.
 - `mp_tournament_whitelist` may only read the current value, clear it, or name
   one existing `cfg/*.txt` file without path traversal.
 - A shared one-second cooldown applies between owner commands, including
@@ -158,8 +160,8 @@ plugin's protected `sm_map_download_base` ConVar:
 When Summon is loaded, it owns the player-facing `!changemap` permission check
 and the fallback behavior for `!map`, then forwards approved requests to the
 downloader. In standalone mode, the downloader follows SourceMod's
-`ADMFLAG_CHANGEMAP` access check. Server-console and RCON `changelevel` requests
-can also download missing maps.
+`ADMFLAG_CHANGEMAP` access check. Server-console and RCON `changelevel` requests,
+including allowlisted owner commands, can also download missing maps.
 
 Downloads time out after five minutes, reject non-200 responses and files
 smaller than 1 KiB, and are saved under the server's `maps/` directory before
