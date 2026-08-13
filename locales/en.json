@@ -169,7 +169,7 @@
         "commands_title": "Reservation commands",
         "commands_intro": "Use these in chat during your reservation. Owner-only commands require the reservation owner to run them.",
         "cmd_reservation": "Shows the reservation number, owner, and time remaining.",
-        "cmd_end": "Starts a 30-second countdown to end the reservation.",
+        "cmd_end": "Starts a 10-second countdown to end the reservation.",
         "cmd_cancel": "Cancels an active end countdown if it was started by mistake.",
         "cmd_changemap": "Changes the server to the specified map. If the map isn't installed on the server, it will be downloaded automatically.",
         "cmd_config": "Loads a league config on the server. Use without arguments to open a menu with available options (RGL, ETF2L, FBTF, or reset to defaults), or specify a config name directly.",

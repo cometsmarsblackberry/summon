@@ -21,6 +21,7 @@
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
+#define END_COUNTDOWN_SECONDS 10
 #define OWNER_COMMAND_COOLDOWN 1.0
 #define OWNER_COMMAND_CONFIG "configs/summon_owner_commands.cfg"
 #define MAX_OWNER_COMMAND_NAME 64
@@ -1191,11 +1192,11 @@ public Action Command_End(int client, int args)
         return Plugin_Handled;
     }
 
-    // Start 30-second countdown
+    // Start the end countdown
     g_bEndCountdownActive = true;
-    g_iEndCountdown = 30;
+    g_iEndCountdown = END_COUNTDOWN_SECONDS;
 
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00Reservation ending in 30 seconds!");
+    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00Reservation ending in %d seconds!", END_COUNTDOWN_SECONDS);
     PrintToChatAll("\x01[\x07FF6600Reserve\x01] Type \x0799FF99!cancel\x01 to abort.");
 
     g_hEndTimer = CreateTimer(1.0, Timer_EndCountdown, _, TIMER_REPEAT);
@@ -1224,8 +1225,8 @@ public Action Timer_EndCountdown(Handle timer)
         return Plugin_Stop;
     }
 
-    // Show countdown at 20, 10, 5, 4, 3, 2, 1
-    if (g_iEndCountdown == 20 || g_iEndCountdown == 10 || g_iEndCountdown <= 5)
+    // Show countdown at 5, 4, 3, 2, 1
+    if (g_iEndCountdown <= 5)
     {
         PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00Reservation ending in %d seconds...", g_iEndCountdown);
     }

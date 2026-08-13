@@ -169,7 +169,7 @@
         "commands_title": "Arahan tempahan",
         "commands_intro": "Gunakan ini dalam sembang semasa tempahan anda. Arahan pemilik sahaja memerlukan pemilik tempahan untuk menjalankannya.",
         "cmd_reservation": "Menunjukkan nombor tempahan, pemilik, dan masa yang tinggal.",
-        "cmd_end": "Memulakan kiraan detik 30 saat untuk menamatkan tempahan.",
+        "cmd_end": "Memulakan kiraan detik 10 saat untuk menamatkan tempahan.",
         "cmd_cancel": "Membatalkan kiraan detik tamat yang sedang berjalan jika dimulakan secara tidak sengaja.",
         "cmd_changemap": "Menukar pelayan ke peta yang ditentukan. Jika peta tidak dipasang pada pelayan, ia akan dimuat turun secara automatik.",
         "cmd_config": "Memuatkan konfigurasi liga pada pelayan. Gunakan tanpa argumen untuk membuka menu dengan pilihan yang tersedia (RGL, ETF2L, FBTF, atau set semula ke lalai), atau nyatakan nama konfigurasi terus.",
