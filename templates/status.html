@@ -34,6 +34,14 @@
         autoEndSeconds: {{ reservation_settings.auto_end_minutes }} * 60,
         countdownInterval: null,
         _tick: 0,
+        statusLabels: {
+            pending: {{ _('status.pending') | tojson | forceescape }},
+            provisioning: {{ _('status.provisioning') | tojson | forceescape }},
+            active: {{ _('status.active') | tojson | forceescape }},
+            ended: {{ _('status.ended') | tojson | forceescape }},
+            cancelled: {{ _('status.cancelled') | tojson | forceescape }},
+            failed: {{ _('status.failed') | tojson | forceescape }},
+        },
 
         normalizeIso(value) {
             if (!value) return value;
@@ -68,7 +76,9 @@
                 && date.getMonth() === tomorrow.getMonth()
                 && date.getDate() === tomorrow.getDate();
             const time = this.formatLocal(value);
-            return isTomorrow ? 'tomorrow at ' + time : time;
+            return isTomorrow
+                ? {{ _('status.tomorrow_at') | tojson | forceescape }}.replace('{time}', time)
+                : time;
         },
 
         formatEndedTime(value) {
@@ -255,7 +265,7 @@
         },
         
         async endReservation() {
-            if (!confirm('End this reservation?')) return;
+            if (!confirm({{ _('status.end_confirm') | tojson | forceescape }})) return;
             
             const response = await fetch('/api/reservations/{{ reservation.id }}/end', {
                 method: 'POST'
@@ -267,7 +277,7 @@
         },
 
         async restartServer() {
-            if (!confirm('Restart the server? This will disconnect players.')) return;
+            if (!confirm({{ _('status.restart_confirm') | tojson | forceescape }})) return;
 
             this.error = null;
             const response = await fetch('/api/reservations/{{ reservation.id }}/restart', {
@@ -276,7 +286,7 @@
 
             if (!response.ok) {
                 const data = await response.json().catch(() => null);
-                this.error = data?.detail || 'Failed to restart server.';
+                this.error = data?.detail || {{ _('status.restart_failed') | tojson | forceescape }};
                 return;
             }
 
@@ -352,14 +362,14 @@
                     }
                 } else {
                     this.configsAvailable = false;
-                    this.configsHint = 'Config list unavailable. Use !config in-game to see available configs.';
+                    this.configsHint = {{ _('status.config_unavailable') | tojson | forceescape }};
                     this.configs = {};
                     this.scheduleConfigRetry();
                 }
             } catch (e) {
                 console.error('Failed to load configs:', e);
                 this.configsAvailable = false;
-                this.configsHint = 'Config list unavailable. Use !config in-game to see available configs.';
+                this.configsHint = {{ _('status.config_unavailable') | tojson | forceescape }};
                 this.configs = {};
                 this.scheduleConfigRetry();
             }
@@ -510,11 +520,11 @@
                     }
                     setTimeout(() => this.configMessage = '', 5000);
                 } else {
-                    this.configError = data.detail || 'Failed to load config.';
+                    this.configError = data.detail || {{ _('status.config_failed') | tojson | forceescape }};
                     setTimeout(() => this.configError = '', 5000);
                 }
             } catch (e) {
-                this.configError = 'Failed to load config.';
+                this.configError = {{ _('status.config_failed') | tojson | forceescape }};
                 setTimeout(() => this.configError = '', 5000);
             }
             this.configLoading = false;
@@ -608,11 +618,11 @@
                     this.mapMenuOpen = false;
                     setTimeout(() => this.mapMessage = '', 5000);
                 } else {
-                    this.mapError = data.detail || 'Failed to change map.';
+                    this.mapError = data.detail || {{ _('status.map_change_failed') | tojson | forceescape }};
                     setTimeout(() => this.mapError = '', 5000);
                 }
             } catch (e) {
-                this.mapError = 'Failed to change map.';
+                this.mapError = {{ _('status.map_change_failed') | tojson | forceescape }};
                 setTimeout(() => this.mapError = '', 5000);
             }
             this.mapChanging = false;
@@ -751,7 +761,7 @@
         kickedIds: {},
 
         async kickPlayer(steamId, playerName) {
-            if (!confirm('Kick ' + playerName + '?')) return;
+            if (!confirm({{ _('status.kick_confirm') | tojson | forceescape }}.replace('{name}', playerName))) return;
             try {
                 const resp = await fetch('/api/reservations/{{ reservation.id }}/kick', {
                     method: 'POST',
@@ -760,13 +770,13 @@
                 });
                 if (!resp.ok) {
                     const data = await resp.json().catch(() => null);
-                    this.error = data?.detail || 'Failed to kick player.';
+                    this.error = data?.detail || {{ _('status.kick_failed') | tojson | forceescape }};
                     return;
                 }
                 this.kickedIds[steamId] = true;
                 setTimeout(() => { delete this.kickedIds[steamId]; this.kickedIds = {...this.kickedIds}; }, 5000);
             } catch (e) {
-                this.error = 'Failed to kick player.';
+                this.error = {{ _('status.kick_failed') | tojson | forceescape }};
             }
         },
 
@@ -809,13 +819,35 @@
 
         formatSnapshotAge(seconds) {
             if (seconds === null || seconds === undefined) return '';
-            if (seconds < 60) return seconds + 's ago';
+            if (seconds < 60) return seconds + 's';
             const m = Math.floor(seconds / 60);
             const s = seconds % 60;
-            if (m < 60) return m + 'm ' + s + 's ago';
+            if (m < 60) return m + 'm ' + s + 's';
             const h = Math.floor(m / 60);
             const remM = m % 60;
-            return h + 'h ' + remM + 'm ago';
+            return h + 'h ' + remM + 'm';
+        },
+
+        formatBootProgress(progress) {
+            if (!progress) return '';
+            const labels = {
+                agent_started: {{ _('status.progress_agent_started') | tojson | forceescape }},
+                loading_config: {{ _('status.progress_loading_config') | tojson | forceescape }},
+                pulling_container: {{ _('status.progress_pulling_container') | tojson | forceescape }},
+                container_pulled: {{ _('status.progress_container_pulled') | tojson | forceescape }},
+                starting_container: {{ _('status.progress_starting_container') | tojson | forceescape }},
+                waiting_for_server: {{ _('status.progress_waiting_for_server') | tojson | forceescape }},
+                configuring_server: {{ _('status.progress_configuring_server') | tojson | forceescape }},
+                detecting_sdr: {{ _('status.progress_detecting_sdr') | tojson | forceescape }},
+                changing_map: {{ _('status.progress_changing_map') | tojson | forceescape }},
+                reconfigure_started: {{ _('status.progress_reconfigure_started') | tojson | forceescape }},
+                reconfiguring: {{ _('status.progress_reconfiguring') | tojson | forceescape }},
+                restarting: {{ _('status.progress_restarting') | tojson | forceescape }},
+            };
+            const label = labels[progress.stage];
+            return label
+                ? label.replace('{map}', this.currentMap || '')
+                : {{ _('status.creating_instance') | tojson | forceescape }};
         },
 
         formatPing(ping) {
@@ -844,17 +876,17 @@
                     'bg-green-100 text-green-800': status === 'active',
                     'bg-slate-100 text-slate-500': status === 'ended' || status === 'cancelled',
                     'bg-red-100 text-red-800': status === 'failed',
-                }" x-text="status"></span>
+                }" x-text="statusLabels[status] || status"></span>
             </h1>
             {% if is_owner %}
             <div class="flex items-center gap-2">
                 <button @click="restartServer()" x-show="status === 'active'" :disabled="status === 'provisioning' || controlDegraded"
                     class="px-2.5 py-1 text-xs rounded border transition-colors disabled:opacity-60 disabled:cursor-not-allowed bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700">
-                    Restart
+                    {{ _('status.restart_server') }}
                 </button>
                 <button @click="endReservation()" x-show="status === 'active' || status === 'provisioning'"
                     class="px-2.5 py-1 text-xs rounded border transition-colors bg-red-50 hover:bg-red-100 border-red-200 text-red-700">
-                    End
+                    {{ _('status.end_reservation') }}
                 </button>
             </div>
             {% endif %}
@@ -869,7 +901,7 @@
 
         <div x-show="runtimeKind === 'instant' && controlDegraded" x-cloak
             class="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            The host is temporarily offline or degraded. Your server lease is preserved and will reconcile when the agent reconnects; controls may be unavailable meanwhile.
+            {{ _('status.control_degraded') }}
         </div>
 
         <!-- Progress bar during provisioning -->
@@ -882,17 +914,17 @@
             <p class="text-sm text-slate-500 mt-2">
                 <span x-show="status === 'pending'">{{ _('status.waiting_provision') }}</span>
                 <span x-show="status === 'provisioning' && !bootProgress">{{ _('status.creating_instance') }}</span>
-                <span x-show="bootProgress" x-text="bootProgress ? bootProgress.message : ''"></span>
+                <span x-show="bootProgress" x-text="formatBootProgress(bootProgress)"></span>
             </p>
             <p x-show="bootProgress && displayProgress" class="text-xs text-slate-400 mt-1"
-                x-text="displayProgress + '% complete'"></p>
+                x-text="{{ _('status.complete_pct') | tojson | forceescape }}.replace('{pct}', displayProgress)"></p>
         </div>
 
         <!-- Failed state -->
         <div x-show="status === 'failed'" x-cloak class="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p class="text-red-800 font-medium mb-2">❌ {{ _('status.server_failed') }}</p>
             <p class="text-red-600 text-sm"
-                x-text="error || 'An error occurred during provisioning. Please try again.'"></p>
+                x-text="error || {{ _('status.provision_error') | tojson | forceescape }}"></p>
             <a href="/reserve"
                 class="inline-block mt-3 px-4 py-2 bg-red-100 hover:bg-red-200 rounded text-sm text-red-800">
                 {{ _('status.try_again') }}
@@ -1290,7 +1322,7 @@
             <div x-show="playersOpen" x-cloak x-transition>
             <p x-show="playersUpdatedAt" x-cloak class="mb-3 text-xs"
                 :class="playersAreStale ? 'text-amber-600' : 'text-slate-400'"
-                x-text="playersAreStale ? 'Live player stats are delayed. Last update ' + formatSnapshotAge(playerSnapshotAge) : 'Updated ' + formatSnapshotAge(playerSnapshotAge)"></p>
+                x-text="(playersAreStale ? {{ _('status.players_stale') | tojson | forceescape }} : {{ _('status.players_updated') | tojson | forceescape }}).replace('{age}', formatSnapshotAge(playerSnapshotAge))"></p>
 
             <div x-show="playerCount === 0" class="text-xs text-slate-400">
                 <p>{{ _('status.no_players') }}</p>
@@ -1426,7 +1458,7 @@
             <div x-show="status === 'active'">
                 <button type="button" @click="settingsOpen = !settingsOpen" :aria-expanded="settingsOpen"
                     class="flex w-full items-center justify-between text-left text-sm font-medium text-slate-500 transition-colors hover:text-slate-700">
-                    <span>Advanced options</span>
+                    <span>{{ _('status.advanced_options') }}</span>
                     <svg class="h-4 w-4 transition-transform" :class="settingsOpen ? 'rotate-180' : ''"
                         viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                         <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
@@ -1569,7 +1601,7 @@
             <div x-show="open" x-cloak x-transition class="mt-3">
                 <div x-show="!stats" class="text-xs text-slate-400">{{ _('status.waiting_for_data') }}</div>
                 <div x-show="stats" class="space-y-2 text-xs font-mono">
-                    <p x-show="usesSharedHost" class="font-sans text-xs text-slate-500">Shared host usage (all slots)</p>
+                    <p x-show="usesSharedHost" class="font-sans text-xs text-slate-500">{{ _('status.shared_host_usage') }}</p>
                     <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-slate-50 rounded-lg p-3">
                         <template x-if="hostStats && hostStats.cpu_model">
                             <div class="contents">
@@ -1612,8 +1644,8 @@
                     </div>
                     <template x-if="usesSharedHost">
                         <div class="rounded-lg bg-blue-50 p-3">
-                            <p class="mb-2 font-sans text-xs font-medium text-blue-800">Reservation container usage</p>
-                            <div x-show="!containerStats" class="font-sans text-xs text-blue-600">Waiting for container statistics</div>
+                            <p class="mb-2 font-sans text-xs font-medium text-blue-800">{{ _('status.reservation_container_usage') }}</p>
+                            <div x-show="!containerStats" class="font-sans text-xs text-blue-600">{{ _('status.waiting_container_stats') }}</div>
                             <div x-show="containerStats" class="grid grid-cols-2 gap-x-4 gap-y-1">
                                 <template x-for="entry in Object.entries(containerStats || {}).filter(([key]) => key !== 'updated_at')" :key="entry[0]">
                                     <div class="contents">
@@ -1625,7 +1657,7 @@
                         </div>
                     </template>
                     <p x-show="hostStats && hostStats.updated_at" class="text-slate-400 text-right"
-                        x-text="hostStats && hostStats.updated_at ? 'Updated ' + new Date(hostStats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}) : ''"></p>
+                        x-text="hostStats && hostStats.updated_at ? {{ _('status.updated_at') | tojson | forceescape }}.replace('{time}', new Date(hostStats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false})) : ''"></p>
                 </div>
             </div>
         </div>

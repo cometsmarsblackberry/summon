@@ -144,11 +144,13 @@ def translate(key: str, locale: str = DEFAULT_LOCALE, **kwargs: object) -> str:
     if not value:
         return key
 
-    # Always inject branding vars (site_name etc.) so {site_name} resolves
-    # in any locale string without explicit kwargs at every call site.
-    from app.config import get_settings
-    branding = {"site_name": get_settings().site_name}
-    merged = {**branding, **kwargs}
+    # Inject branding only when the selected string needs it. Besides avoiding
+    # unnecessary settings work for ordinary messages, this keeps translation
+    # calls usable in isolated services that provide a minimal settings object.
+    merged = dict(kwargs)
+    if "{site_name}" in value and "site_name" not in merged:
+        from app.config import get_settings
+        merged["site_name"] = get_settings().site_name
     try:
         return value.format(**merged)
     except (KeyError, IndexError):

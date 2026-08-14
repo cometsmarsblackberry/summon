@@ -178,7 +178,7 @@
         <div x-show="confirmOpen" x-cloak class="space-y-3">
             <p class="text-sm font-medium text-red-700">{{ _('profile.delete_confirm') }}</p>
             <div class="flex gap-3">
-                <button @click="deleting = true; fetch('/api/account', { method: 'DELETE' }).then(r => { if (r.ok) window.location.href = '/'; else r.json().then(d => { alert(d.detail || 'Failed to delete account'); deleting = false; }).catch(() => { alert('Failed to delete account'); deleting = false; }); }).catch(() => { alert('Failed to delete account'); deleting = false; })"
+                <button @click="deleting = true; fetch('/api/account', { method: 'DELETE' }).then(r => { if (r.ok) window.location.href = '/'; else r.json().then(d => { alert(d.detail || {{ _('profile.delete_failed') | tojson | forceescape }}); deleting = false; }).catch(() => { alert({{ _('profile.delete_failed') | tojson | forceescape }}); deleting = false; }); }).catch(() => { alert({{ _('profile.delete_failed') | tojson | forceescape }}); deleting = false; })"
                         :disabled="deleting"
                         class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50">
                     <span x-show="!deleting">{{ _('profile.yes_delete') }}</span>
@@ -187,7 +187,7 @@
                 <button @click="confirmOpen = false"
                         :disabled="deleting"
                         class="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50">
-                    Cancel
+                    {{ _('home.cancel') }}
                 </button>
             </div>
         </div>

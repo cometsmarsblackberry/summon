@@ -36,7 +36,7 @@
                                 {% elif reservation.status.value == 'active' %}bg-green-100 text-green-800
                                 {% elif reservation.status.value == 'failed' %}bg-red-100 text-red-800
                                 {% else %}bg-slate-100 text-slate-500{% endif %}">
-                            {{ reservation.status.value }}
+                            {{ _('status.' ~ reservation.status.value) }}
                         </span>
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-500"
