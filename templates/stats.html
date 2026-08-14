@@ -50,11 +50,11 @@
             <!-- Overview cards -->
             <div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-6">
                 <template x-for="card in [
-                    {label: 'Total', value: res.data?.overview.total},
-                    {label: 'Active Now', value: res.data?.overview.active},
-                    {label: 'Today', value: res.data?.overview.today},
-                    {label: 'This Week', value: res.data?.overview.this_week},
-                    {label: 'This Month', value: res.data?.overview.this_month},
+                    {label: {{ _('stats.total') | tojson | forceescape }}, value: res.data?.overview.total},
+                    {label: {{ _('stats.active_now') | tojson | forceescape }}, value: res.data?.overview.active},
+                    {label: {{ _('stats.today') | tojson | forceescape }}, value: res.data?.overview.today},
+                    {label: {{ _('stats.this_week') | tojson | forceescape }}, value: res.data?.overview.this_week},
+                    {label: {{ _('stats.this_month') | tojson | forceescape }}, value: res.data?.overview.this_month},
                 ]" :key="card.label">
                     <div class="bg-white rounded-lg border border-slate-200 p-4">
                         <p class="text-sm text-slate-500" x-text="card.label"></p>
@@ -278,10 +278,10 @@ function statsPage() {
         async loadReservations() {
             try {
                 const resp = await fetch('/api/reservation-stats');
-                if (!resp.ok) throw new Error('Failed to load reservation stats.');
+                if (!resp.ok) throw new Error({{ _('stats.load_failed') | tojson }});
                 this.res.data = await resp.json();
             } catch (e) {
-                this.res.error = e.message || 'Failed to load statistics.';
+                this.res.error = e.message || {{ _('stats.load_failed') | tojson }};
             } finally {
                 this.res.loading = false;
             }
@@ -292,11 +292,11 @@ function statsPage() {
             this.ping.loading = true;
             try {
                 const resp = await fetch('/api/ping-stats');
-                if (!resp.ok) throw new Error('Failed to load ping stats.');
+                if (!resp.ok) throw new Error({{ _('stats.load_failed') | tojson }});
                 this.ping.data = await resp.json();
                 this.ping.loaded = true;
             } catch (e) {
-                this.ping.error = e.message || 'Failed to load statistics.';
+                this.ping.error = e.message || {{ _('stats.load_failed') | tojson }};
             } finally {
                 this.ping.loading = false;
             }

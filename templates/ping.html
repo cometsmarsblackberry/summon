@@ -281,7 +281,8 @@ function pingTest() {
             const BATCH = 5;
             for (let i = 0; i < ordered.length; i += BATCH) {
                 const batch = ordered.slice(i, i + BATCH);
-                this.currentLocation = 'Testing ' + batch.map(l => l.name).join(', ');
+                this.currentLocation = {{ _('ping.testing_locations') | tojson }}
+                    .replace('{locations}', batch.map(l => l.name).join(', '));
                 await Promise.all(batch.map(loc => this.pingLocation(loc)));
             }
 
@@ -316,7 +317,7 @@ function pingTest() {
 
             // Phase 1: pick first location from each continent, test in parallel
             const scouts = Object.values(byContinent).map(locs => locs[0]);
-            this.currentLocation = 'Scouting continents...';
+            this.currentLocation = {{ _('ping.scouting') | tojson }};
             await Promise.all(scouts.map(loc => this.pingLocation(loc)));
 
             // Find best continent
@@ -340,7 +341,8 @@ function pingTest() {
             const BATCH = 5;
             for (let i = 0; i < ordered.length; i += BATCH) {
                 const batch = ordered.slice(i, i + BATCH);
-                this.currentLocation = 'Testing ' + batch.map(l => l.name).join(', ');
+                this.currentLocation = {{ _('ping.testing_locations') | tojson }}
+                    .replace('{locations}', batch.map(l => l.name).join(', '));
                 await Promise.all(batch.map(loc => this.pingLocation(loc)));
             }
 
@@ -365,11 +367,11 @@ function pingTest() {
                     this.shareState = 'success';
                 } else {
                     const data = await resp.json().catch(() => ({}));
-                    this.shareError = data.error || 'Submission failed.';
+                    this.shareError = data.error || {{ _('ping.submission_failed') | tojson }};
                     this.shareState = 'error';
                 }
             } catch {
-                this.shareError = 'Network error.';
+                this.shareError = {{ _('ping.network_error') | tojson }};
                 this.shareState = 'error';
             }
         },

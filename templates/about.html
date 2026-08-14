@@ -12,34 +12,34 @@
     "mainEntity": [
         {
             "@type": "Question",
-            "name": "What is {{ site_name }}?",
+            "name": {{ _('about.what_is_title') | tojson }},
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "{{ site_name }} lets you instantly reserve a private Team Fortress 2 server. Pick a location, choose a map, and a server is spun up for you. Reservations last {{ reservation_settings.max_duration_hours }} hours and auto-end when the server is empty for {{ reservation_settings.auto_end_minutes }} minutes."
+                "text": {{ _('about.what_is_body', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) | tojson }}
             }
         },
         {
             "@type": "Question",
-            "name": "What commands can I use during a reservation?",
+            "name": {{ _('about.commands_title') | tojson }},
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Available commands: !reservation (shows info), !end (owner only — starts end countdown), !cancel (owner only — cancels end countdown), !changemap <mapname> (owner only — changes map), !config [configname] (owner only — loads a league config like RGL, ETF2L, FBTF, or resets to defaults), !restart (owner only — opens a menu to restart the tournament, game, or round), !cmd <command> [arguments...] (owner only — runs a server command), !sdr (re-connect using SDR)."
+                "text": {{ (_('about.commands_intro') ~ ' !reservation: ' ~ _('about.cmd_reservation') ~ ' !end: ' ~ _('about.cmd_end') ~ ' !cancel: ' ~ _('about.cmd_cancel') ~ ' !changemap: ' ~ _('about.cmd_changemap') ~ ' !config: ' ~ _('about.cmd_config') ~ ' !restart: ' ~ _('about.cmd_restart') ~ ' !cmd: ' ~ _('about.cmd_server') ~ ' !sdr: ' ~ _('about.cmd_sdr')) | tojson }}
             }
         },
         {
             "@type": "Question",
-            "name": "Is {{ site_name }} open source?",
+            "name": {{ _('about.open_source_title') | tojson }},
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Yes. {{ site_name }} is open source, licensed under the GNU Affero General Public License v3 (AGPL-3.0), and available on GitHub at https://github.com/cometsmarsblackberry/summon."
+                "text": {{ (_('about.open_source_body') ~ ' GitHub: https://github.com/cometsmarsblackberry/summon.') | tojson }}
             }
         },
         {
             "@type": "Question",
-            "name": "What happens if I abuse the service?",
+            "name": {{ _('about.bans_title') | tojson }},
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "If you abuse the service, you will be permanently banned. Banned players are listed on the bans page."
+                "text": {{ (_('about.bans_body_1') ~ ' ' ~ _('about.bans_body_rules') ~ ' ' ~ _('about.bans_body_2') ~ ' ' ~ _('about.bans_body_link') ~ '.') | tojson }}
             }
         }
     ]

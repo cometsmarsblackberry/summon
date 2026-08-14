@@ -15,7 +15,10 @@
     get continents() {
         const cs = new Set();
         Object.values(this.status).forEach(loc => { if (loc.continent) cs.add(loc.continent); });
-        return ['All', ...[...cs].sort()];
+        return [
+            {value: 'All', label: {{ _('home.all_regions') | tojson | forceescape }}},
+            ...[...cs].sort().map(value => ({value, label: value})),
+        ];
     },
     get flatList() {
         const entries = this.activeContinent === 'All'
@@ -39,7 +42,13 @@
         let lastContinent = null;
         sorted.forEach(([code, loc]) => {
             const c = loc.continent || 'Other';
-            if (c !== lastContinent) { result.push({type: 'header', name: c}); lastContinent = c; }
+            if (c !== lastContinent) {
+                result.push({
+                    type: 'header',
+                    name: c === 'Other' ? {{ _('home.other_region') | tojson | forceescape }} : c,
+                });
+                lastContinent = c;
+            }
             result.push({type: 'row', entry: [code, loc]});
         });
         return result;
@@ -374,7 +383,7 @@
                 window.location.href = '/reservations/' + result.id;
             } else if (resp.status === 428) {
                 this.captchaRequired = true;
-                this.error = 'Please complete the captcha verification.';
+                this.error = {{ _('home.captcha_error') | tojson | forceescape }};
                 if (!this.captchaSiteKey) {
                     try {
                         const check = await fetch('/api/captcha/check');
@@ -398,7 +407,7 @@
                 }
                 this.submitting = false;
             } else {
-                this.error = result.detail || 'Failed to create reservation';
+                this.error = result.detail || {{ _('home.create_failed') | tojson | forceescape }};
                 if (this.captchaWidgetId !== null && typeof hcaptcha !== 'undefined') {
                     hcaptcha.reset(this.captchaWidgetId);
                     this.captchaToken = null;
@@ -406,7 +415,7 @@
                 this.submitting = false;
             }
         } catch (err) {
-            this.error = 'Network error — check your connection and try again.';
+            this.error = {{ _('home.network_error') | tojson | forceescape }};
             this.submitting = false;
         }
     }
@@ -465,7 +474,7 @@
             {% if not user %}
             <a href="/login" class="hover:opacity-80 transition-opacity">
                 {% if login_image_wide_url %}
-                <img src="{{ login_image_wide_url }}" alt="Login with Steam" class="h-7">
+                <img src="{{ login_image_wide_url }}" alt="{{ _('nav.login_alt') }}" class="h-7">
                 {% else %}
                 <span class="text-sm text-slate-500 hover:text-slate-900">{{ _('nav.login_alt') }}</span>
                 {% endif %}
@@ -477,10 +486,10 @@
 
         <!-- Filters -->
         <div class="flex flex-wrap items-center gap-1 mb-3">
-            <template x-for="c in continents" :key="c">
-                <button x-show="continents.length > 2" @click="activeContinent = c; sortBy = 'region'"
-                    :class="activeContinent === c && sortBy === 'region' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
-                    class="px-2.5 py-1 text-xs rounded-full transition-colors" x-text="c"></button>
+            <template x-for="c in continents" :key="c.value">
+                <button x-show="continents.length > 2" @click="activeContinent = c.value; sortBy = 'region'"
+                    :class="activeContinent === c.value && sortBy === 'region' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
+                    class="px-2.5 py-1 text-xs rounded-full transition-colors" x-text="c.label"></button>
             </template>
             <button x-show="pingDone" @click="sortBy = 'ping'; activeContinent = 'All'"
                 :class="sortBy === 'ping' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
@@ -501,7 +510,7 @@
                             {% endif %}>
                             <div class="flex items-center gap-2">
                                 <template x-if="item.entry[1].flag">
-                                    <img :src="item.entry[1].flag.src" :alt="item.entry[1].flag.alt"
+                                    <img :src="item.entry[1].flag.src" alt=""
                                         class="w-5 h-5 shrink-0">
                                 </template>
                                 <div>
@@ -549,7 +558,7 @@
                                     <span class="text-slate-300 mx-1">/</span>
                                     <span class="text-green-800 inline-block min-w-[2ch] text-right" x-text="item.entry[1].available"></span>
                                     <span class="text-slate-400"
-                                        title="Remaining slots across all regions">{{ _('home.available') }}</span>
+                                        title="{{ _('home.remaining_slots_tooltip') }}">{{ _('home.available') }}</span>
                                 </span>
                                 <span x-show="!item.entry[1].enabled"
                                     class="text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded">

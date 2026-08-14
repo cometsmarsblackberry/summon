@@ -497,7 +497,7 @@ async def get_competitive_configs():
     return {
         "available": False,
         "configs": {},
-        "message": "Config list unavailable. Use !config in-game to see available configs.",
+        "message": t("home.config_unavailable"),
     }
 
 
@@ -783,7 +783,7 @@ async def get_reservation_configs(
         return {
             "available": False,
             "configs": {},
-            "message": "Config list unavailable. Use !config in-game to see available configs.",
+            "message": t("status.config_unavailable"),
         }
 
     from app.services.competitive_configs import group_for_ui
@@ -862,7 +862,7 @@ async def end_reservation_endpoint(
         had_started=had_started,
     )
     
-    return {"message": "Reservation ended", "status": reservation.status.value}
+    return {"message": t("status.reservation_ended"), "status": reservation.status.value}
 
 
 @router.post("/{reservation_id}/restart")
@@ -911,7 +911,7 @@ async def restart_reservation_endpoint(
     reservation.empty_since = None  # Clear during restart; reset when server is ready
     await db.commit()
 
-    return {"message": "Server restart initiated"}
+    return {"message": t("status.restart_initiated")}
 
 
 def _steamid64_to_steamid3(steamid64: str) -> str:
@@ -976,7 +976,10 @@ async def exec_competitive_config(
     logger.info(
         f"Executed config {cfg_file} on reservation #{reservation.reservation_number}"
     )
-    return {"message": f"Loaded {cfg_file}", "cfg_file": cfg_file}
+    return {
+        "message": t("status.config_loaded", config=cfg_file),
+        "cfg_file": cfg_file,
+    }
 
 
 class ChangeLevelRequest(BaseModel):
@@ -1022,7 +1025,10 @@ async def change_level(
     logger.info(
         f"Changelevel to {map_name} on reservation #{reservation.reservation_number}"
     )
-    return {"message": f"Changing map to {map_name}", "map_name": map_name}
+    return {
+        "message": t("status.map_changing", map=map_name),
+        "map_name": map_name,
+    }
 
 
 class UploadSettingsRequest(BaseModel):
@@ -1060,7 +1066,7 @@ async def update_upload_settings(
     await db.commit()
 
     return {
-        "message": "Upload settings updated",
+        "message": t("status.upload_settings_saved"),
         "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
         "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
     }
@@ -1163,4 +1169,4 @@ async def kick_player(
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
     logger.info(f"Kick sent for {body.steam_id} from reservation #{reservation.reservation_number}")
-    return {"message": "Kick command sent"}
+    return {"message": t("status.kick_sent")}

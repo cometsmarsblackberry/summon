@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ site_name }}{% endblock %}</title>
-    <meta name="description" content="{% block meta_description %}On-demand TF2 server reservations for competitive Team Fortress 2. Pre-loaded RGL and ETF2L configs, multiple global locations.{% endblock %}">
+    <meta name="description" content="{% block meta_description %}{{ _('meta.site_description') }}{% endblock %}">
     <link rel="canonical" href="{% block canonical %}{{ base_url }}/{% endblock %}">
     {% if favicon_url %}<link rel="icon" href="{{ favicon_url }}">{% endif %}
 
@@ -108,9 +108,9 @@
     {
         "@context": "https://schema.org",
         "@type": "WebSite",
-        "name": "{{ site_name }}",
-        "url": "{{ base_url }}/",
-        "description": "On-demand TF2 server reservations for competitive Team Fortress 2. Pre-loaded RGL and ETF2L configs, multiple global locations."
+        "name": {{ site_name | tojson }},
+        "url": {{ (base_url ~ '/') | tojson }},
+        "description": {{ _('meta.site_description') | tojson }}
     }
     </script>
     {% endblock %}
