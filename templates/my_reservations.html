@@ -41,12 +41,8 @@
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-500"
                         x-data="{ iso: '{{ reservation.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}', locale: '{{ request.state.locale|default('en') }}' }"
-                        :title="locale === 'en'
-                            ? new Date(iso).toLocaleString('en-GB', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) + ' UTC'
-                            : new Date(iso).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'"
-                        x-text="locale === 'en'
-                            ? new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
-                            : new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: false })">
+                        :title="summonIntl.dateTime(iso, locale, 'UTC') + ' UTC'"
+                        x-text="summonIntl.dateTime(iso, locale)">
                         {{ reservation.created_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%Y-%m-%d %H:%M') }}
                     </td>
                     <td class="px-4 py-3 text-right">
