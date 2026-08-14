@@ -38,8 +38,14 @@
                     {{ user.display_name }}
                 </a>
                 <div class="mt-2 text-xs text-slate-500 space-y-0.5">
-                    <div>{{ _('profile.member_since', date=user.created_at.strftime('%d/%m/%Y' if request.state.locale|default('en') == 'en' else '%b %d, %Y')) }}</div>
-                    <div>{{ _('profile.last_login', date=user.last_login_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M')) }}</div>
+                    <div x-data="{ iso: '{{ user.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}' }"
+                        x-text="{{ _('profile.member_since', date='{date}') | tojson | forceescape }}.replace('{date}', summonIntl.date(iso, '{{ request.state.locale|default('en') }}', 'UTC'))">
+                        {{ _('profile.member_since', date=user.created_at.strftime('%d/%m/%Y' if request.state.locale|default('en') == 'en' else '%Y-%m-%d')) }}
+                    </div>
+                    <div x-data="{ iso: '{{ user.last_login_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}' }"
+                        x-text="{{ _('profile.last_login', date='{date}') | tojson | forceescape }}.replace('{date}', summonIntl.dateTime(iso, '{{ request.state.locale|default('en') }}', 'UTC'))">
+                        {{ _('profile.last_login', date=user.last_login_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%Y-%m-%d %H:%M')) }}
+                    </div>
                 </div>
             </div>
         </div>
@@ -146,8 +152,10 @@
         </div>
 
         {% if user.steam_data_updated_at %}
-        <div class="mt-4 text-xs text-slate-400">
-            {{ _('profile.last_updated', date=user.steam_data_updated_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M')) }}
+        <div class="mt-4 text-xs text-slate-400"
+            x-data="{ iso: '{{ user.steam_data_updated_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}' }"
+            x-text="{{ _('profile.last_updated', date='{date}') | tojson | forceescape }}.replace('{date}', summonIntl.dateTime(iso, '{{ request.state.locale|default('en') }}', 'UTC'))">
+            {{ _('profile.last_updated', date=user.steam_data_updated_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%Y-%m-%d %H:%M')) }}
         </div>
         {% endif %}
     </div>

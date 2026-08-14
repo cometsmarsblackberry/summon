@@ -55,14 +55,7 @@
 
         formatLocal(value) {
             if (!value) return '';
-            const date = new Date(this.normalizeIso(value));
-            if (Number.isNaN(date.getTime())) return '';
-            if (this.locale === 'en') {
-                return date.toLocaleTimeString('en-GB', {
-                    hour: '2-digit', minute: '2-digit', hour12: false,
-                });
-            }
-            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            return summonIntl.time(this.normalizeIso(value), this.locale);
         },
 
         formatEndTime(value) {
@@ -83,25 +76,12 @@
 
         formatEndedTime(value) {
             if (!value) return '';
-            const date = new Date(this.normalizeIso(value));
-            if (Number.isNaN(date.getTime())) return '';
-            const day = String(date.getDate()).padStart(2, '0');
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const year = date.getFullYear();
-            return day + '/' + month + '/' + year + ' ' + this.formatLocal(value);
+            return summonIntl.dateTime(this.normalizeIso(value), this.locale);
         },
 
         formatUtc(value) {
             if (!value) return '';
-            const date = new Date(this.normalizeIso(value));
-            if (Number.isNaN(date.getTime())) return '';
-            if (this.locale === 'en') {
-                return date.toLocaleString('en-GB', {
-                    timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
-                    hour: '2-digit', minute: '2-digit', hour12: false,
-                }) + ' UTC';
-            }
-            return date.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+            return summonIntl.dateTime(this.normalizeIso(value), this.locale, 'UTC') + ' UTC';
         },
 
         init() {
@@ -1657,7 +1637,7 @@
                         </div>
                     </template>
                     <p x-show="hostStats && hostStats.updated_at" class="text-slate-400 text-right"
-                        x-text="hostStats && hostStats.updated_at ? {{ _('status.updated_at') | tojson | forceescape }}.replace('{time}', new Date(hostStats.updated_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false})) : ''"></p>
+                        x-text="hostStats && hostStats.updated_at ? {{ _('status.updated_at') | tojson | forceescape }}.replace('{time}', summonIntl.time(hostStats.updated_at, locale, null, true)) : ''"></p>
                 </div>
             </div>
         </div>

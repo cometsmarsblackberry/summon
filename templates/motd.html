@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if reservation %}{{ site_name }} #{{ reservation.reservation_number }}{% else %}{{ site_name }}{% endif %}</title>
+    <script src="{{ static_asset('js/intl.js') }}"></script>
     <script>
         var savedTheme = null;
         try {
@@ -173,7 +174,8 @@
             </div>
             <div class="info-row">
                 <span class="info-label">{{ _('motd.ends_at') }}</span>
-                <span class="info-value">{{ reservation.ends_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%b %d, %Y %H:%M') }} UTC</span>
+                <span class="info-value" id="reservation-ends-at"
+                    data-iso="{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ reservation.ends_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%Y-%m-%d %H:%M') }} UTC</span>
             </div>
         </div>
 
@@ -190,6 +192,15 @@
     </div>
 {% endif %}
 <script>
+var reservationEndsAt = document.getElementById("reservation-ends-at");
+if (reservationEndsAt) {
+    reservationEndsAt.textContent = summonIntl.dateTime(
+        reservationEndsAt.getAttribute("data-iso"),
+        "{{ request.state.locale|default('en') }}",
+        "UTC"
+    ) + " UTC";
+}
+
 function findParentWithClass(element, className) {
     while (element && element !== document.body) {
         if (element.classList && element.classList.contains(className)) {

@@ -360,10 +360,7 @@ function statsPage() {
 
         formatDate(dateStr) {
             const d = new Date(dateStr + 'T00:00:00');
-            if ('{{ request.state.locale|default('en') }}' === 'en') {
-                return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            }
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            return summonIntl.date(d, '{{ request.state.locale|default('en') }}');
         },
 
         get chartLabels() {

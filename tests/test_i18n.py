@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 LOCALES_DIR = Path(__file__).resolve().parent.parent / "locales"
+PROJECT_ROOT = LOCALES_DIR.parent
 PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
 
 
@@ -58,6 +59,39 @@ class TranslationCatalogTests(unittest.TestCase):
                         sorted(PLACEHOLDER_RE.findall(english_value)),
                         sorted(PLACEHOLDER_RE.findall(catalog[key])),
                     )
+
+
+class FrontendLocaleTests(unittest.TestCase):
+    def test_date_views_use_the_site_locale_instead_of_browser_default(self):
+        for template_name in (
+            "my_reservations.html",
+            "profile.html",
+            "stats.html",
+            "status.html",
+        ):
+            with self.subTest(template=template_name):
+                template = (PROJECT_ROOT / "templates" / template_name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("summonIntl.", template)
+                self.assertNotRegex(
+                    template,
+                    r"toLocale(?:String|DateString|TimeString)\(\[\]",
+                )
+
+    def test_shared_formatter_is_loaded_by_standard_and_motd_layouts(self):
+        for template_name in ("base.html", "motd.html"):
+            with self.subTest(template=template_name):
+                template = (PROJECT_ROOT / "templates" / template_name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("static_asset('js/intl.js')", template)
+
+        formatter = (PROJECT_ROOT / "static" / "js" / "intl.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("language === 'en' ? 'en-GB'", formatter)
+        self.assertIn("new Intl.DateTimeFormat(locale(language)", formatter)
 
 
 if __name__ == "__main__":
