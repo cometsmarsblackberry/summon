@@ -27,7 +27,10 @@ const (
 	// RetryDelay is the base delay between retries (exponential backoff)
 	RetryDelay = 5 * time.Second
 	// RCONReadyTimeout is the max time to wait for RCON to become available
-	RCONReadyTimeout = 60 * time.Second
+	// Startup can include the image's bounded map prefetch before SRCDS begins.
+	// Ninety seconds leaves the prefetch up to thirty seconds while preserving
+	// the previous sixty-second allowance for the game server itself.
+	RCONReadyTimeout = 90 * time.Second
 	// RCONProbeTimeout bounds one readiness check so an unresponsive RCON
 	// process cannot prevent the overall readiness deadline from being observed.
 	RCONProbeTimeout = 2 * time.Second
@@ -211,6 +214,81 @@ func isSafeMapName(name string) bool {
 	return safeMapNameRE.MatchString(strings.TrimSpace(name))
 }
 
+func desiredMapAlreadyLoaded(desiredMap string, serverInfo *sdr.ServerInfo, statusErr error) bool {
+	if statusErr != nil || serverInfo == nil {
+		return false
+	}
+	return strings.EqualFold(
+		strings.TrimSpace(serverInfo.Map),
+		strings.TrimSpace(desiredMap),
+	)
+}
+
+// ensureDesiredMap preserves the RCON-based startup path for older images but
+// avoids an unnecessary level reload when a newer image already prefetched and
+// started directly on the reservation's requested map.
+func (s *Sequence) ensureDesiredMap(ctx context.Context, progress int, phase string) {
+	desiredMap := strings.TrimSpace(s.config.FirstMap)
+	if desiredMap == "" || strings.EqualFold(desiredMap, "cp_badlands") {
+		return
+	}
+
+	phaseSuffix := ""
+	if phase != "" {
+		phaseSuffix = fmt.Sprintf(" (%s)", phase)
+	}
+	if !isSafeMapName(desiredMap) {
+		log.Printf("Skipping unsafe map name during boot%s: %q", phaseSuffix, desiredMap)
+		return
+	}
+
+	statusCtx, cancelStatus := context.WithTimeout(ctx, RCONProbeTimeout)
+	serverInfo, statusErr := s.getServerInfo(statusCtx)
+	cancelStatus()
+	if desiredMapAlreadyLoaded(desiredMap, serverInfo, statusErr) {
+		log.Printf("Server already started on desired map %s%s", desiredMap, phaseSuffix)
+		return
+	}
+	if statusErr != nil {
+		log.Printf(
+			"Unable to confirm startup map%s: %v; using legacy changelevel fallback",
+			phaseSuffix, statusErr,
+		)
+	} else if serverInfo == nil || strings.TrimSpace(serverInfo.Map) == "" {
+		log.Printf("Startup map was not reported%s; using legacy changelevel fallback", phaseSuffix)
+	} else {
+		log.Printf(
+			"Server started on %s instead of %s%s; using legacy changelevel fallback",
+			serverInfo.Map, desiredMap, phaseSuffix,
+		)
+	}
+
+	log.Printf("Boot stage: changing_map to %s%s", desiredMap, phaseSuffix)
+	s.ws.SendBootProgress("changing_map", progress, fmt.Sprintf("Changing map to %s...", desiredMap))
+
+	rconCmd := fmt.Sprintf("changelevel %s", desiredMap)
+	changeCtx, cancelChange := context.WithTimeout(ctx, RCONProbeTimeout)
+	err := s.podman.ExecInContainer(changeCtx, s.containerID, []string{
+		"/home/tf2/server/rcon",
+		"-H", "127.0.0.1",
+		"-p", "27015",
+		"-P", s.config.RCONPassword,
+		rconCmd,
+	})
+	cancelChange()
+	if err != nil {
+		log.Printf("RCON changelevel failed%s: %v (will use default map)", phaseSuffix, err)
+		return
+	}
+
+	log.Printf("Map change to %s initiated, waiting for RCON%s", desiredMap, phaseSuffix)
+	// Wait for RCON to come back after map change instead of a long fixed sleep.
+	time.Sleep(3 * time.Second) // brief grace period for map transition
+	if err := s.waitForRCON(ctx); err != nil {
+		log.Printf("Warning: RCON not ready after map change%s: %v", phaseSuffix, err)
+	}
+}
+
 // Run executes the full boot sequence with retries
 func (s *Sequence) Run() error {
 	ctx := context.Background()
@@ -304,36 +382,10 @@ func (s *Sequence) Run() error {
 	}
 	log.Println("RCON is ready")
 
-	// Stage 6: Change to desired map via RCON (if not cp_badlands)
-	// Do this BEFORE setting passwords, as map changes can reset server settings
-	desiredMap := s.config.FirstMap
-	if desiredMap != "" && desiredMap != "cp_badlands" {
-		if !isSafeMapName(desiredMap) {
-			log.Printf("Skipping unsafe map name during boot: %q", desiredMap)
-		} else {
-			log.Printf("Boot stage: changing_map to %s", desiredMap)
-			s.ws.SendBootProgress("changing_map", 88, fmt.Sprintf("Changing map to %s...", desiredMap))
-
-			rconCmd := fmt.Sprintf("changelevel %s", desiredMap)
-			err = s.podman.ExecInContainer(ctx, s.containerID, []string{
-				"/home/tf2/server/rcon",
-				"-H", "127.0.0.1",
-				"-p", "27015",
-				"-P", s.config.RCONPassword,
-				rconCmd,
-			})
-			if err != nil {
-				log.Printf("RCON changelevel failed: %v (will use default map)", err)
-			} else {
-				log.Printf("Map change to %s initiated, waiting for RCON...", desiredMap)
-				// Wait for RCON to come back after map change instead of fixed sleep
-				time.Sleep(3 * time.Second) // brief grace period for map transition
-				if err := s.waitForRCON(ctx); err != nil {
-					log.Printf("Warning: RCON not ready after map change: %v", err)
-				}
-			}
-		}
-	}
+	// Stage 6: Keep the legacy changelevel fallback for old images, but skip it
+	// when startup-map prefetching already launched the requested map.
+	// Do this BEFORE setting passwords, as map changes can reset server settings.
+	s.ensureDesiredMap(ctx, 88, "")
 
 	// Stage 7: Set passwords and plugin ConVars via individual RCON commands
 	log.Println("Boot stage: configuring server and plugin")
@@ -484,34 +536,9 @@ func (s *Sequence) RunReconfigure() error {
 	}
 	log.Println("RCON is ready (reconfigure)")
 
-	// Stage 4: Change to desired map via RCON (if not cp_badlands)
-	desiredMap := s.config.FirstMap
-	if desiredMap != "" && desiredMap != "cp_badlands" {
-		if !isSafeMapName(desiredMap) {
-			log.Printf("Skipping unsafe map name during reconfigure: %q", desiredMap)
-		} else {
-			log.Printf("Boot stage: changing_map to %s (reconfigure)", desiredMap)
-			s.ws.SendBootProgress("changing_map", 60, fmt.Sprintf("Changing map to %s...", desiredMap))
-
-			rconCmd := fmt.Sprintf("changelevel %s", desiredMap)
-			err = s.podman.ExecInContainer(ctx, s.containerID, []string{
-				"/home/tf2/server/rcon",
-				"-H", "127.0.0.1",
-				"-p", "27015",
-				"-P", s.config.RCONPassword,
-				rconCmd,
-			})
-			if err != nil {
-				log.Printf("RCON changelevel failed: %v (will use default map)", err)
-			} else {
-				log.Printf("Map change to %s initiated, waiting for RCON... (reconfigure)", desiredMap)
-				time.Sleep(3 * time.Second) // brief grace period for map transition
-				if err := s.waitForRCON(ctx); err != nil {
-					log.Printf("Warning: RCON not ready after map change: %v", err)
-				}
-			}
-		}
-	}
+	// Stage 4: Keep the legacy changelevel fallback for old images, but skip it
+	// when startup-map prefetching already launched the requested map.
+	s.ensureDesiredMap(ctx, 60, "reconfigure")
 
 	// Stage 5: Set passwords and plugin ConVars via individual RCON commands
 	log.Println("Boot stage: configuring server and plugin (reconfigure)")

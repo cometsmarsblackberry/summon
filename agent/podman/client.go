@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -529,6 +530,24 @@ type ContainerConfig struct {
 	Labels   map[string]string
 }
 
+var safeStartupMapRE = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+
+func startupMap(firstMap string) string {
+	mapName := strings.TrimSpace(firstMap)
+	if !safeStartupMapRE.MatchString(mapName) {
+		return "cp_badlands"
+	}
+	return mapName
+}
+
+func mapDownloadBase(fastDLURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(fastDLURL), "/")
+	if !strings.HasSuffix(base, "/maps") {
+		base += "/maps"
+	}
+	return base + "/"
+}
+
 // BuildRunArgs builds deterministic rootless Podman arguments. RCON remains
 // reachable only inside the container; only game and SourceTV ports are bound.
 func BuildRunArgs(cfg ContainerConfig) []string {
@@ -538,12 +557,14 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 	hostname = strings.ReplaceAll(hostname, "{location}", strings.Title(cfg.Location))
 	hostname = strings.ReplaceAll(hostname, "{location_city}", cfg.LocationCity)
 
-	// Build FastDL map download URL from base FastDL URL
-	mapDownloadURL := cfg.FastDLURL
-	if !strings.HasSuffix(mapDownloadURL, "/") {
-		mapDownloadURL += "/"
-	}
-	mapDownloadURL += "maps/"
+	// The image uses this map before SRCDS starts when it supports startup-map
+	// prefetching. Older images ignore it and continue booting cp_badlands, then
+	// the agent's legacy RCON changelevel path takes over.
+	startMap := startupMap(cfg.FirstMap)
+
+	// Build the FastDL map download URL from either a site root or an already
+	// normalized maps directory.
+	mapDownloadURL := mapDownloadBase(cfg.FastDLURL)
 	instantRuntime := cfg.GamePort != 0 || cfg.TVPort != 0
 	gamePort := cfg.GamePort
 	if gamePort == 0 {
@@ -579,6 +600,7 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 		"-e", "ENABLE_FAKE_IP=1",
 		"-e", fmt.Sprintf("DOWNLOAD_URL=%s", cfg.FastDLURL),
 		"-e", fmt.Sprintf("SM_MAP_DOWNLOAD_BASE=%s", mapDownloadURL),
+		"-e", fmt.Sprintf("SUMMON_START_MAP=%s", startMap),
 		"-e", fmt.Sprintf("DEMOS_TF_APIKEY=%s", cfg.DemosTFAPIKey),
 		"-e", fmt.Sprintf("LOGS_TF_APIKEY=%s", cfg.LogsTFAPIKey),
 		"-e", fmt.Sprintf("MOTD_URL=%s", cfg.MOTDURL),
@@ -600,7 +622,9 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 	// Image and command
 	args = append(args,
 		cfg.Image,
-		"+map", "cp_badlands", // Start map (will be changed via RCON)
+		// New images replace this after a successful prefetch. Keeping badlands
+		// here makes old images and failed prefetches safe during rolling deploys.
+		"+map", "cp_badlands",
 	)
 	return args
 }
