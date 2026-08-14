@@ -118,3 +118,55 @@ func TestBuildRunArgsPreservesCloudDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRunArgsProvidesValidatedStartupMapWithBadlandsCommandFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		firstMap string
+		want     string
+	}{
+		{name: "requested map", firstMap: "cp_process_f12", want: "cp_process_f12"},
+		{name: "surrounding whitespace", firstMap: "  koth_product_rcx  ", want: "koth_product_rcx"},
+		{name: "empty map", firstMap: "", want: "cp_badlands"},
+		{name: "unsafe map", firstMap: "cp_process;quit", want: "cp_badlands"},
+		{name: "path traversal", firstMap: "../cp_process", want: "cp_badlands"},
+		{name: "too long", firstMap: strings.Repeat("a", 65), want: "cp_badlands"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := BuildRunArgs(ContainerConfig{
+				Name: "startup-map", Image: "tf2:test", FirstMap: test.firstMap,
+			})
+			if env := "SUMMON_START_MAP=" + test.want; !slices.Contains(args, env) {
+				t.Fatalf("startup map environment %q missing from %q", env, args)
+			}
+			if len(args) < 2 || !slices.Equal(args[len(args)-2:], []string{"+map", "cp_badlands"}) {
+				t.Fatalf("badlands command fallback missing from %q", args)
+			}
+		})
+	}
+}
+
+func TestBuildRunArgsNormalizesFastDLMapDirectory(t *testing.T) {
+	tests := []struct {
+		name   string
+		fastDL string
+		want   string
+	}{
+		{name: "site root", fastDL: "https://fastdl.example.test", want: "https://fastdl.example.test/maps/"},
+		{name: "site root slash", fastDL: "https://fastdl.example.test/", want: "https://fastdl.example.test/maps/"},
+		{name: "maps directory", fastDL: "https://fastdl.example.test/maps", want: "https://fastdl.example.test/maps/"},
+		{name: "maps directory slash", fastDL: "https://fastdl.example.test/maps/", want: "https://fastdl.example.test/maps/"},
+		{name: "nested root", fastDL: "https://fastdl.example.test/tf/", want: "https://fastdl.example.test/tf/maps/"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := BuildRunArgs(ContainerConfig{
+				Name: "fastdl", Image: "tf2:test", FastDLURL: test.fastDL,
+			})
+			if env := "SM_MAP_DOWNLOAD_BASE=" + test.want; !slices.Contains(args, env) {
+				t.Fatalf("map download environment %q missing from %q", env, args)
+			}
+		})
+	}
+}
