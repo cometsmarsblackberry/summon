@@ -60,6 +60,28 @@ class TranslationCatalogTests(unittest.TestCase):
                         sorted(PLACEHOLDER_RE.findall(catalog[key])),
                     )
 
+    def test_reservation_action_labels_stay_compact(self):
+        expected = {
+            "en": ("Restart", "End"),
+            "es": ("Reiniciar", "Terminar"),
+            "fi": ("Käynnistä uudelleen", "Lopeta"),
+            "fil": ("I-restart", "Tapusin"),
+            "ja": ("再起動", "終了"),
+            "ko": ("재시작", "종료"),
+            "ms": ("Mulakan Semula", "Tamatkan"),
+            "pt": ("Reiniciar", "Encerrar"),
+            "sv": ("Starta om", "Avsluta"),
+            "th": ("รีสตาร์ท", "สิ้นสุด"),
+            "vi": ("Khởi động lại", "Kết thúc"),
+        }
+        catalogs = {"en": self.english, **self.translations}
+
+        self.assertEqual(set(expected), set(catalogs))
+        for locale, labels in expected.items():
+            with self.subTest(locale=locale):
+                self.assertEqual(labels[0], catalogs[locale]["status.restart_server"])
+                self.assertEqual(labels[1], catalogs[locale]["status.end_reservation"])
+
 
 class FrontendLocaleTests(unittest.TestCase):
     def test_date_views_use_the_site_locale_instead_of_browser_default(self):
