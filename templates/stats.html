@@ -278,10 +278,10 @@ function statsPage() {
         async loadReservations() {
             try {
                 const resp = await fetch('/api/reservation-stats');
-                if (!resp.ok) throw new Error({{ _('stats.load_failed') | tojson }});
+                if (!resp.ok) throw new Error({{ _('stats.reservation_load_failed') | tojson }});
                 this.res.data = await resp.json();
             } catch (e) {
-                this.res.error = e.message || {{ _('stats.load_failed') | tojson }};
+                this.res.error = e.message || {{ _('stats.reservation_load_failed') | tojson }};
             } finally {
                 this.res.loading = false;
             }
@@ -292,11 +292,11 @@ function statsPage() {
             this.ping.loading = true;
             try {
                 const resp = await fetch('/api/ping-stats');
-                if (!resp.ok) throw new Error({{ _('stats.load_failed') | tojson }});
+                if (!resp.ok) throw new Error({{ _('stats.ping_load_failed') | tojson }});
                 this.ping.data = await resp.json();
                 this.ping.loaded = true;
             } catch (e) {
-                this.ping.error = e.message || {{ _('stats.load_failed') | tojson }};
+                this.ping.error = e.message || {{ _('stats.ping_load_failed') | tojson }};
             } finally {
                 this.ping.loading = false;
             }

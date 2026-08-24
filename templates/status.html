@@ -810,6 +810,38 @@
 
         formatBootProgress(progress) {
             if (!progress) return '';
+            const message = String(progress.message || '');
+            const detailLabels = {
+                downloading: {{ _('status.progress_downloading_layers') | tojson | forceescape }},
+                extracting: {{ _('status.progress_extracting_layers') | tojson | forceescape }},
+                preparing: {{ _('status.progress_preparing_container') | tojson | forceescape }},
+                cached: {{ _('status.progress_using_cached_layers') | tojson | forceescape }},
+                layerCount: {{ _('status.progress_downloading_layers_count') | tojson | forceescape }},
+                retrying: {{ _('status.progress_retrying_image_download') | tojson | forceescape }},
+            };
+            const fill = (template, values) => Object.entries(values).reduce(
+                (text, [key, value]) => text.replace('{' + key + '}', value),
+                template,
+            );
+            let match = message.match(/^Downloading layers \((.+?) \/ (.+?)\)\.\.\.$/);
+            if (match) {
+                return fill(detailLabels.downloading, {current: match[1], total: match[2]});
+            }
+            match = message.match(/^Extracting layers \((.+?) \/ (.+?)\)\.\.\.$/);
+            if (match) {
+                return fill(detailLabels.extracting, {current: match[1], total: match[2]});
+            }
+            match = message.match(/^Downloading layers \((\d+)\)\.\.\.$/);
+            if (match) {
+                return fill(detailLabels.layerCount, {count: match[1]});
+            }
+            match = message.match(/^Retrying image download \(attempt (\d+)\)\.\.\.$/);
+            if (match) {
+                return fill(detailLabels.retrying, {attempt: match[1]});
+            }
+            if (message === 'Preparing container image...') return detailLabels.preparing;
+            if (message === 'Using cached image layers...') return detailLabels.cached;
+
             const labels = {
                 agent_started: {{ _('status.progress_agent_started') | tojson | forceescape }},
                 loading_config: {{ _('status.progress_loading_config') | tojson | forceescape }},

@@ -82,8 +82,62 @@ class TranslationCatalogTests(unittest.TestCase):
                 self.assertEqual(labels[0], catalogs[locale]["status.restart_server"])
                 self.assertEqual(labels[1], catalogs[locale]["status.end_reservation"])
 
+    def test_restored_english_operational_copy(self):
+        expected = {
+            "home.config_unavailable": (
+                "Config list unavailable. You can still choose one after the server starts."
+            ),
+            "status.progress_downloading_layers": (
+                "Downloading layers ({current} / {total})..."
+            ),
+            "status.progress_extracting_layers": (
+                "Extracting layers ({current} / {total})..."
+            ),
+            "status.progress_preparing_container": "Preparing container image...",
+            "status.progress_using_cached_layers": "Using cached image layers...",
+            "status.progress_downloading_layers_count": "Downloading layers ({count})...",
+            "status.progress_retrying_image_download": (
+                "Retrying image download (attempt {attempt})..."
+            ),
+            "status.progress_container_pulled": "Image downloaded",
+            "stats.reservation_load_failed": "Failed to load reservation stats.",
+            "stats.ping_load_failed": "Failed to load ping stats.",
+        }
+
+        for key, value in expected.items():
+            with self.subTest(key=key):
+                self.assertEqual(value, self.english[key])
+
 
 class FrontendLocaleTests(unittest.TestCase):
+    def test_live_image_progress_uses_localized_agent_details(self):
+        template = (PROJECT_ROOT / "templates" / "status.html").read_text(
+            encoding="utf-8"
+        )
+
+        for key in (
+            "progress_downloading_layers",
+            "progress_extracting_layers",
+            "progress_preparing_container",
+            "progress_using_cached_layers",
+            "progress_downloading_layers_count",
+            "progress_retrying_image_download",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(f"_('status.{key}')", template)
+
+        self.assertIn("message.match(/^Downloading layers", template)
+        self.assertIn("message.match(/^Extracting layers", template)
+        self.assertNotIn("bootProgress ? bootProgress.message : ''", template)
+
+    def test_statistics_keep_specific_localized_load_errors(self):
+        template = (PROJECT_ROOT / "templates" / "stats.html").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("_('stats.reservation_load_failed')", template)
+        self.assertIn("_('stats.ping_load_failed')", template)
+
     def test_date_views_use_the_site_locale_instead_of_browser_default(self):
         for template_name in (
             "my_reservations.html",
