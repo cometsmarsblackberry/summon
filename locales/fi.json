@@ -144,6 +144,7 @@
         "download_map": "Lataa kartta",
         "change_map": "Vaihda kartta",
         "server_commands": "Palvelinkomennot",
+        "command_placeholder": "esim. mp_timelimit 30",
         "run_command": "Suorita",
         "command_running": "Suoritetaan…",
         "command_succeeded": "Komento suoritettu",

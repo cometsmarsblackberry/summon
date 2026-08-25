@@ -144,6 +144,7 @@
         "download_map": "맵 다운로드",
         "change_map": "맵 변경",
         "server_commands": "서버 명령어",
+        "command_placeholder": "예: mp_timelimit 30",
         "run_command": "실행",
         "command_running": "실행 중…",
         "command_succeeded": "명령어 완료",

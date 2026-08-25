@@ -144,6 +144,7 @@
         "download_map": "ดาวน์โหลดแผนที่",
         "change_map": "เปลี่ยนแผนที่",
         "server_commands": "คำสั่งเซิร์ฟเวอร์",
+        "command_placeholder": "เช่น mp_timelimit 30",
         "run_command": "เรียกใช้",
         "command_running": "กำลังเรียกใช้…",
         "command_succeeded": "คำสั่งเสร็จสิ้น",
