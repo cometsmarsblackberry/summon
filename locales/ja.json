@@ -144,6 +144,7 @@
         "download_map": "マップをダウンロード",
         "change_map": "マップを変更",
         "server_commands": "サーバーコマンド",
+        "command_placeholder": "例: mp_timelimit 30",
         "run_command": "実行",
         "command_running": "実行中…",
         "command_succeeded": "コマンド完了",

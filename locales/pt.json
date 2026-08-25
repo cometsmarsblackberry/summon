@@ -144,6 +144,7 @@
         "download_map": "Baixar mapa",
         "change_map": "Mudar mapa",
         "server_commands": "Comandos do servidor",
+        "command_placeholder": "ex.: mp_timelimit 30",
         "run_command": "Executar",
         "command_running": "Executando…",
         "command_succeeded": "Comando concluído",
