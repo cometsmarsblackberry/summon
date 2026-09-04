@@ -163,9 +163,12 @@ downloader. In standalone mode, the downloader follows SourceMod's
 `ADMFLAG_CHANGEMAP` access check. Server-console and RCON `changelevel` requests,
 including allowlisted owner commands, can also download missing maps.
 
-Downloads time out after five minutes, reject non-200 responses and files
-smaller than 1 KiB, and are saved under the server's `maps/` directory before
-the level changes.
+Each download attempt has a five-second connection timeout and a three-minute
+transfer timeout. Transport failures, HTTP 408/429 and 5xx responses, and files
+smaller than 1 KiB are retried after two and five seconds, up to three attempts
+within a four-minute overall budget. Other non-200 responses fail immediately.
+Successful downloads are saved under the server's `maps/` directory before the
+level changes.
 
 ## Backend integration
 
