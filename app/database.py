@@ -1,7 +1,7 @@
 """Database setup and session management."""
 
 from pathlib import Path
-from sqlalchemy import MetaData, event, text
+from sqlalchemy import MetaData, event, inspect, text
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -133,6 +133,7 @@ async def _create_and_migrate(conn) -> None:
     await _migrate_enabled_locations_nullable(conn)
     await _migrate_instant_hosts_public_ipv4_nullable(conn)
     await _backfill_motd_tokens(conn)
+    await _correct_sdr_source_tv_ports(conn)
     await _migrate_create_indexes(conn)
 
 
@@ -180,6 +181,25 @@ async def _backfill_motd_tokens(conn):
             text("UPDATE reservations SET motd_token = :token WHERE id = :id"),
             {"token": token, "id": row_id},
         )
+
+
+async def _correct_sdr_source_tv_ports(conn) -> None:
+    """Repair SDR SourceTV ports persisted from TF2's misleading status output."""
+    columns = await conn.run_sync(
+        lambda sync_conn: {
+            column["name"]
+            for column in inspect(sync_conn).get_columns("reservations")
+        }
+    )
+    required = {"sdr_ip", "sdr_port", "sdr_tv_port"}
+    if not required.issubset(columns):
+        return
+
+    await conn.execute(text(
+        "UPDATE reservations SET sdr_tv_port = sdr_port + 1 "
+        "WHERE sdr_ip LIKE '169.254.%' AND sdr_port BETWEEN 1 AND 65534 "
+        "AND (sdr_tv_port IS NULL OR sdr_tv_port != sdr_port + 1)"
+    ))
 
 
 async def _migrate_create_indexes(conn) -> None:

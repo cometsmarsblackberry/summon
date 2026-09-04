@@ -71,6 +71,19 @@ class RconRequestTimeout(TimeoutError):
     """A correlated RCON request did not complete before its deadline."""
 
 
+def _sdr_ports(
+    reported_game_port: int | str | None, fallback_game_port: int
+) -> tuple[int, int]:
+    """Return the real SDR game and SourceTV ports.
+
+    TF2 repeats the game FakeIP port for SourceTV in status output, but SDR
+    exposes SourceTV on the following port. Ignore the reported SourceTV port
+    so this also corrects readiness messages from older agents.
+    """
+    game_port = int(reported_game_port or fallback_game_port)
+    return game_port, game_port + 1
+
+
 def _fail_cloud_rcon_for_instance(instance_id: str, message: str) -> None:
     for key, future in list(pending_cloud_rcon.items()):
         if key[0] == instance_id:
@@ -865,8 +878,9 @@ async def _handle_instant_ready(
     sdr_ip = data.get("sdr_ip")
     if isinstance(sdr_ip, str) and sdr_ip.startswith("169.254."):
         reservation.sdr_ip = sdr_ip
-        reservation.sdr_port = int(data.get("sdr_port") or assignment.slot.game_port)
-        reservation.sdr_tv_port = int(data.get("sdr_tv_port") or assignment.slot.tv_port)
+        reservation.sdr_port, reservation.sdr_tv_port = _sdr_ports(
+            data.get("sdr_port"), assignment.slot.game_port
+        )
     else:
         reservation.sdr_ip = assignment.slot.host.public_ipv4
         reservation.sdr_port = assignment.slot.game_port
@@ -1148,8 +1162,6 @@ async def handle_server_ready(instance_id: str, data: dict):
     
     sdr_ip = data.get("sdr_ip")
     sdr_port = data.get("sdr_port")
-    sdr_tv_port = data.get("sdr_tv_port")
-    
     current_map = data.get("map")
     
     # Determine the connect address - prefer SDR FakeIP if available
@@ -1157,8 +1169,7 @@ async def handle_server_ready(instance_id: str, data: dict):
     
     if has_sdr:
         connect_ip = sdr_ip
-        connect_port = sdr_port or 27015
-        connect_tv_port = sdr_tv_port or 27020
+        connect_port, connect_tv_port = _sdr_ports(sdr_port, 27015)
         logger.info(f"Server ready: {instance_id} with SDR FakeIP {connect_ip}:{connect_port} (real: {real_ip}:{real_port})")
     else:
         connect_ip = real_ip

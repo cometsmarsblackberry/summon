@@ -82,6 +82,12 @@ func ParseStatus(statusOutput string) *ServerInfo {
 		}
 	}
 
+	// TF2 reports the game server's FakeIP port on the SourceTV status line.
+	// SourceTV is actually exposed through SDR on the following port.
+	if info.HasSDR() && info.SDRPort > 0 && info.SDRPort < 65535 {
+		info.SDRTVPort = info.SDRPort + 1
+	}
+
 	return info
 }
 
@@ -128,7 +134,8 @@ func parseUDPIP(line string, info *ServerInfo) {
 	}
 }
 
-// parseSourceTV extracts STV addresses from the sourcetv line.
+// parseSourceTV extracts STV addresses from the sourcetv line. When SDR is in
+// use, TF2 reports the game port here; ParseStatus corrects it after parsing.
 // Format: sourcetv:  169.254.214.222:35344, delay 0.0s  (local: 198.51.100.5:27020)
 func parseSourceTV(line string, info *ServerInfo) {
 	// Match the first IP:port (SDR FakeIP for STV if present)

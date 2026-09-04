@@ -797,6 +797,49 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("server.stop", command["type"])
             self.assertEqual(assignment.id, command["assignment_id"])
 
+    async def test_ready_derives_sourcetv_port_from_sdr_game_port(self):
+        async with self.sessions() as db:
+            await self.add_ready_host(db, "203.0.113.29", "sdr-ready")
+            reservation = self.reservation(352)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+
+            with patch("app.services.timer.schedule_expiry_timer"):
+                await _handle_instant_ready(
+                    assignment,
+                    reservation,
+                    {
+                        "container_id": "sdr-container",
+                        "sdr_ip": "169.254.122.213",
+                        "sdr_port": 25664,
+                        # TF2 incorrectly repeats the game port here.
+                        "sdr_tv_port": 25664,
+                    },
+                    db,
+                )
+
+            self.assertEqual("169.254.122.213", reservation.sdr_ip)
+            self.assertEqual(25664, reservation.sdr_port)
+            self.assertEqual(25665, reservation.sdr_tv_port)
+
+    async def test_migration_corrects_persisted_sdr_sourcetv_port(self):
+        async with self.sessions() as db:
+            reservation = self.reservation(353)
+            reservation.sdr_ip = "169.254.122.213"
+            reservation.sdr_port = 25664
+            reservation.sdr_tv_port = 25664
+            db.add(reservation)
+            await db.commit()
+            reservation_id = reservation.id
+
+        async with self.engine.begin() as connection:
+            await _create_and_migrate(connection)
+
+        async with self.sessions() as db:
+            reservation = await db.get(Reservation, reservation_id)
+            self.assertEqual(25665, reservation.sdr_tv_port)
+
     async def test_ready_for_closed_assignment_is_stopped(self):
         async with self.sessions() as db:
             await self.add_ready_host(db, "203.0.113.26", "closed-ready")

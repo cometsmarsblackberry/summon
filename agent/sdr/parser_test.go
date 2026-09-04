@@ -37,8 +37,8 @@ func TestParseStatus_WithSDR(t *testing.T) {
 	if info.SDRPort != 35344 {
 		t.Errorf("SDRPort = %d, want %d", info.SDRPort, 35344)
 	}
-	if info.SDRTVPort != 35344 {
-		t.Errorf("SDRTVPort = %d, want %d", info.SDRTVPort, 35344)
+	if info.SDRTVPort != 35345 {
+		t.Errorf("SDRTVPort = %d, want %d", info.SDRTVPort, 35345)
 	}
 
 	// Check real addresses
@@ -78,6 +78,13 @@ func TestParseStatus_WithSDR(t *testing.T) {
 	ip, port := info.GetConnectAddress()
 	if ip != "169.254.214.222" || port != 35344 {
 		t.Errorf("GetConnectAddress() = (%q, %d), want (%q, %d)", ip, port, "169.254.214.222", 35344)
+	}
+
+	// TF2's status output repeats the game port for SourceTV under SDR, but
+	// SourceTV is reachable on the following port.
+	ip, port = info.GetSTVAddress()
+	if ip != "169.254.214.222" || port != 35345 {
+		t.Errorf("GetSTVAddress() = (%q, %d), want (%q, %d)", ip, port, "169.254.214.222", 35345)
 	}
 }
 
