@@ -1184,16 +1184,16 @@
         {% if is_owner %}
         <div x-show="status === 'active'" x-cloak class="border-t border-slate-200 pt-5"
             x-data="{ connType: 'connect', connTypeInit: false }"
-            x-effect="if (!connTypeInit && connection && connection.direct_ip) { connType = 'direct'; connTypeInit = true; }">
+            x-effect="if (!connTypeInit && connection && connection.direct_ip) { connTypeInit = true; $nextTick(() => { connType = 'direct'; }); }">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-sm font-medium text-slate-500">{{ _('status.connection_details') }}</h2>
                 <select x-model="connType"
                     class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">
                     <option value="connect">{{ _('status.connect') }}</option>
-                    <option value="stv">{{ _('status.source_tv') }}</option>
                     <template x-if="connection && connection.direct_ip">
                         <option value="direct">{{ _('status.direct_connect') }}</option>
                     </template>
+                    <option value="stv">{{ _('status.source_tv') }}</option>
                     <template x-if="connection && connection.direct_ip">
                         <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
                     </template>
