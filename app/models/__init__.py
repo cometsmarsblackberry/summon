@@ -1,7 +1,7 @@
 # Database models
 from app.models.user import User
 from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
-from app.models.instance import CloudInstance, EnabledLocation, Provider, LocationProvider
+from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLocation, Provider, LocationProvider
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.models.cost import CostRecord, MonthlyCost
 from app.models.ping import PingSubmission
@@ -16,6 +16,7 @@ __all__ = [
     "ReservationStatus",
     "RuntimeKind",
     "CloudInstance",
+    "CloudCreationAttempt",
     "EnabledLocation",
     "Provider",
     "LocationProvider",

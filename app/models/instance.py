@@ -8,6 +8,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
+class CloudCreationAttempt(Base):
+    """Durable ownership of a Vultr create request whose result may be unknown.
+
+    Written before POST and removed atomically with recording the resulting VM.
+    Never discard an uncertain request just because a list response is empty.
+    """
+
+    __tablename__ = "cloud_creation_attempts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    reservation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("reservations.id"), unique=True, nullable=False
+    )
+    instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    auth_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    region: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+
 class CloudInstance(Base):
     """Tracks cloud provider VPS instances."""
 
