@@ -571,7 +571,7 @@ bool IsSafeMapName(const char[] mapName)
             || (character >= 'A' && character <= 'Z');
         bool isDigit = character >= '0' && character <= '9';
 
-        if (!isLetter && !isDigit && character != '_')
+        if (!isLetter && !isDigit && character != '_' && character != '-')
             return false;
     }
 
@@ -921,7 +921,7 @@ bool ExecuteOwnerServerCommand(
             strcopy(
                 argumentError,
                 sizeof(argumentError),
-                "Changelevel requires exactly one map name containing only letters, numbers, or underscores."
+                "Changelevel requires exactly one map name containing only letters, numbers, underscores, or hyphens."
             );
         }
         else

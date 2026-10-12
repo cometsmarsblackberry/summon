@@ -78,7 +78,7 @@ func TestDesiredMapAlreadyLoaded(t *testing.T) {
 }
 
 func TestMapNameValidationRejectsRCONInjection(t *testing.T) {
-	valid := []string{"cp_process_f12", "koth_product_rcx"}
+	valid := []string{"cp_process_f12", "koth_product_rcx", "koth_proot_b6c-alt2"}
 	for _, name := range valid {
 		if !isSafeMapName(name) {
 			t.Errorf("expected map name %q to be valid", name)
@@ -90,6 +90,11 @@ func TestMapNameValidationRejectsRCONInjection(t *testing.T) {
 		"cp_process\nquit",
 		"../cp_process",
 		"workshop/cp_process",
+		"koth_proot_b6c-alt2;quit",
+		"koth_proot_b6c-alt2\nquit",
+		"../koth_proot_b6c-alt2",
+		`koth_proot_b6c-alt2"`,
+		"koth_proot_b6c-alt2.bsp",
 		strings.Repeat("a", 65),
 	}
 	for _, name := range invalid {

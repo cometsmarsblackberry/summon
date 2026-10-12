@@ -21,11 +21,20 @@ class MapNameValidationTests(unittest.TestCase):
     def test_accepts_standard_map_names(self):
         self.assertTrue(is_valid_map_name("cp_process_f12"))
         self.assertTrue(is_valid_map_name("koth_product_rcx"))
+        self.assertTrue(is_valid_map_name("koth_proot_b6c-alt2"))
 
     def test_rejects_injection_primitives(self):
         self.assertFalse(is_valid_map_name("cp_process; quit"))
         self.assertFalse(is_valid_map_name("cp_process\nchangelevel badlands"))
         self.assertFalse(is_valid_map_name("../cp_badlands"))
+        self.assertFalse(is_valid_map_name("koth_proot_b6c-alt2;quit"))
+        self.assertFalse(is_valid_map_name("koth_proot_b6c-alt2\nquit"))
+        self.assertFalse(is_valid_map_name("../koth_proot_b6c-alt2"))
+        self.assertFalse(is_valid_map_name('koth_proot_b6c-alt2"'))
+
+    def test_rejects_extensions_and_oversized_names(self):
+        self.assertFalse(is_valid_map_name("koth_proot_b6c-alt2.bsp"))
+        self.assertFalse(is_valid_map_name("a" * 65))
 
 
 if __name__ == "__main__":
