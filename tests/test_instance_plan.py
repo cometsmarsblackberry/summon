@@ -22,7 +22,9 @@ class InstancePlanTests(unittest.IsolatedAsyncioTestCase):
             instance_id=None,
         )
         loc_provider = SimpleNamespace(
-            provider_code="vultr",
+            # Exercise the shared adapter path; durable Vultr creation has
+            # database-backed coverage in test_cloud_creation.py.
+            provider_code="onidel",
             provider_region="mad",
             instance_plan=location_plan,
         )

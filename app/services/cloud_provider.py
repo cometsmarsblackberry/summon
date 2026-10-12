@@ -15,6 +15,12 @@ class CloudInstanceData:
     status: str
     power_status: str
     date_created: str
+    label: str = ""
+    tags: tuple[str, ...] = ()
+
+
+class CloudCreationUncertain(Exception):
+    """A create request may have succeeded; do not retry or fail over."""
 
 
 class CloudProviderError(Exception):

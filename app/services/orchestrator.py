@@ -9,14 +9,16 @@ from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.instance import CloudInstance, EnabledLocation, LocationProvider, Provider
+from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLocation, LocationProvider, Provider
 from app.models.reservation import Reservation, ReservationStatus
-from app.services.cloud_provider import get_cloud_client, CloudProviderError
+from app.services.cloud_provider import get_cloud_client, CloudProviderError, CloudCreationUncertain
+from app.services.cloud_creation import reconcile_creation_attempt, record_created_instance
 from app.services.failure_messages import public_failure_reason
 from app.services.provider_priority import (
     get_providers_for_location,
@@ -249,6 +251,24 @@ async def provision_instance_for_reservation(
     Returns:
         CloudInstance if successful, None if all providers failed
     """
+    # An uncertain POST must be reconciled before *any* retry or provider
+    # failover. This database guard also survives process restarts.
+    pending = (await db.execute(select(CloudCreationAttempt).where(
+        CloudCreationAttempt.reservation_id == reservation.id
+    ))).scalar_one_or_none()
+    if pending:
+        client = get_cloud_client("vultr")
+        if client:
+            return await reconcile_creation_attempt(pending, client, db)
+        logger.error("Vultr unavailable for unresolved creation attempt %s", pending.id)
+        return None
+
+    existing = (await db.execute(select(CloudInstance).where(
+        CloudInstance.current_reservation_id == reservation.id
+    ))).scalar_one_or_none()
+    if existing:
+        return existing
+
     # Look up location metadata
     loc_result = await db.execute(
         select(EnabledLocation).where(EnabledLocation.code == reservation.location)
@@ -324,15 +344,8 @@ async def provision_instance_for_reservation(
     unique_suffix = hex(int(time.time()))[2:]
     instance_id = f"tf2-{reservation.reservation_number}-{unique_suffix}"
 
-    # Clean up any stale CloudInstance records for this reservation
-    stale_instances = await db.execute(
-        select(CloudInstance).where(CloudInstance.current_reservation_id == reservation.id)
-    )
-    for stale in stale_instances.scalars().all():
-        logger.info(f"Cleaning up stale instance record: {stale.id}")
-        await db.delete(stale)
-    await db.commit()
-
+    # Keep logging safe if a failed database commit expires ORM attributes.
+    reservation_number = reservation.reservation_number
     # Try each provider in priority order
     last_error: Optional[Exception] = None
     all_suspended = True
@@ -382,6 +395,12 @@ async def provision_instance_for_reservation(
             if result:
                 record_provider_success(reservation.location, provider_code)
                 return result
+        except CloudCreationUncertain:
+            logger.warning(
+                "Creation outcome unknown for reservation #%s; reconciling before any retry",
+                reservation_number,
+            )
+            return None
         except CloudProviderError as e:
             logger.error(f"Provider {provider_code} failed for {reservation.location}: {e}")
             record_provider_failure(reservation.location, provider_code)
@@ -559,6 +578,39 @@ async def _create_new_instance(
     if isinstance(client, GcoreClient) and reservation.enable_direct_connect:
         sg_id = await client.ensure_direct_connect_security_group(int(loc_provider.provider_region))
         create_kwargs["security_groups"] = [sg_id]
+
+    if loc_provider.provider_code == "vultr":
+        attempt = CloudCreationAttempt(
+            id=f"summon-create-{uuid4().hex}",
+            reservation_id=reservation.id,
+            instance_id=instance_id,
+            auth_token=auth_token,
+            region=loc_provider.provider_region,
+        )
+        db.add(attempt)
+        try:
+            await db.commit()  # Persist ownership *before* the network side effect.
+        except Exception as exc:
+            # A concurrent worker may already own this reservation's intent.
+            # Do not bypass that guard by falling back to another provider.
+            await db.rollback()
+            raise CloudCreationUncertain("Unable to claim Vultr creation attempt") from exc
+        create_kwargs["creation_key"] = attempt.id
+        try:
+            cloud_instance_data = await client.create_instance(**create_kwargs)
+        except CloudCreationUncertain:
+            raise  # Keep intent; neither retry nor fail over.
+        except Exception:
+            # VultrClient wraps every uncertain POST outcome. Other failures
+            # here are preflight failures or definitive provider rejections.
+            await db.delete(attempt)
+            await db.commit()
+            raise
+        try:
+            return await record_created_instance(attempt, cloud_instance_data, db)
+        except Exception as exc:
+            await db.rollback()
+            raise CloudCreationUncertain("Unable to persist created Vultr instance") from exc
 
     cloud_instance_data = await client.create_instance(**create_kwargs)
 
@@ -895,9 +947,6 @@ async def sync_cloud_instances() -> int:
         result = await db.execute(select(CloudInstance))
         db_instances = list(result.scalars().all())
 
-        if not db_instances:
-            return 0
-
         # Group DB instances by provider.
         # Prefer instance.provider_code; fall back to location lookup for legacy records.
         loc_result = await db.execute(select(EnabledLocation))
@@ -907,6 +956,11 @@ async def sync_cloud_instances() -> int:
         for inst in db_instances:
             prov = inst.provider_code or location_provider_map.get(inst.location, "vultr")
             by_provider.setdefault(prov, []).append(inst)
+
+        # Scan Vultr even when the local inventory is empty: that is exactly
+        # what happens when a timed-out create leaves an untracked VM behind.
+        if get_cloud_client("vultr"):
+            by_provider.setdefault("vultr", [])
 
         # Sync each provider
         for provider_code, instances in by_provider.items():
@@ -921,6 +975,27 @@ async def sync_cloud_instances() -> int:
             except Exception as e:
                 logger.error(f"Failed to list instances from {provider_code}: {e}")
                 continue
+
+            if provider_code == "vultr":
+                attempts = list((await db.execute(select(CloudCreationAttempt))).scalars())
+                pending_tags = {attempt.id for attempt in attempts}
+                for attempt in attempts:
+                    # Let the foreground POST finish before attempting recovery.
+                    if attempt.created_at > datetime.utcnow() - timedelta(minutes=1):
+                        continue
+                    await reconcile_creation_attempt(attempt, client, db, cloud_instances)
+
+                # Refresh after network I/O; another provisioning task may have
+                # registered a VM while the provider list was in flight.
+                tracked_ids = set((await db.execute(select(CloudInstance.id))).scalars())
+                for cloud in cloud_instances:
+                    if (cloud.id not in tracked_ids
+                            and cloud.label.startswith(f"{settings.site_name} #")
+                            and not pending_tags.intersection(cloud.tags)):
+                        logger.warning(
+                            "Untracked Vultr instance %s (%s, region=%s); manual review required",
+                            cloud.id, cloud.label, cloud.region,
+                        )
 
             # Find orphaned records (in DB but not in provider)
             for instance in instances:

@@ -1,6 +1,7 @@
 """Vultr API client for cloud instance management."""
 
 from typing import Optional
+from urllib.parse import urlencode
 import httpx
 
 from app.config import get_settings
@@ -8,6 +9,7 @@ from app.services.cloud_provider import (
     CloudProvider,
     CloudInstanceData,
     CloudProviderError,
+    CloudCreationUncertain,
 )
 
 
@@ -89,6 +91,7 @@ class VultrClient(CloudProvider):
         user_data: str,
         hostname: Optional[str] = None,
         plan: Optional[str] = None,
+        creation_key: Optional[str] = None,
     ) -> CloudInstanceData:
         """Create a new VPS instance.
 
@@ -123,9 +126,25 @@ class VultrClient(CloudProvider):
         if hostname:
             payload["hostname"] = hostname
 
-        data = await self._request("POST", "/instances", json=payload)
-        instance_data = data.get("instance", {})
+        if creation_key:
+            payload["tags"] = [creation_key]
 
+        # Once POST starts, a lost response (including a server-side error) is
+        # not proof that creation failed. The caller must reconcile its intent.
+        try:
+            data = await self._request("POST", "/instances", json=payload)
+            return self._instance_data(data["instance"])
+        except CloudProviderError as exc:
+            if 400 <= exc.status_code < 500 and exc.status_code != 408:
+                raise  # Definitive rejection; retry/failover is safe.
+            raise CloudCreationUncertain("Vultr creation outcome unknown") from exc
+        except Exception as exc:
+            raise CloudCreationUncertain("Vultr creation outcome unknown") from exc
+
+    @staticmethod
+    def _instance_data(instance_data: dict) -> CloudInstanceData:
+        if not instance_data.get("id"):
+            raise ValueError("Vultr returned no instance ID")
         return CloudInstanceData(
             id=instance_data["id"],
             region=instance_data["region"],
@@ -134,22 +153,14 @@ class VultrClient(CloudProvider):
             status=instance_data["status"],
             power_status=instance_data.get("power_status", ""),
             date_created=instance_data["date_created"],
+            label=instance_data.get("label", ""),
+            tags=tuple(instance_data.get("tags") or ()),
         )
 
     async def get_instance(self, instance_id: str) -> CloudInstanceData:
         """Get instance details."""
         data = await self._request("GET", f"/instances/{instance_id}")
-        instance_data = data.get("instance", {})
-
-        return CloudInstanceData(
-            id=instance_data["id"],
-            region=instance_data["region"],
-            plan=instance_data["plan"],
-            main_ip=instance_data.get("main_ip", ""),
-            status=instance_data["status"],
-            power_status=instance_data.get("power_status", ""),
-            date_created=instance_data["date_created"],
-        )
+        return self._instance_data(data["instance"])
 
     async def destroy_instance(self, instance_id: str, region: Optional[str] = None) -> None:
         """Delete/destroy an instance."""
@@ -157,23 +168,24 @@ class VultrClient(CloudProvider):
 
     async def list_instances(self, label_prefix: Optional[str] = None) -> list[CloudInstanceData]:
         """List all instances, optionally filtered by label prefix."""
-        data = await self._request("GET", "/instances")
         instances = []
-
-        for instance_data in data.get("instances", []):
-            if label_prefix and not instance_data.get("label", "").startswith(label_prefix):
-                continue
-            instances.append(CloudInstanceData(
-                id=instance_data["id"],
-                region=instance_data["region"],
-                plan=instance_data["plan"],
-                main_ip=instance_data.get("main_ip", ""),
-                status=instance_data["status"],
-                power_status=instance_data.get("power_status", ""),
-                date_created=instance_data["date_created"],
-            ))
-
-        return instances
+        cursor = ""
+        seen_cursors = set()
+        while True:
+            query = {"per_page": 100}
+            if cursor:
+                query["cursor"] = cursor
+            data = await self._request("GET", "/instances?" + urlencode(query))
+            for item in data.get("instances", []):
+                if label_prefix and not item.get("label", "").startswith(label_prefix):
+                    continue
+                instances.append(self._instance_data(item))
+            cursor = data.get("meta", {}).get("links", {}).get("next", "")
+            if not cursor:
+                return instances
+            if cursor in seen_cursors:
+                raise CloudProviderError("Vultr repeated a pagination cursor")
+            seen_cursors.add(cursor)
 
 
 def get_vultr_client() -> Optional[VultrClient]:
