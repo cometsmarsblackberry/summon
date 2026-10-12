@@ -58,6 +58,8 @@
     firstMap: '',
     mapMenuOpen: false,
     mapSearch: '',
+    mapMenuPosition: {},
+    mapMenuListMaxHeight: 360,
     get homeMaps() {
         return typeof _homeMaps !== 'undefined' ? _homeMaps : [];
     },
@@ -75,16 +77,22 @@
     },
     toggleHomeMapMenu() {
         if (!this.homeMaps.length) return;
-        this.mapMenuOpen = !this.mapMenuOpen;
         if (this.mapMenuOpen) {
-            this.mapSearch = '';
-            this.$nextTick(() => this.$refs.homeMapSearch?.focus());
+            this.closeHomeMapMenu();
+            return;
         }
+        this.mapSearch = '';
+        this.positionHomeMenu('map');
+        this.mapMenuOpen = true;
+        this.$nextTick(() => this.$refs.homeMapSearch?.focus({ preventScroll: true }));
+    },
+    closeHomeMapMenu() {
+        this.mapMenuOpen = false;
+        this.mapSearch = '';
     },
     selectHomeMap(map) {
         this.firstMap = map.name;
-        this.mapMenuOpen = false;
-        this.mapSearch = '';
+        this.closeHomeMapMenu();
     },
     scrollMenu(event, list) {
         if (!list) return;
@@ -101,14 +109,8 @@
     configsHint: '',
     configMenuOpen: false,
     configSearch: '',
-    configMenuPosition: {
-        top: 'auto',
-        right: 'auto',
-        bottom: 'auto',
-        left: '0px',
-        width: '0px',
-    },
-    configMenuListMaxHeight: 192,
+    configMenuPosition: {},
+    configMenuListMaxHeight: 360,
     selectedConfig: '',
     get filteredConfigGroups() {
         const query = this.configSearch.trim().toLowerCase();
@@ -148,19 +150,21 @@
             return;
         }
         this.configSearch = '';
-        this.positionConfigMenu();
+        this.positionHomeMenu('config');
         this.configMenuOpen = true;
-        this.$nextTick(() => this.$refs.homeConfigSearch?.focus());
+        this.$nextTick(() => this.$refs.homeConfigSearch?.focus({ preventScroll: true }));
     },
-    positionConfigMenu() {
-        const trigger = this.$refs.homeConfigTrigger;
+    positionHomeMenu(menu) {
+        const trigger = menu === 'map' ? this.$refs.homeMapTrigger : this.$refs.homeConfigTrigger;
         if (!trigger) return;
 
         const rect = trigger.getBoundingClientRect();
         const viewportMargin = 8;
         const menuGap = 4;
         const menuHeaderHeight = 57;
-        const preferredMenuHeight = menuHeaderHeight + 192;
+        // Room for roughly ten map rows, with the search field kept visible.
+        const preferredListHeight = 360;
+        const preferredMenuHeight = menuHeaderHeight + preferredListHeight;
         const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - viewportMargin - menuGap);
         const spaceAbove = Math.max(0, rect.top - viewportMargin - menuGap);
         const opensAbove = spaceBelow < preferredMenuHeight && spaceAbove > spaceBelow;
@@ -171,11 +175,11 @@
             Math.min(rect.left, window.innerWidth - viewportMargin - width),
         );
 
-        this.configMenuListMaxHeight = Math.max(
-            48,
-            Math.min(192, availableHeight - menuHeaderHeight),
+        this[`${menu}MenuListMaxHeight`] = Math.max(
+            0,
+            Math.min(preferredListHeight, availableHeight - menuHeaderHeight),
         );
-        this.configMenuPosition = {
+        this[`${menu}MenuPosition`] = {
             top: opensAbove ? 'auto' : `${Math.round(rect.bottom + menuGap)}px`,
             right: 'auto',
             bottom: opensAbove ? `${Math.round(window.innerHeight - rect.top + menuGap)}px` : 'auto',
@@ -588,8 +592,8 @@
         @keydown.escape.window="modalOpen = false">
         <div class="absolute inset-0 bg-black/60" @click="!submitting && (modalOpen = false)"></div>
         <div class="relative w-full max-w-sm max-h-[calc(100vh-2rem)] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl p-5"
-            @scroll="if (configMenuOpen) closeConfigMenu()"
-            @resize.window="if (configMenuOpen) positionConfigMenu()">
+            @scroll="closeHomeMapMenu(); closeConfigMenu()"
+            @resize.window="if (mapMenuOpen) positionHomeMenu('map'); if (configMenuOpen) positionHomeMenu('config')">
             <div class="mb-4">
                 <h2 class="text-base font-semibold text-slate-900"
                     x-text="loc ? (loc.city || loc.name) + (loc.country ? ', ' + loc.country : '') : ''"></h2>
@@ -607,10 +611,10 @@
             <div class="space-y-3">
                 <div>
                     <label class="block text-xs text-slate-400 mb-1">{{ _('home.first_map') }}</label>
-                    <div class="relative" @click.outside="mapMenuOpen = false; mapSearch = ''"
-                        @keydown.escape="if (mapMenuOpen) { $event.stopPropagation(); mapMenuOpen = false; mapSearch = ''; }">
+                    <div class="relative" @click.outside="closeHomeMapMenu()"
+                        @keydown.escape="if (mapMenuOpen) { $event.stopPropagation(); closeHomeMapMenu(); }">
                         <button type="button" role="combobox" aria-haspopup="listbox"
-                            :aria-expanded="mapMenuOpen" @click="toggleHomeMapMenu()"
+                            x-ref="homeMapTrigger" :aria-expanded="mapMenuOpen" @click="toggleHomeMapMenu()"
                             :disabled="homeMaps.length === 0"
                             class="flex w-full items-center justify-between gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm text-left focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:opacity-50">
                             <span x-show="firstMap" x-text="selectedHomeMapLabel" class="truncate"></span>
@@ -620,28 +624,34 @@
                                 <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
                             </svg>
                         </button>
-                        <div x-show="mapMenuOpen" x-cloak x-transition.origin.top role="listbox"
-                            @wheel.prevent.stop="scrollMenu($event, $refs.homeMapList)"
-                            class="absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
-                            <div class="border-b border-slate-200 p-2">
-                                <input type="search" x-ref="homeMapSearch" x-model="mapSearch"
-                                    placeholder="{{ _('home.search_maps') }}"
-                                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                        <template x-teleport="body">
+                            <div x-show="modalOpen && mapMenuOpen" x-cloak x-transition.opacity role="listbox"
+                                @click.stop
+                                @wheel.prevent.stop="scrollMenu($event, $refs.homeMapList)"
+                                @keydown.escape.stop="closeHomeMapMenu(); $refs.homeMapTrigger?.focus()"
+                                :style="{ ...mapMenuPosition, zIndex: 60 }"
+                                class="fixed flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                                <div class="shrink-0 border-b border-slate-200 p-2">
+                                    <input type="search" x-ref="homeMapSearch" x-model="mapSearch"
+                                        placeholder="{{ _('home.search_maps') }}"
+                                        class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent">
+                                </div>
+                                <div x-ref="homeMapList" class="overflow-y-auto p-1" style="min-height: 0"
+                                    :style="{ maxHeight: `${mapMenuListMaxHeight}px` }">
+                                    <template x-for="m in filteredHomeMaps" :key="m.name">
+                                        <button type="button" role="option" :aria-selected="firstMap === m.name"
+                                            @click="selectHomeMap(m)"
+                                            :class="firstMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                            class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                            <span x-text="m.display || m.name" class="truncate"></span>
+                                            <span x-show="firstMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
+                                        </button>
+                                    </template>
+                                    <p x-show="filteredHomeMaps.length === 0" x-cloak
+                                        class="px-3 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_maps') }}</p>
+                                </div>
                             </div>
-                            <div x-ref="homeMapList" class="max-h-48 overflow-y-auto p-1">
-                                <template x-for="m in filteredHomeMaps" :key="m.name">
-                                    <button type="button" role="option" :aria-selected="firstMap === m.name"
-                                        @click="selectHomeMap(m)"
-                                        :class="firstMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
-                                        class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
-                                        <span x-text="m.display || m.name" class="truncate"></span>
-                                        <span x-show="firstMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
-                                    </button>
-                                </template>
-                                <p x-show="filteredHomeMaps.length === 0" x-cloak
-                                    class="px-3 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_maps') }}</p>
-                            </div>
-                        </div>
+                        </template>
                     </div>
                 </div>
                 <div>
@@ -661,7 +671,7 @@
                             </svg>
                         </button>
                         <template x-teleport="body">
-                            <div x-show="configMenuOpen" x-cloak x-transition.opacity role="listbox"
+                            <div x-show="modalOpen && configMenuOpen" x-cloak x-transition.opacity role="listbox"
                                 @click.stop
                                 @wheel.prevent.stop="scrollMenu($event, $refs.homeConfigList)"
                                 @keydown.escape.stop="closeConfigMenu(); $refs.homeConfigTrigger?.focus()"
