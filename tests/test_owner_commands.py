@@ -120,17 +120,19 @@ class OwnerCommandPolicyTests(unittest.TestCase):
 
     def test_changelevel_requires_one_safe_map_name(self):
         allowed = ("changelevel",)
-        self.assertEqual(
-            "changelevel cp_process_f12",
-            validate_owner_command_line(" changelevel cp_process_f12 ", allowed),
-        )
+        for name in ("cp_process_f12", "cp-process-f12", "koth_proot_b6c-alt2"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    f"changelevel {name}",
+                    validate_owner_command_line(f" changelevel {name} ", allowed),
+                )
 
         rejected = (
             "changelevel",
             "changelevel cp_process_f12 extra",
             "changelevel ../cp_process_f12",
             "changelevel workshop/cp_process_f12",
-            "changelevel cp-process-f12",
+            "changelevel koth_proot_b6c-alt2.bsp",
             "changelevel " + "a" * 65,
         )
         for command in rejected:

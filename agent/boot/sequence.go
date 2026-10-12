@@ -118,7 +118,7 @@ var (
 	competitiveConfigsMu       sync.Mutex
 	competitiveConfigsReported bool
 	competitiveConfigsImage    string
-	safeMapNameRE              = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	safeMapNameRE              = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	safeConfigNameRE           = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 )
 

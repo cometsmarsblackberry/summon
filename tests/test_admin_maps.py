@@ -11,9 +11,13 @@ from app.models.instance import GameMap
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.upload_link import UploadLink  # noqa: F401 - registers relationship
 from app.routers.admin import (
+    AddMapRequest,
     BulkDeleteMapsRequest,
+    BulkImportMapsRequest,
     _get_maps_data,
+    add_map,
     bulk_delete_maps,
+    bulk_import_maps,
 )
 
 
@@ -29,6 +33,34 @@ class AdminMapTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.engine.dispose()
+
+    async def test_add_map_preserves_hyphenated_filename(self):
+        name = "koth_proot_b6c-alt2"
+        async with self.session_maker() as db:
+            response = await add_map(
+                AddMapRequest(name=f" {name} ", display_name="Proot"),
+                user=SimpleNamespace(is_admin=True),
+                db=db,
+            )
+            game_map = (await db.execute(select(GameMap))).scalar_one()
+
+        self.assertEqual(name, response["name"])
+        self.assertEqual(name, game_map.name)
+        self.assertEqual("Proot", game_map.display_name)
+
+    async def test_bulk_import_preserves_and_deduplicates_hyphenated_filename(self):
+        name = "koth_proot_b6c-alt2"
+        async with self.session_maker() as db:
+            response = await bulk_import_maps(
+                BulkImportMapsRequest(maps_text=f"\n {name} \n{name}\n"),
+                user=SimpleNamespace(is_admin=True),
+                db=db,
+            )
+            game_map = (await db.execute(select(GameMap))).scalar_one()
+
+        self.assertEqual({"added": [name], "skipped": [name]}, response)
+        self.assertEqual(name, game_map.name)
+        self.assertEqual(name, game_map.display_name)
 
     @staticmethod
     def _reservation(

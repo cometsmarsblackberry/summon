@@ -136,7 +136,7 @@ Owner-command execution has the following safeguards:
 - Semicolons, line breaks, control characters, and command lines of 512 bytes
   or more are rejected.
 - `changelevel` requires exactly one map name containing only letters, numbers,
-  or underscores.
+  underscores, or hyphens.
 - `mp_tournament_whitelist` may only read the current value, clear it, or name
   one existing `cfg/*.txt` file without path traversal.
 - A shared one-second cooldown applies between owner commands, including

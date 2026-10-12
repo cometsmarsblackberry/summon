@@ -530,7 +530,7 @@ type ContainerConfig struct {
 	Labels   map[string]string
 }
 
-var safeStartupMapRE = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+var safeStartupMapRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func startupMap(firstMap string) string {
 	mapName := strings.TrimSpace(firstMap)

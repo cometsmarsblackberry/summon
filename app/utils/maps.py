@@ -3,7 +3,7 @@
 import re
 
 
-_MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+_MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def is_valid_map_name(name: str) -> bool:

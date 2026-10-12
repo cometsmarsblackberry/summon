@@ -126,10 +126,16 @@ func TestBuildRunArgsProvidesValidatedStartupMapWithBadlandsCommandFallback(t *t
 		want     string
 	}{
 		{name: "requested map", firstMap: "cp_process_f12", want: "cp_process_f12"},
+		{name: "hyphenated map", firstMap: "koth_proot_b6c-alt2", want: "koth_proot_b6c-alt2"},
 		{name: "surrounding whitespace", firstMap: "  koth_product_rcx  ", want: "koth_product_rcx"},
 		{name: "empty map", firstMap: "", want: "cp_badlands"},
 		{name: "unsafe map", firstMap: "cp_process;quit", want: "cp_badlands"},
 		{name: "path traversal", firstMap: "../cp_process", want: "cp_badlands"},
+		{name: "hyphenated injection", firstMap: "koth_proot_b6c-alt2;quit", want: "cp_badlands"},
+		{name: "hyphenated newline", firstMap: "koth_proot_b6c-alt2\nquit", want: "cp_badlands"},
+		{name: "hyphenated traversal", firstMap: "../koth_proot_b6c-alt2", want: "cp_badlands"},
+		{name: "quoted map", firstMap: `koth_proot_b6c-alt2"`, want: "cp_badlands"},
+		{name: "map extension", firstMap: "koth_proot_b6c-alt2.bsp", want: "cp_badlands"},
 		{name: "too long", firstMap: strings.Repeat("a", 65), want: "cp_badlands"},
 	}
 	for _, test := range tests {
