@@ -37,6 +37,14 @@ command begins with `sm_`.
 | Chat command | Description |
 | --- | --- |
 | `!reservation`, `!res`, `!who` | Show the reservation number, owner, and time remaining. |
+| `!pause` | Pause the game. Repeating it keeps the game paused. |
+| `!unpause` | Unpause the game through the installed pause plugin's countdown. |
+
+`!pause` and `!unpause` require `sv_pausable 1` and forward the native
+`setpause` and `unpause` commands as the player. The bundled F2 pause plugin
+retains player attribution, state restoration, and its five-second unpause
+countdown. Both commands also support SourceMod's silent `/pause` and
+`/unpause` chat triggers. The `summon_reset` config sets `sv_pausable 0`.
 
 ### Reservation owner
 
