@@ -14,11 +14,14 @@ from app.routers.admin import (
     AddMapRequest,
     BulkDeleteMapsRequest,
     BulkImportMapsRequest,
+    MapLeagueRotationRequest,
     _get_maps_data,
     add_map,
     bulk_delete_maps,
     bulk_import_maps,
+    set_map_league_rotation,
 )
+from app.services.maps import get_selectable_maps
 
 
 class AdminMapTests(unittest.IsolatedAsyncioTestCase):
@@ -176,6 +179,75 @@ class AdminMapTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(404, raised.exception.status_code)
         self.assertEqual([game_map.id], [item.id for item in remaining])
+
+    async def test_set_map_league_rotation_updates_flag_and_admin_data(self):
+        async with self.session_maker() as db:
+            game_map = GameMap(name="cp_process_f12", display_name="cp_process_f12")
+            db.add(game_map)
+            await db.commit()
+
+            response = await set_map_league_rotation(
+                game_map.id,
+                MapLeagueRotationRequest(in_league_rotation=True),
+                user=SimpleNamespace(is_admin=True),
+                db=db,
+            )
+            maps = await _get_maps_data(db)
+
+        self.assertTrue(response["in_league_rotation"])
+        self.assertTrue(maps[0]["in_league_rotation"])
+
+    async def test_set_map_league_rotation_rejects_missing_map(self):
+        async with self.session_maker() as db:
+            with self.assertRaises(HTTPException) as raised:
+                await set_map_league_rotation(
+                    999,
+                    MapLeagueRotationRequest(in_league_rotation=True),
+                    user=SimpleNamespace(is_admin=True),
+                    db=db,
+                )
+
+        self.assertEqual(404, raised.exception.status_code)
+
+    async def test_selectable_maps_list_league_rotation_first(self):
+        async with self.session_maker() as db:
+            db.add_all(
+                [
+                    GameMap(name="ctf_2fort", display_name="ctf_2fort", display_order=1),
+                    GameMap(
+                        name="koth_product_final",
+                        display_name="koth_product_final",
+                        in_league_rotation=True,
+                        display_order=2,
+                    ),
+                    GameMap(name="Cp_badlands", display_name="Cp_badlands", display_order=3),
+                    GameMap(
+                        name="cp_process_f12",
+                        display_name="cp_process_f12",
+                        in_league_rotation=True,
+                        display_order=4,
+                    ),
+                    GameMap(
+                        name="cp_sunshine",
+                        display_name="cp_sunshine",
+                        in_league_rotation=True,
+                        enabled=False,
+                    ),
+                ]
+            )
+            await db.commit()
+
+            maps = await get_selectable_maps(db)
+
+        self.assertEqual(
+            [
+                ("cp_process_f12", True),
+                ("koth_product_final", True),
+                ("Cp_badlands", False),
+                ("ctf_2fort", False),
+            ],
+            [(item["name"], item["in_league_rotation"]) for item in maps],
+        )
 
 
 if __name__ == "__main__":

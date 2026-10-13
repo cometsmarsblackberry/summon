@@ -71,6 +71,23 @@
             || (map.display || '').toLowerCase().includes(query)
         );
     },
+    get hasLeagueRotationHomeMaps() {
+        return this.homeMaps.some(map => map.in_league_rotation);
+    },
+    get homeMapGroups() {
+        return [
+            {
+                key: 'league_rotation',
+                label: {{ _('home.league_rotation') | tojson | forceescape }},
+                maps: this.filteredHomeMaps.filter(map => map.in_league_rotation),
+            },
+            {
+                key: 'all',
+                label: {{ _('home.all_maps') | tojson | forceescape }},
+                maps: this.filteredHomeMaps.filter(map => !map.in_league_rotation),
+            },
+        ].filter(group => group.maps.length > 0);
+    },
     get selectedHomeMapLabel() {
         const map = this.homeMaps.find(map => map.name === this.firstMap);
         return map ? (map.display || map.name) : '';
@@ -638,14 +655,23 @@
                                 </div>
                                 <div x-ref="homeMapList" class="overflow-y-auto p-1" style="min-height: 0"
                                     :style="{ maxHeight: `${mapMenuListMaxHeight}px` }">
-                                    <template x-for="m in filteredHomeMaps" :key="m.name">
-                                        <button type="button" role="option" :aria-selected="firstMap === m.name"
-                                            @click="selectHomeMap(m)"
-                                            :class="firstMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
-                                            class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
-                                            <span x-text="m.display || m.name" class="truncate"></span>
-                                            <span x-show="firstMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
-                                        </button>
+                                    <template x-for="group in homeMapGroups" :key="group.key">
+                                        <div role="group" :aria-label="hasLeagueRotationHomeMaps ? group.label : null">
+                                            <div x-show="hasLeagueRotationHomeMaps" aria-hidden="true"
+                                                class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                                                <span x-show="group.key === 'league_rotation'">🏆</span>
+                                                <span x-text="group.label"></span>
+                                            </div>
+                                            <template x-for="m in group.maps" :key="m.name">
+                                                <button type="button" role="option" :aria-selected="firstMap === m.name"
+                                                    @click="selectHomeMap(m)"
+                                                    :class="firstMap === m.name ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                                    class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
+                                                    <span x-text="m.display || m.name" class="truncate"></span>
+                                                    <span x-show="firstMap === m.name" class="text-brand-600" aria-hidden="true">✓</span>
+                                                </button>
+                                            </template>
+                                        </div>
                                     </template>
                                     <p x-show="filteredHomeMaps.length === 0" x-cloak
                                         class="px-3 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_maps') }}</p>

@@ -1085,17 +1085,8 @@ async def get_reservation_maps(
 
     _require_reservation_access_or_404(user, reservation)
 
-    from app.models.instance import GameMap
-    maps_result = await db.execute(
-        select(GameMap)
-        .where(GameMap.enabled == True)
-        .order_by(GameMap.display_order)
-    )
-    maps = [
-        {"name": m.name, "display": m.display_name}
-        for m in maps_result.scalars().all()
-    ]
-    return {"maps": maps}
+    from app.services.maps import get_selectable_maps
+    return {"maps": await get_selectable_maps(db)}
 
 
 @router.get("/{reservation_id}/uploads")

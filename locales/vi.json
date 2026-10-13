@@ -59,6 +59,8 @@
         "network_error": "Lỗi mạng — kiểm tra kết nối và thử lại.",
         "search_maps": "Tìm bản đồ...",
         "no_matching_maps": "Không có bản đồ phù hợp.",
+        "league_rotation": "Bản đồ giải đấu hiện tại",
+        "all_maps": "Tất cả bản đồ",
         "competitive_config": "Cấu hình thi đấu",
         "loading_configs": "Đang tải cấu hình...",
         "search_configs": "Tìm cấu hình...",

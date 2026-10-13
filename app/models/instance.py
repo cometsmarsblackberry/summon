@@ -183,6 +183,7 @@ class GameMap(Base):
     display_name: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g., cp_process
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)  # True = ships with TF2, no download link
+    in_league_rotation: Mapped[bool] = mapped_column(Boolean, default=False)  # True = in a league's current map pool
     display_order: Mapped[int] = mapped_column(Integer, default=0)
 
     def __repr__(self) -> str:

@@ -59,6 +59,8 @@
         "network_error": "Nätverksfel — kontrollera din anslutning och försök igen.",
         "search_maps": "Sök kartor...",
         "no_matching_maps": "Inga matchande kartor.",
+        "league_rotation": "Ligarotation",
+        "all_maps": "Alla kartor",
         "competitive_config": "Tävlingskonfiguration",
         "loading_configs": "Laddar konfigurationer...",
         "search_configs": "Sök konfigurationer...",

@@ -177,16 +177,8 @@ async def home(
         active_reservation = await get_user_active_reservation(user, db)
 
     # Fetch enabled maps for the reservation form
-    from app.models.instance import GameMap
-    maps_result = await db.execute(
-        select(GameMap)
-        .where(GameMap.enabled == True)
-        .order_by(GameMap.name)
-    )
-    maps = [
-        {"name": m.name, "display": m.display_name}
-        for m in maps_result.scalars().all()
-    ]
+    from app.services.maps import get_selectable_maps
+    maps = await get_selectable_maps(db)
 
     location_cities = {loc.code: loc.city or loc.code for loc in locations}
 

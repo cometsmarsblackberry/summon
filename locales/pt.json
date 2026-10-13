@@ -59,6 +59,8 @@
         "network_error": "Erro de rede — verifique sua conexão e tente novamente.",
         "search_maps": "Pesquisar mapas...",
         "no_matching_maps": "Nenhum mapa correspondente.",
+        "league_rotation": "Rotação das ligas",
+        "all_maps": "Todos os mapas",
         "competitive_config": "Configuração competitiva",
         "loading_configs": "Carregando configurações...",
         "search_configs": "Pesquisar configurações...",
