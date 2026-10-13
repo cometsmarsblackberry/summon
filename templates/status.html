@@ -543,8 +543,8 @@
                     maps: this.filteredMapList.filter(map => map.in_league_rotation),
                 },
                 {
-                    key: 'all',
-                    label: {{ _('home.all_maps') | tojson | forceescape }},
+                    key: 'other',
+                    label: {{ _('home.other_maps') | tojson | forceescape }},
                     maps: this.filteredMapList.filter(map => !map.in_league_rotation),
                 },
             ].filter(group => group.maps.length > 0);
