@@ -3,7 +3,8 @@
  *
  * Provides in-game reservation management for TF2 servers
  * Commands: !admin, !reservation, !res, !who, !end, !cancel,
- *           !changemap, !map, !config, !cfg, !restart, !command, !cmd, !rcon
+ *           !changemap, !map, !config, !cfg, !restart, !command, !cmd, !rcon,
+ *           !pause, !unpause
  */
 
 #include <sourcemod>
@@ -17,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.4.1"
+#define PLUGIN_VERSION "1.5.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -85,6 +86,8 @@ public void OnPluginStart()
     // Register chat commands
     RegConsoleCmd("sm_reservation", Command_Reservation, "Show reservation info");
     RegConsoleCmd("sm_res", Command_Reservation, "Alias of sm_reservation");
+    RegConsoleCmd("sm_pause", Command_Pause, "Pause the game");
+    RegConsoleCmd("sm_unpause", Command_Unpause, "Unpause the game");
     RegConsoleCmd("sm_end", Command_End, "End the reservation");
     RegConsoleCmd("sm_cancel", Command_Cancel, "Cancel pending reservation end");
     RegConsoleCmd("sm_changemap", Command_Map, "Change the map (owner only)");
@@ -1105,6 +1108,45 @@ public Action Timer_ExpiryCheck(Handle timer)
 // Chat Commands
 // ============================================================================
 
+public Action Command_Pause(int client, int args)
+{
+    return HandlePauseCommand(client, args, "pause", "setpause");
+}
+
+public Action Command_Unpause(int client, int args)
+{
+    return HandlePauseCommand(client, args, "unpause", "unpause");
+}
+
+Action HandlePauseCommand(int client, int args, const char[] trigger, const char[] command)
+{
+    if (client == 0)
+    {
+        ReplyToCommand(client, "[SM] Pause commands must be used by a player in game.");
+        return Plugin_Handled;
+    }
+    if (client < 1 || client > MaxClients || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Handled;
+
+    if (args != 0)
+    {
+        ReplyToCommand(client, "[SM] Usage: !%s", trigger);
+        return Plugin_Handled;
+    }
+
+    ConVar pausable = FindConVar("sv_pausable");
+    if (pausable == null || !pausable.BoolValue)
+    {
+        ReplyToCommand(client, "[SM] Pausing is disabled by the current config.");
+        return Plugin_Handled;
+    }
+
+    // Keep F2's player attribution, state restoration, and unpause countdown.
+    // setpause is explicit, so repeated !pause requests cannot toggle an unpause.
+    FakeClientCommandEx(client, "%s", command);
+    return Plugin_Handled;
+}
+
 public Action Command_Reservation(int client, int args)
 {
     char ownerName[64];
@@ -1930,12 +1972,13 @@ public void LogUploaded(bool success, const char[] logid, const char[] url)
     ReportUploadLink("log", logid, url);
 }
 
-public void DemoUploaded(bool success, const char[] demoid, const char[] url)
+public int DemoUploaded(bool success, const char[] demoid, const char[] url)
 {
     if (!success || strlen(demoid) == 0 || strlen(url) == 0)
-        return;
+        return 0;
 
     ReportUploadLink("demo", demoid, url);
+    return 0;
 }
 
 void ReportUploadLink(const char[] type, const char[] externalId, const char[] uploadUrl)
