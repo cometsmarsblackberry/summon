@@ -70,6 +70,7 @@ async def _get_maps_data(db: AsyncSession) -> list[dict]:
             "display_name": game_map.display_name,
             "enabled": game_map.enabled,
             "is_default": game_map.is_default,
+            "in_league_rotation": bool(game_map.in_league_rotation),
             "selection_count": int(selection_count),
             "play_count": int(play_count),
             "last_used_at": last_used_at.isoformat() if last_used_at else None,
@@ -1369,6 +1370,11 @@ class MapToggleRequest(BaseModel):
     enabled: bool
 
 
+class MapLeagueRotationRequest(BaseModel):
+    """Request to mark a map as part of the league rotation."""
+    in_league_rotation: bool
+
+
 class AddMapRequest(BaseModel):
     """Request to add a new map."""
     name: str
@@ -1405,6 +1411,32 @@ async def toggle_map(
     await db.commit()
     
     return {"id": game_map.id, "name": game_map.name, "enabled": game_map.enabled}
+
+
+@router.post("/maps/{map_id}/league-rotation")
+async def set_map_league_rotation(
+    map_id: int,
+    request: MapLeagueRotationRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark or unmark a map as part of the league rotation."""
+    result = await db.execute(
+        select(GameMap).where(GameMap.id == map_id)
+    )
+    game_map = result.scalar_one_or_none()
+
+    if not game_map:
+        raise HTTPException(status_code=404, detail="Map not found")
+
+    game_map.in_league_rotation = request.in_league_rotation
+    await db.commit()
+
+    return {
+        "id": game_map.id,
+        "name": game_map.name,
+        "in_league_rotation": game_map.in_league_rotation,
+    }
 
 
 @router.post("/maps")

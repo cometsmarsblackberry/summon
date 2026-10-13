@@ -153,11 +153,22 @@ _PREVIEW_LOCATIONS = (
     },
 )
 
+# (name, display name, in a league rotation)
 _PREVIEW_MAPS = (
-    ("cp_process_f12", "Process"),
-    ("cp_snakewater_final1", "Snakewater"),
-    ("koth_product_final", "Product"),
-    ("pl_upward", "Upward"),
+    ("cp_process_f12", "Process", True),
+    ("cp_snakewater_final1", "Snakewater", True),
+    ("koth_product_final", "Product", True),
+    ("cp_gullywash_f9", "Gullywash", True),
+    ("cp_sunshine", "Sunshine", True),
+    ("cp_metalworks_f5", "Metalworks", True),
+    ("pl_upward", "Upward", False),
+    ("cp_granary_pro_rc8", "Granary", False),
+    ("ctf_2fort", "2Fort", False),
+    ("cp_dustbowl", "Dustbowl", False),
+    ("koth_harvest_final", "Harvest", False),
+    ("pl_badwater", "Badwater", False),
+    ("cp_well", "Well", False),
+    ("koth_viaduct", "Viaduct", False),
 )
 
 _PREVIEW_CONFIGS = (
@@ -231,7 +242,7 @@ async def _seed_preview_data(db: AsyncSession) -> User:
         mapping.priority = 0
         mapping.enabled = True
 
-    for display_order, (name, display_name) in enumerate(_PREVIEW_MAPS, start=2):
+    for display_order, (name, display_name, in_league_rotation) in enumerate(_PREVIEW_MAPS, start=2):
         map_result = await db.execute(select(GameMap).where(GameMap.name == name))
         game_map = map_result.scalar_one_or_none()
         if game_map is None:
@@ -240,6 +251,7 @@ async def _seed_preview_data(db: AsyncSession) -> User:
         game_map.display_name = display_name
         game_map.enabled = True
         game_map.is_default = False
+        game_map.in_league_rotation = in_league_rotation
         game_map.display_order = display_order
 
     user_result = await db.execute(

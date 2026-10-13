@@ -59,6 +59,8 @@
         "network_error": "Verkkovirhe — tarkista yhteytesi ja yritä uudelleen.",
         "search_maps": "Hae karttoja...",
         "no_matching_maps": "Vastaavia karttoja ei löytynyt.",
+        "league_rotation": "Liigakartat",
+        "all_maps": "Kaikki kartat",
         "competitive_config": "Kilpailuasetukset",
         "loading_configs": "Ladataan asetuksia...",
         "search_configs": "Hae asetuksia...",

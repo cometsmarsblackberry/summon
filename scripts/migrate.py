@@ -30,7 +30,7 @@ CATEGORIES = {
     "providers": "Cloud providers (code, name, billing, instance plan)",
     "location_providers": "Location-provider mappings (failover priority)",
     "instant_hosts": "Instant host and slot metadata (credentials excluded)",
-    "maps": "Game maps (name, display_name, enabled, default)",
+    "maps": "Game maps (name, display_name, enabled, default, league rotation)",
     "settings": "Site settings (key-value overrides)",
     "monthly_costs": "Monthly cost history (hours, USD, EUR, reservations)",
     "trivia": "Trivia facts for MOTD pages (scope, key, fact)",
@@ -247,7 +247,7 @@ def _export_instant_hosts(conn: sqlite3.Connection) -> list[dict]:
 def _export_maps(conn: sqlite3.Connection) -> list[dict]:
     if not _table_exists(conn, "game_maps"):
         return []
-    cols = ["name", "display_name", "enabled", "is_default", "display_order"]
+    cols = ["name", "display_name", "enabled", "is_default", "in_league_rotation", "display_order"]
     existing = [c for c in cols if _table_has_column(conn, "game_maps", c)]
     cur = conn.execute(
         f"SELECT {', '.join(existing)} FROM game_maps ORDER BY display_order, name"
@@ -621,10 +621,11 @@ def _import_maps(conn: sqlite3.Connection, records: list[dict], mode: str) -> di
             if mode == "update":
                 conn.execute(
                     "UPDATE game_maps SET display_name=?, enabled=?, is_default=?, "
-                    "display_order=? WHERE id=?",
+                    "in_league_rotation=?, display_order=? WHERE id=?",
                     (
                         rec.get("display_name", rec["name"]),
                         rec.get("enabled", 1), rec.get("is_default", 0),
+                        rec.get("in_league_rotation", 0),
                         rec.get("display_order", 0), existing["id"],
                     ),
                 )
@@ -633,11 +634,13 @@ def _import_maps(conn: sqlite3.Connection, records: list[dict], mode: str) -> di
                 skipped += 1
         else:
             conn.execute(
-                "INSERT INTO game_maps (name, display_name, enabled, is_default, display_order) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO game_maps "
+                "(name, display_name, enabled, is_default, in_league_rotation, display_order) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     rec["name"], rec.get("display_name", rec["name"]),
                     rec.get("enabled", 1), rec.get("is_default", 0),
+                    rec.get("in_league_rotation", 0),
                     rec.get("display_order", 0),
                 ),
             )

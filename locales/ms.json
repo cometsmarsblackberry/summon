@@ -59,6 +59,8 @@
         "network_error": "Ralat rangkaian — periksa sambungan anda dan cuba lagi.",
         "search_maps": "Cari peta...",
         "no_matching_maps": "Tiada peta sepadan.",
+        "league_rotation": "Rotasi liga",
+        "all_maps": "Semua peta",
         "competitive_config": "Konfigurasi kompetitif",
         "loading_configs": "Memuatkan konfigurasi...",
         "search_configs": "Cari konfigurasi...",

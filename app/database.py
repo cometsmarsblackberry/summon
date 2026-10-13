@@ -89,6 +89,7 @@ async def _create_and_migrate(conn) -> None:
     await conn.run_sync(Base.metadata.create_all)
     # Add columns that create_all won't add to existing tables
     await _migrate_add_column(conn, "game_maps", "is_default", "BOOLEAN DEFAULT 0")
+    await _migrate_add_column(conn, "game_maps", "in_league_rotation", "BOOLEAN DEFAULT 0")
     await _migrate_add_column(conn, "enabled_locations", "region_instance_limit", "INTEGER")
     await _migrate_add_column(conn, "enabled_locations", "subdivision", "VARCHAR(16)")
     # Steam trust fields on users

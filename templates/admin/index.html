@@ -54,6 +54,7 @@
                 this.$watch('tab', v => { window.location.hash = v; });
                 this.$watch('locationSearch', () => { this.locPage = 1; });
                 this.$watch('mapSearch', () => { this.mapPage = 1; });
+                this.$watch('mapLeagueRotationOnly', () => { this.mapPage = 1; });
                 this.$watch('resSearch', () => { this.resPage = 1; });
                 this.$watch('userSearch', () => { this.userPage = 1; });
                 this.$watch('triviaSearch', () => { this.triviaPage = 1; });
@@ -382,6 +383,7 @@
             /* ── Maps ── */
             allMaps: _adminMaps,
             mapSearch: '',
+            mapLeagueRotationOnly: false,
             mapPage: 1,
             mapPerPage: 20,
             selectedMapIds: [],
@@ -396,6 +398,7 @@
                 const q = this.mapSearch.toLowerCase();
                 return this.allMaps
                     .filter(m => !q || m.name.toLowerCase().includes(q))
+                    .filter(m => !this.mapLeagueRotationOnly || m.in_league_rotation)
                     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
             },
             get mapTotalPages() { return Math.max(1, Math.ceil(this.filteredMaps.length / this.mapPerPage)); },
@@ -438,6 +441,19 @@
                 });
                 if (!res.ok) {
                     map.enabled = previous;
+                    const err = await res.json().catch(() => ({}));
+                    alert(err.detail || 'Failed to update map');
+                }
+            },
+            async setMapLeagueRotation(map, inRotation) {
+                const previous = map.in_league_rotation;
+                map.in_league_rotation = inRotation;
+                const res = await fetch('/admin/maps/' + map.id + '/league-rotation', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ in_league_rotation: inRotation })
+                });
+                if (!res.ok) {
+                    map.in_league_rotation = previous;
                     const err = await res.json().catch(() => ({}));
                     alert(err.detail || 'Failed to update map');
                 }
@@ -1059,6 +1075,11 @@
                         <span x-show="!deletingMaps" x-text="'Delete selected (' + selectedMapCount + ')'"></span>
                         <span x-show="deletingMaps" x-cloak>Deleting...</span>
                     </button>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-600">
+                        <input type="checkbox" x-model="mapLeagueRotationOnly"
+                            class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500">
+                        League rotation only
+                    </label>
                     <input x-model="mapSearch" placeholder="Search maps..."
                         class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-40">
                     <button @click="showBulkImport = !showBulkImport; showAddMap = false"
@@ -1121,6 +1142,7 @@
                             <th class="text-right py-2 px-2" title="Number of reservations where this map was selected as the starting map">Selected</th>
                             <th class="text-right py-2 px-2" title="Number of those reservations that reached a running server">Played</th>
                             <th class="text-left py-2 px-2">Last used</th>
+                            <th class="text-center py-2 px-2" title="Maps leagues currently play. Listed first in the map picker.">League rotation</th>
                             <th class="text-center py-2 px-2">Enabled</th>
                             <th class="text-center py-2 px-2"><span class="sr-only">Actions</span></th>
                         </tr>
@@ -1141,6 +1163,14 @@
                                 <td class="py-2 px-2 text-slate-500 whitespace-nowrap" x-text="formatMapLastUsed(map.last_used_at)"></td>
                                 <td class="text-center py-2 px-2">
                                     <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" class="sr-only peer" :checked="map.in_league_rotation"
+                                            :aria-label="'Include ' + map.name + ' in league rotation'"
+                                            @change="setMapLeagueRotation(map, $event.target.checked)">
+                                        <div class="w-7 h-4 bg-slate-200 rounded-full peer peer-checked:after:translate-x-3 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+                                    </label>
+                                </td>
+                                <td class="text-center py-2 px-2">
+                                    <label class="relative inline-flex items-center cursor-pointer">
                                         <input type="checkbox" class="sr-only peer" :checked="map.enabled"
                                             :aria-label="'Enable ' + map.name"
                                             @change="toggleMap(map, $event.target.checked)">
@@ -1154,7 +1184,7 @@
                             </tr>
                         </template>
                         <tr x-show="paginatedMaps.length === 0" x-cloak>
-                            <td colspan="7" class="py-6 px-2 text-center text-slate-400">No maps found</td>
+                            <td colspan="8" class="py-6 px-2 text-center text-slate-400">No maps found</td>
                         </tr>
                     </tbody>
                 </table>
