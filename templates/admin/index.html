@@ -1773,21 +1773,36 @@
                     <span class="text-brand-600" x-text="lpFormLocCode"></span>
                 </h3>
                 <div class="grid grid-cols-3 gap-2">
-                    <select x-model="lpFormData.provider_code" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                        <template x-for="p in providers" :key="p.code">
-                            <option :value="p.code" x-text="p.name"></option>
-                        </template>
-                    </select>
-                    <input x-model="lpFormData.provider_region" placeholder="Region ID"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                    <input x-model="lpFormData.priority" type="number" min="0" placeholder="Priority"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <div>
+                        <label class="text-xs text-slate-500">Provider</label>
+                        <select x-model="lpFormData.provider_code" class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <template x-for="p in providers" :key="p.code">
+                                <option :value="p.code" x-text="p.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">Region ID</label>
+                        <input x-model="lpFormData.provider_region" placeholder="e.g. 46"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500" title="Lower number is tried first">Priority (lower first)</label>
+                        <input x-model="lpFormData.priority" type="number" min="0" placeholder="0"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
-                    <input x-model="lpFormData.instance_plan" placeholder="Plan override (optional)"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                    <input x-model="lpFormData.region_instance_limit" type="number" min="1" placeholder="Instance limit"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <div>
+                        <label class="text-xs text-slate-500">Plan override</label>
+                        <input x-model="lpFormData.instance_plan" placeholder="Provider default"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500">Instance limit override</label>
+                        <input x-model="lpFormData.region_instance_limit" type="number" min="1" placeholder="Provider default"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
                 </div>
                 <div class="flex gap-2 justify-end pt-2 border-t border-slate-100">
                     <button @click="showLPModal = false" class="px-3 py-1.5 text-xs bg-slate-200 hover:bg-slate-300 rounded">Cancel</button>
