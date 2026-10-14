@@ -726,7 +726,8 @@
                                                     @click="selectHomeConfig(config)"
                                                     :class="selectedConfig === config.cfg_file ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
                                                     class="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm">
-                                                    <span x-text="config.name || config.cfg_file" class="truncate"></span>
+                                                    <span x-text="config.name || config.cfg_file" class="truncate"
+                                                        @mouseenter="$el.title = $el.scrollWidth > $el.clientWidth ? $el.textContent : ''"></span>
                                                     <span class="flex shrink-0 items-center gap-2">
                                                         <span x-text="config.format" class="text-xs text-slate-400"></span>
                                                         <span x-show="selectedConfig === config.cfg_file" class="text-brand-600" aria-hidden="true">✓</span>
