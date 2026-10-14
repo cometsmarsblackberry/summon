@@ -142,6 +142,12 @@ WantedBy=multi-user.target
                     "name": "zincati.service",
                     "mask": True,
                 },
+                # Disposable game servers never install firmware updates; the
+                # refresh only wakes fwupd and takes CPU and memory from SRCDS.
+                {
+                    "name": "fwupd-refresh.timer",
+                    "mask": True,
+                },
                 {
                     "name": "create-swap.service",
                     "enabled": True,

@@ -52,6 +52,12 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn("grep -qsx off /sys/devices/system/cpu/smt/control", unit["contents"])
         self.assertIn("echo on > /sys/devices/system/cpu/smt/control", unit["contents"])
 
+    def test_fcos_masks_background_update_services(self):
+        units = self._ignition_units()
+
+        for name in ("zincati.service", "fwupd-refresh.timer"):
+            self.assertIs(units[name].get("mask"), True, name)
+
     def test_onidel_preserves_hardened_agent_download_in_systemd(self):
         encoded, _ = self._ignition_config()
         script = OnidelClient._ignition_to_startup_script(encoded)
