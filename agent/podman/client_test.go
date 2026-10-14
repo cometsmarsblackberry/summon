@@ -117,6 +117,11 @@ func TestBuildRunArgsPreservesCloudDefaults(t *testing.T) {
 			t.Fatalf("cloud default mapping %q missing", mapping)
 		}
 	}
+	imageIndex := slices.Index(args, "tf2:test")
+	healthcheckIndex := slices.Index(args, "--no-healthcheck")
+	if healthcheckIndex == -1 || healthcheckIndex > imageIndex {
+		t.Fatalf("cloud containers must disable the image healthcheck before the image argument: %v", args)
+	}
 }
 
 func TestBuildRunArgsProvidesValidatedStartupMapWithBadlandsCommandFallback(t *testing.T) {
