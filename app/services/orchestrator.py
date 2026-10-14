@@ -158,6 +158,27 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 """
+                },
+                # Fedora CoreOS boots with mitigations=auto,nosmt. When the
+                # hypervisor presents vCPUs as SMT siblings, that leaves a
+                # 2-vCPU plan with one usable CPU, so bring the siblings online
+                # without the extra reboot a kernelArguments change costs. This
+                # only relaxes isolation between processes inside this VM.
+                {
+                    "name": "enable-smt.service",
+                    "enabled": True,
+                    "contents": """[Unit]
+Description=Bring vCPUs parked by mitigations=auto,nosmt online
+Before=tf2-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'if grep -qsx off /sys/devices/system/cpu/smt/control; then echo on > /sys/devices/system/cpu/smt/control; fi'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
                 }
             ]
         },
