@@ -587,6 +587,10 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 	// the legacy cloud mapping exactly for disposable single-server VMs.
 	if !instantRuntime {
 		args = append(args, "-p", fmt.Sprintf("%d:27015/tcp", gamePort))
+		// Nothing reads the image HEALTHCHECK, but every 30-second probe
+		// starts podman, an exec session, and an RCON client. On a small
+		// cloud VM that work competes with SRCDS for CPU.
+		args = append(args, "--no-healthcheck")
 	}
 	args = append(args,
 		"-p", fmt.Sprintf("%d:27015/udp", gamePort),
