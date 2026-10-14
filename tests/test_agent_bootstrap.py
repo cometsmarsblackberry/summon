@@ -37,6 +37,21 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn(f"/static/tf2-agent?sha256={digest}", agent_unit)
         self.assertIn("/usr/bin/mv /home/core/tf2-agent.download /home/core/tf2-agent", agent_unit)
 
+    def _ignition_units(self) -> dict[str, dict]:
+        encoded, _ = self._ignition_config()
+        ignition = json.loads(base64.b64decode(encoded))
+        return {unit["name"]: unit for unit in ignition["systemd"]["units"]}
+
+    def test_fcos_brings_parked_smt_siblings_online_before_the_agent(self):
+        unit = self._ignition_units()["enable-smt.service"]
+
+        self.assertTrue(unit["enabled"])
+        self.assertIn("Before=tf2-agent.service", unit["contents"])
+        self.assertIn("Type=oneshot", unit["contents"])
+        # Only a soft "off" can be re-enabled; forceoff and notsupported are left alone.
+        self.assertIn("grep -qsx off /sys/devices/system/cpu/smt/control", unit["contents"])
+        self.assertIn("echo on > /sys/devices/system/cpu/smt/control", unit["contents"])
+
     def test_onidel_preserves_hardened_agent_download_in_systemd(self):
         encoded, _ = self._ignition_config()
         script = OnidelClient._ignition_to_startup_script(encoded)

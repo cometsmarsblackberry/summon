@@ -158,6 +158,24 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 """
+                },
+                # Bring SMT siblings online when the hypervisor exposes
+                # vCPUs as sibling threads and the guest has disabled them.
+                {
+                    "name": "enable-smt.service",
+                    "enabled": True,
+                    "contents": """[Unit]
+Description=Bring vCPUs parked by mitigations=auto,nosmt online
+Before=tf2-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'if grep -qsx off /sys/devices/system/cpu/smt/control; then echo on > /sys/devices/system/cpu/smt/control; fi'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
                 }
             ]
         },
