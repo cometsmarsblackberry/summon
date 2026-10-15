@@ -138,6 +138,7 @@
         "cpu_model": "Model CPU",
         "logical_cpus": "CPU logic",
         "cpu": "CPU",
+        "cpu_steal": "CPU bị chiếm dụng",
         "load_avg": "Tải trung bình",
         "ram": "RAM",
         "swap": "Swap",

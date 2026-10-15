@@ -138,6 +138,7 @@
         "cpu_model": "Model CPU",
         "logical_cpus": "CPU logik",
         "cpu": "CPU",
+        "cpu_steal": "Curian CPU",
         "load_avg": "Purata beban",
         "ram": "RAM",
         "swap": "Swap",

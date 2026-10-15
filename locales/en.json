@@ -149,6 +149,7 @@
         "cpu_model": "CPU model",
         "logical_cpus": "Logical CPUs",
         "cpu": "CPU",
+        "cpu_steal": "CPU steal",
         "load_avg": "Load avg",
         "ram": "RAM",
         "swap": "Swap",

@@ -1663,6 +1663,13 @@
                         <div class="text-slate-400">{{ _('status.cpu') }}</div>
                         <div class="text-slate-700 text-right" x-text="hostStats ? fmtPct(hostStats.cpu_percent) : '--'"></div>
 
+                        <template x-if="hostStats && hostStats.cpu_steal_percent !== undefined">
+                            <div class="contents">
+                                <div class="text-slate-400">{{ _('status.cpu_steal') }}</div>
+                                <div class="text-slate-700 text-right" x-text="fmtPct(hostStats.cpu_steal_percent)"></div>
+                            </div>
+                        </template>
+
                         <div class="text-slate-400">{{ _('status.load_avg') }}</div>
                         <div class="text-slate-700 text-right" x-text="hostStats ? (fmtLoad(hostStats.load_avg_1) + '  ' + fmtLoad(hostStats.load_avg_5) + '  ' + fmtLoad(hostStats.load_avg_15)) : '--'"></div>
 

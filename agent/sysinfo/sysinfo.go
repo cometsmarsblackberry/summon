@@ -11,28 +11,30 @@ import (
 
 // Stats holds a snapshot of system metrics.
 type Stats struct {
-	CPUModel    string  `json:"cpu_model"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemTotalMB  int     `json:"mem_total_mb"`
-	MemUsedMB   int     `json:"mem_used_mb"`
-	MemPercent  float64 `json:"mem_percent"`
-	SwapTotalMB int     `json:"swap_total_mb"`
-	SwapUsedMB  int     `json:"swap_used_mb"`
-	SwapPercent float64 `json:"swap_percent"`
-	DiskTotalGB float64 `json:"disk_total_gb"`
-	DiskUsedGB  float64 `json:"disk_used_gb"`
-	DiskPercent float64 `json:"disk_percent"`
-	UptimeSec   int     `json:"uptime_sec"`
-	LoadAvg1    float64 `json:"load_avg_1"`
-	LoadAvg5    float64 `json:"load_avg_5"`
-	LoadAvg15   float64 `json:"load_avg_15"`
-	NumCPUs     int     `json:"num_cpus"`
+	CPUModel        string  `json:"cpu_model"`
+	CPUPercent      float64 `json:"cpu_percent"`
+	CPUStealPercent float64 `json:"cpu_steal_percent"`
+	MemTotalMB      int     `json:"mem_total_mb"`
+	MemUsedMB       int     `json:"mem_used_mb"`
+	MemPercent      float64 `json:"mem_percent"`
+	SwapTotalMB     int     `json:"swap_total_mb"`
+	SwapUsedMB      int     `json:"swap_used_mb"`
+	SwapPercent     float64 `json:"swap_percent"`
+	DiskTotalGB     float64 `json:"disk_total_gb"`
+	DiskUsedGB      float64 `json:"disk_used_gb"`
+	DiskPercent     float64 `json:"disk_percent"`
+	UptimeSec       int     `json:"uptime_sec"`
+	LoadAvg1        float64 `json:"load_avg_1"`
+	LoadAvg5        float64 `json:"load_avg_5"`
+	LoadAvg15       float64 `json:"load_avg_15"`
+	NumCPUs         int     `json:"num_cpus"`
 }
 
 // cpuTimes holds cumulative CPU jiffies from /proc/stat.
 type cpuTimes struct {
 	total uint64
 	idle  uint64
+	steal uint64
 }
 
 var lastCPU *cpuTimes
@@ -47,7 +49,7 @@ func Collect() Stats {
 	s.MemTotalMB, s.MemUsedMB, s.MemPercent,
 		s.SwapTotalMB, s.SwapUsedMB, s.SwapPercent = readMemory()
 	s.DiskTotalGB, s.DiskUsedGB, s.DiskPercent = readDisk()
-	s.CPUPercent = readCPUPercent()
+	s.CPUPercent, s.CPUStealPercent = readCPUUsage()
 	return s
 }
 
@@ -185,10 +187,10 @@ func readDiskWith(statfsFn func(string, *statfsT) error) (totalGB, usedGB, perce
 	return
 }
 
-func readCPUPercent() float64 {
+func readCPUUsage() (busy, steal float64) {
 	cur := readCPUTimes()
 	if cur == nil {
-		return 0
+		return 0, 0
 	}
 	defer func() { lastCPU = cur }()
 
@@ -197,20 +199,23 @@ func readCPUPercent() float64 {
 		time.Sleep(200 * time.Millisecond)
 		next := readCPUTimes()
 		if next == nil {
-			return 0
+			return 0, 0
 		}
-		return calcCPUPercent(cur, next)
+		return calcCPUUsage(cur, next)
 	}
-	return calcCPUPercent(lastCPU, cur)
+	return calcCPUUsage(lastCPU, cur)
 }
 
-func calcCPUPercent(prev, cur *cpuTimes) float64 {
+func calcCPUUsage(prev, cur *cpuTimes) (busy, steal float64) {
 	totalDelta := cur.total - prev.total
 	idleDelta := cur.idle - prev.idle
+	stealDelta := cur.steal - prev.steal
 	if totalDelta == 0 {
-		return 0
+		return 0, 0
 	}
-	return float64(totalDelta-idleDelta) / float64(totalDelta) * 100
+	busy = float64(totalDelta-idleDelta) / float64(totalDelta) * 100
+	steal = float64(stealDelta) / float64(totalDelta) * 100
+	return busy, steal
 }
 
 func readCPUTimes() *cpuTimes {
@@ -218,21 +223,32 @@ func readCPUTimes() *cpuTimes {
 	if err != nil {
 		return nil
 	}
-	// First line: cpu  user nice system idle iowait irq softirq steal ...
-	line := strings.SplitN(string(data), "\n", 2)[0]
+	return parseCPUTimes(strings.SplitN(string(data), "\n", 2)[0])
+}
+
+// parseCPUTimes parses the aggregate line of /proc/stat:
+// cpu  user nice system idle iowait irq softirq steal guest guest_nice
+func parseCPUTimes(line string) *cpuTimes {
 	fields := strings.Fields(line)
 	if len(fields) < 5 || fields[0] != "cpu" {
 		return nil
 	}
-	var total, idle uint64
+	var t cpuTimes
 	for i, f := range fields[1:] {
+		// guest and guest_nice are already included in user and nice.
+		if i >= 8 {
+			break
+		}
 		val, _ := strconv.ParseUint(f, 10, 64)
-		total += val
-		if i == 3 { // idle is the 4th value (index 3)
-			idle = val
+		t.total += val
+		switch i {
+		case 3:
+			t.idle = val
+		case 7:
+			t.steal = val
 		}
 	}
-	return &cpuTimes{total: total, idle: idle}
+	return &t
 }
 
 // statfsT is a minimal statfs struct for Linux.

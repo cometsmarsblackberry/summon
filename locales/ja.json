@@ -138,6 +138,7 @@
         "cpu_model": "CPUモデル",
         "logical_cpus": "論理CPU数",
         "cpu": "CPU",
+        "cpu_steal": "CPUスチール",
         "load_avg": "平均負荷",
         "ram": "RAM",
         "swap": "スワップ",
