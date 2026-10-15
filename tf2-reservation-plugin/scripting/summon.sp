@@ -18,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.5.2"
+#define PLUGIN_VERSION "1.5.3"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -55,6 +55,9 @@ bool g_bExpiryKickDone = false;
 float g_fLastOwnerCommand = 0.0;
 StringMap g_mOwnerCommandAllowlist;
 int g_iOwnerCommandCount = 0;
+// Last config loaded through ExecuteConfig. Real configs need a league
+// prefix, so "none" cannot collide with one.
+char g_sCurrentConfig[64] = "none";
 
 public Plugin myinfo = {
     name = PLUGIN_NAME,
@@ -95,7 +98,7 @@ public void OnPluginStart()
     RegConsoleCmd("sm_end", Command_End, "End the reservation");
     RegConsoleCmd("sm_cancel", Command_Cancel, "Cancel pending reservation end");
     RegConsoleCmd("sm_changemap", Command_Map, "Change the map (owner only)");
-    RegConsoleCmd("sm_config", Command_Config, "Load a competitive config (owner only)");
+    RegConsoleCmd("sm_config", Command_Config, "Show the current config, or load one (owner only)");
     RegConsoleCmd("sm_cfg", Command_Config, "Alias of sm_config");
     RegConsoleCmd("sm_restart", Command_Restart, "Restart tournament/game/round (owner only)");
     RegAdminCmd(
@@ -1713,6 +1716,16 @@ void ExecuteConfig(const char[] cfgFile)
     }
 
     ServerCommand("exec %s", cfgFile);
+
+    if (StrEqual(cfgFile, "summon_reset", false))
+        strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), "none");
+    else
+        strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), cfgFile);
+}
+
+void PrintCurrentConfig(int client)
+{
+    PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Current config: \x07FFFF00%s", g_sCurrentConfig);
 }
 
 bool IsAllowedConfig(const char[] cfgFile)
@@ -1761,13 +1774,15 @@ public Action Command_Config(int client, int args)
 
     if (!IsOwner(client))
     {
+        PrintCurrentConfig(client);
         PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can load configs.");
         return Plugin_Handled;
     }
 
     if (args < 1)
     {
-        // No argument -- show league menu
+        // No argument -- show the current config and the league menu
+        PrintCurrentConfig(client);
         ShowLeagueMenu(client);
         return Plugin_Handled;
     }
@@ -1790,7 +1805,7 @@ public Action Command_Config(int client, int args)
 void ShowLeagueMenu(int client)
 {
     Menu menu = new Menu(LeagueMenuHandler);
-    menu.SetTitle("Select League");
+    menu.SetTitle("Select League\nCurrent: %s", g_sCurrentConfig);
     menu.ExitBackButton = true;
 
     // Scan cfg/ directory and collect leagues that have at least one config file

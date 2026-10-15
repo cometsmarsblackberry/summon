@@ -37,6 +37,7 @@ command begins with `sm_`.
 | Chat command | Description |
 | --- | --- |
 | `!reservation`, `!res`, `!who` | Show the reservation number, owner, and time remaining. |
+| `!config`, `!cfg` | Show the current competitive config. Only the reservation owner can load one. |
 | `!pause` | Pause the game. Repeating it keeps the game paused. |
 | `!unpause` | Unpause the game through the installed pause plugin's countdown. |
 
@@ -54,7 +55,7 @@ countdown. Both commands also support SourceMod's silent `/pause` and
 | `!end` | Start a 10-second countdown, notify the backend, and then remove all players. |
 | `!cancel` | Cancel an active `!end` countdown. |
 | `!changemap <map>`, `!map <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
-| `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, open the league/config menu. |
+| `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, show the current config and open the league/config menu. |
 | `!restart` | Open a menu to restart the tournament, game, or round. |
 | `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. `exec <config>` is accepted too and loads the config like `!config`. |
 
@@ -80,6 +81,11 @@ rgl_  etf2l_  fbtf_  tfarena_  ultitrio_  ozfortress_  cltf2_  afc_  af_
 The special `summon_reset` config resets the server to its defaults. Loading an
 RGL config also enables Summon's built-in RGL plugin set; loading
 `summon_reset` disables it again.
+
+The current config is the last one loaded through Summon, whether by the agent
+at boot, the web panel, `!config`, the menus, or `exec` through `!command`. It
+shows as `none` before any config is loaded and after `summon_reset`. A config
+executed with the native `exec` from the server console is not tracked.
 
 ### Administrators and server console
 
