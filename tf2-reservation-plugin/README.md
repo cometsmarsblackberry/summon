@@ -175,7 +175,10 @@ When Summon is loaded, it owns the player-facing `!changemap` permission check
 and the fallback behavior for `!map`, then forwards approved requests to the
 downloader. In standalone mode, the downloader follows SourceMod's
 `ADMFLAG_CHANGEMAP` access check. Server-console and RCON `changelevel` requests,
-including allowlisted owner commands, can also download missing maps.
+including allowlisted owner commands, can also download missing maps. Only
+plain map names (letters, numbers, underscores and hyphens, at most 64
+characters) are downloaded, because the name becomes part of the download URL
+and of the saved file's path.
 
 Each download attempt has a five-second connection timeout and a three-minute
 transfer timeout. Transport failures, HTTP 408/429 and 5xx responses, and files
