@@ -86,7 +86,7 @@ def is_instant_reservation(reservation: Reservation) -> bool:
     return _runtime_value(reservation) == RuntimeKind.INSTANT.value
 
 
-async def _get_cloud_instance(
+async def _get_cloud_instance_record(
     reservation: Reservation, db: AsyncSession
 ) -> CloudInstance | None:
     instance_id = getattr(reservation, "instance_id", None)
@@ -96,6 +96,21 @@ async def _get_cloud_instance(
         select(CloudInstance).where(CloudInstance.id == instance_id)
     )
     return result.scalar_one_or_none()
+
+
+async def _get_cloud_instance(
+    reservation: Reservation, db: AsyncSession
+) -> CloudInstance | None:
+    """Return the reservation's cloud instance while it still serves it.
+
+    Warm-pool reuse and boot handover give an instance to later reservations,
+    and the earlier reservation keeps pointing at it. Its controls must never
+    reach the server another user now has.
+    """
+    instance = await _get_cloud_instance_record(reservation, db)
+    if instance is None or instance.current_reservation_id != reservation.id:
+        return None
+    return instance
 
 
 async def get_open_assignment(
@@ -770,7 +785,16 @@ async def end_reservation_runtime(
         is_hourly_billing,
         release_to_warm_pool,
     )
-    cloud = await _get_cloud_instance(reservation, db)
+    cloud = await _get_cloud_instance_record(reservation, db)
+    if cloud is not None and cloud.current_reservation_id != reservation.id:
+        # Already released to the warm pool or handed to another reservation.
+        # A missing record still goes to destroy_instance below, which can
+        # delete the server at the provider without it.
+        logger.info(
+            "Reservation #%s no longer holds instance %s; leaving it running",
+            reservation.reservation_number, cloud.id,
+        )
+        return True
     if cloud and (was_active or had_started):
         await send_to_agent(cloud.instance_id, {"type": "reservation.end"})
     if at_expiry:

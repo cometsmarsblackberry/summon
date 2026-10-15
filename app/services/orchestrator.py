@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -531,24 +531,53 @@ async def _reuse_warm_instance(
     fastdl_url: str,
     db: AsyncSession,
 ) -> Optional[CloudInstance]:
-    """Reuse a warm pool instance for a new reservation."""
+    """Reuse a warm pool instance for a new reservation.
+
+    Returns None without changing anything if another reservation claimed the
+    instance after it was looked up.
+    """
     logger.info(f"Reusing warm pool instance {warm_instance.id} ({loc_provider.provider_code}) for {reservation.location}")
 
     old_agent_id = warm_instance.instance_id
 
-    warm_instance.is_available = False
-    warm_instance.available_since = None
-    warm_instance.current_reservation_id = reservation.id
-    warm_instance.auth_token = auth_token
-    warm_instance.instance_id = instance_id
-
     new_billing_end = reservation.ends_at + timedelta(minutes=5)
     if new_billing_end.tzinfo is not None:
         new_billing_end = new_billing_end.replace(tzinfo=None)
-    warm_instance.billing_hour_ends_at = new_billing_end
+
+    # Provisioning tasks run concurrently, so claim the instance only if it is
+    # still as it was found. Every claim gives it a new agent ID, so a claim in
+    # between always changes at least that.
+    previous_reservation_id = warm_instance.current_reservation_id
+    claim = await db.execute(
+        update(CloudInstance)
+        .where(
+            CloudInstance.id == warm_instance.id,
+            CloudInstance.instance_id == old_agent_id,
+            CloudInstance.is_available == warm_instance.is_available,
+            CloudInstance.current_reservation_id.is_(None)
+            if previous_reservation_id is None
+            else CloudInstance.current_reservation_id == previous_reservation_id,
+        )
+        .values(
+            is_available=False,
+            available_since=None,
+            current_reservation_id=reservation.id,
+            auth_token=auth_token,
+            instance_id=instance_id,
+            billing_hour_ends_at=new_billing_end,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if claim.rowcount != 1:
+        logger.info(
+            "Instance %s was claimed by another reservation; not reusing it for #%s",
+            warm_instance.id, reservation.reservation_number,
+        )
+        return None
 
     reservation.instance_id = warm_instance.id
     await db.commit()
+    await db.refresh(warm_instance)
 
     # Manage Gcore security group for direct connect
     from app.services.gcore import GcoreClient, DIRECT_CONNECT_SG_NAME
