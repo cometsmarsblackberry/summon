@@ -340,6 +340,30 @@ async def admin_panel(
         for t in result.scalars().all()
     ]
 
+    # Get the latest feedback
+    from app.models.feedback import Feedback
+    result = await db.execute(
+        select(Feedback)
+        .options(selectinload(Feedback.user), selectinload(Feedback.reservation))
+        .order_by(Feedback.created_at.desc(), Feedback.id.desc())
+        .limit(200)
+    )
+    feedback_data = [
+        {
+            "id": f.id,
+            "category": f.category,
+            "message": f.message,
+            "status": f.status,
+            "created_at": f.created_at.replace(tzinfo=timezone.utc).isoformat() if f.created_at else None,
+            "user_name": f.user.display_name if f.user else "Unknown",
+            "user_steam_id": f.user.steam_id if f.user else None,
+            "reservation_id": f.reservation_id,
+            "reservation_number": f.reservation.reservation_number if f.reservation else None,
+            "context": f.context,
+        }
+        for f in result.scalars().all()
+    ]
+
     # Get rate limit settings, server settings, and steam trust settings
     from app.services.settings import get_rate_limit_settings, get_fastdl_url, get_steam_trust_settings, get_reservation_settings
     from app.services.captcha import get_captcha_settings
@@ -398,6 +422,7 @@ async def admin_panel(
             "reservation_settings": reservation_settings,
             "captcha_settings": captcha_settings,
             "trivia": trivia_data,
+            "feedback": feedback_data,
             "instant_hosts": instant_hosts_data,
             "instant_settings": instant_settings,
             "instant_metrics": instant_metrics,
@@ -1971,3 +1996,55 @@ async def delete_trivia(
     await db.delete(fact)
     await db.commit()
     return {"deleted": True, "id": trivia_id}
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+class UpdateFeedbackRequest(BaseModel):
+    """Request to change a feedback item's review status."""
+    status: str
+
+
+@router.patch("/feedback/{feedback_id}")
+async def update_feedback(
+    feedback_id: int,
+    request: UpdateFeedbackRequest,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark feedback as new or resolved."""
+    from app.models.feedback import Feedback
+    from app.services.feedback import FEEDBACK_STATUSES
+
+    if request.status not in FEEDBACK_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status must be one of: {', '.join(FEEDBACK_STATUSES)}")
+
+    result = await db.execute(select(Feedback).where(Feedback.id == feedback_id))
+    feedback = result.scalar_one_or_none()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    feedback.status = request.status
+    await db.commit()
+    return {"id": feedback.id, "status": feedback.status}
+
+
+@router.delete("/feedback/{feedback_id}")
+async def delete_feedback(
+    feedback_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a feedback item."""
+    from app.models.feedback import Feedback
+
+    result = await db.execute(select(Feedback).where(Feedback.id == feedback_id))
+    feedback = result.scalar_one_or_none()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    await db.delete(feedback)
+    await db.commit()
+    return {"deleted": True, "id": feedback_id}

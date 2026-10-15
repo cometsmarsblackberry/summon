@@ -14,6 +14,7 @@
     "footer": {
         "about": "Giới thiệu",
         "stats": "Thống kê",
+        "feedback": "Góp ý",
         "discord": "Discord",
         "ping_tagline": "Độ trễ thấp, khắp nơi",
         "privacy": "Quyền riêng tư"
@@ -107,6 +108,7 @@
         "restart_failed": "Không thể khởi động lại máy chủ.",
         "restarting": "Đang khởi động lại máy chủ...",
         "end_reservation": "Kết thúc",
+        "send_feedback": "Gửi góp ý",
         "competitive_config": "Cấu hình thi đấu",
         "league": "Giải đấu",
         "format": "Định dạng",
@@ -276,6 +278,7 @@
         "col_status": "Trạng thái",
         "col_created": "Ngày tạo",
         "view": "Xem",
+        "feedback": "Góp ý",
         "no_reservations": "Bạn chưa tạo đặt chỗ nào.",
         "reserve_server": "Đặt chỗ máy chủ"
     },
@@ -359,6 +362,39 @@
         "no_reason": "Không có lý do",
         "no_bans": "Không có lệnh cấm nào."
     },
+    "feedback": {
+        "title": "Góp ý - {site_name}",
+        "description": "Báo cáo sự cố hoặc đề xuất cải tiến cho {site_name}.",
+        "heading": "Góp ý",
+        "intro": "Bạn gặp lag, cấu hình bị lỗi hoặc máy chủ không khởi động? Bạn có ý tưởng để cải thiện? Hãy cho chúng tôi biết tại đây.",
+        "discord_hint": "Cần trợ giúp ngay? Hỏi trên Discord.",
+        "login_prompt": "Đăng nhập bằng Steam để gửi góp ý.",
+        "unavailable": "Tài khoản của bạn hiện không thể gửi góp ý.",
+        "reservation_label": "Đặt chỗ",
+        "reservation_none": "Không liên quan đến đặt chỗ cụ thể",
+        "category_label": "Danh mục",
+        "category_placeholder": "Chọn danh mục",
+        "categories": {
+            "lag": "Lag hoặc hiệu năng",
+            "connection": "Sự cố kết nối",
+            "config": "Cấu hình hoặc cài đặt",
+            "map": "Sự cố bản đồ",
+            "provisioning": "Máy chủ không khởi động",
+            "website": "Trang web",
+            "suggestion": "Đề xuất",
+            "other": "Khác"
+        },
+        "message_label": "Nội dung",
+        "message_placeholder": "Đã xảy ra chuyện gì? Thời gian, bản đồ và bất cứ điều gì bạn nhận thấy đều hữu ích.",
+        "context_note": "Thông tin kỹ thuật của đặt chỗ đã chọn (địa điểm, máy chủ, bản đồ, cấu hình) được đính kèm tự động.",
+        "submit": "Gửi góp ý",
+        "submitting": "Đang gửi...",
+        "success_heading": "Cảm ơn bạn đã góp ý!",
+        "success_body": "Tin nhắn của bạn đã được gửi đến đội ngũ.",
+        "send_another": "Gửi thêm góp ý",
+        "submit_failed": "Không thể gửi góp ý. Vui lòng thử lại.",
+        "network_error": "Lỗi mạng — kiểm tra kết nối và thử lại."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Không tìm thấy",
@@ -418,7 +454,11 @@
         "command_unsafe": "Không cho phép ký tự phân tách lệnh và ký tự điều khiển.",
         "command_invalid_name": "Tên lệnh máy chủ không hợp lệ.",
         "command_not_allowed": "Lệnh máy chủ đó không được phép.",
-        "profile_not_public": "Hồ sơ Steam của bạn phải công khai để tạo đặt chỗ."
+        "profile_not_public": "Hồ sơ Steam của bạn phải công khai để tạo đặt chỗ.",
+        "feedback_invalid_category": "Hãy chọn danh mục góp ý.",
+        "feedback_message_required": "Hãy viết nội dung trước khi gửi.",
+        "feedback_message_too_long": "Nội dung quá dài. Giới hạn là {max} ký tự.",
+        "feedback_rate_limited": "Gần đây bạn đã gửi nhiều góp ý. Vui lòng thử lại sau."
     },
     "language": {
         "label": "Ngôn ngữ"

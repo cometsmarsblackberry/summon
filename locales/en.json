@@ -14,6 +14,7 @@
     "footer": {
         "about": "About",
         "stats": "Stats",
+        "feedback": "Feedback",
         "discord": "Discord",
         "ping_tagline": "Low ping, everywhere",
         "privacy": "Privacy"
@@ -110,6 +111,7 @@
         "restart_failed": "Failed to restart server.",
         "restarting": "Restarting server...",
         "end_reservation": "End",
+        "send_feedback": "Send feedback",
         "competitive_config": "Competitive Config",
         "config_short": "Config",
         "change_config": "Change config",
@@ -276,6 +278,7 @@
         "col_status": "Status",
         "col_created": "Created",
         "view": "View",
+        "feedback": "Feedback",
         "no_reservations": "You haven't made any reservations yet.",
         "reserve_server": "Reserve a Server"
     },
@@ -359,6 +362,39 @@
         "no_reason": "No reason provided",
         "no_bans": "No bans to show."
     },
+    "feedback": {
+        "title": "Feedback - {site_name}",
+        "description": "Report a problem or suggest an improvement to {site_name}.",
+        "heading": "Feedback",
+        "intro": "Had lag, a broken config or a server that didn't start? Have an idea for something better? Tell us here.",
+        "discord_hint": "Need help right now? Ask on Discord.",
+        "login_prompt": "Log in with Steam to send feedback.",
+        "unavailable": "Your account can't send feedback right now.",
+        "reservation_label": "Reservation",
+        "reservation_none": "Not about a specific reservation",
+        "category_label": "Category",
+        "category_placeholder": "Choose a category",
+        "categories": {
+            "lag": "Lag or performance",
+            "connection": "Connection problem",
+            "config": "Config or settings",
+            "map": "Map problem",
+            "provisioning": "Server didn't start",
+            "website": "Website",
+            "suggestion": "Suggestion",
+            "other": "Other"
+        },
+        "message_label": "Message",
+        "message_placeholder": "What happened? Times, maps and anything else you noticed all help.",
+        "context_note": "Technical details about the selected reservation (location, server, map, config) are attached automatically.",
+        "submit": "Send feedback",
+        "submitting": "Sending...",
+        "success_heading": "Thanks for your feedback!",
+        "success_body": "Your message has been sent to the team.",
+        "send_another": "Send more feedback",
+        "submit_failed": "Failed to send feedback. Please try again.",
+        "network_error": "Network error — check your connection and try again."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Not Found",
@@ -418,7 +454,11 @@
         "command_unsafe": "Command separators and control characters are not allowed.",
         "command_invalid_name": "The server command name is invalid.",
         "command_not_allowed": "That server command is not allowed.",
-        "profile_not_public": "Your Steam profile must be public to create reservations."
+        "profile_not_public": "Your Steam profile must be public to create reservations.",
+        "feedback_invalid_category": "Choose a feedback category.",
+        "feedback_message_required": "Write a message before sending.",
+        "feedback_message_too_long": "Your message is too long. The limit is {max} characters.",
+        "feedback_rate_limited": "You've sent a lot of feedback recently. Please try again later."
     },
     "language": {
         "label": "Language"

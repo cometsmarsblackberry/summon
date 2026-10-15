@@ -28,7 +28,7 @@ from app.static_assets import (
     STATIC_ROOT,
     static_asset_url,
 )
-from app.routers import auth, reservations, status, internal, admin, pages, ping, motd
+from app.routers import auth, reservations, status, internal, admin, pages, ping, motd, feedback
 from app.i18n import (
     get_locale,
     set_current_locale,
@@ -320,6 +320,7 @@ app.include_router(status.router)
 app.include_router(internal.router)
 app.include_router(admin.router)
 app.include_router(ping.router)
+app.include_router(feedback.router)
 app.include_router(motd.router)
 
 _templates = Jinja2Templates(directory="templates")

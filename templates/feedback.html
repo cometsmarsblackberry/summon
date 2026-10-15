@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}{{ _('feedback.title') }}{% endblock %}
+{% block meta_description %}{{ _('feedback.description') }}{% endblock %}
+{% block canonical %}{{ base_url }}/feedback{% endblock %}
+
+{% set locale = request.state.locale|default('en') %}
+{% set field_class = 'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 text-sm placeholder:text-slate-400 focus:ring-2 focus:ring-brand-500 focus:border-transparent' %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-2 text-slate-900">{{ _('feedback.heading') }}</h1>
+    <p class="text-slate-500 text-sm">{{ _('feedback.intro') }}</p>
+    {% if discord_url %}
+    <p class="text-sm mt-1">
+        <a href="{{ discord_url }}" class="text-brand-600 hover:underline">{{ _('feedback.discord_hint') }}</a>
+    </p>
+    {% endif %}
+
+    <div class="mt-6">
+        {% if not user %}
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-8 text-center">
+            <p class="text-slate-500 mb-4">{{ _('feedback.login_prompt') }}</p>
+            <a href="/login"
+                class="inline-flex px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium transition-colors">
+                {{ _('nav.login_alt') }}
+            </a>
+        </div>
+        {% elif not can_submit %}
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-8 text-center text-slate-500">
+            {{ _('feedback.unavailable') }}
+        </div>
+        {% else %}
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-6" x-data="feedbackForm()">
+            <div x-show="sent" x-cloak class="p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
+                <p class="font-medium">{{ _('feedback.success_heading') }}</p>
+                <p class="text-sm mt-1">{{ _('feedback.success_body') }}</p>
+                <button type="button" @click="reset()"
+                    class="mt-4 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+                    {{ _('feedback.send_another') }}
+                </button>
+            </div>
+
+            <div x-show="error" x-cloak class="mb-4 p-2.5 bg-red-100 border border-red-200 rounded text-red-800 text-sm"
+                x-text="error"></div>
+
+            <form x-show="!sent" @submit.prevent="submit()" class="space-y-4">
+                <!-- Side by side only where both columns fit the longest translations.
+                     The note follows Reservation when stacked and spans both columns otherwise. -->
+                <div class="grid gap-x-4 gap-y-1 lg:grid-cols-2">
+                    <div>
+                        <label for="feedback-reservation" class="block text-sm font-medium text-slate-700 mb-1">
+                            {{ _('feedback.reservation_label') }}
+                        </label>
+                        <select id="feedback-reservation" x-model="reservationId" class="{{ field_class }}">
+                            <option value="">{{ _('feedback.reservation_none') }}</option>
+                            {% for r in reservations %}
+                            {% set label = '#' ~ r.reservation_number ~ ' — ' ~ r.city ~ ' — ' %}
+                            <option value="{{ r.id }}" {% if r.id == preselected_id %}selected{% endif %}
+                                x-text="{{ label | tojson | forceescape }} + summonIntl.date('{{ r.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}', '{{ locale }}')">
+                                {{ label }}{{ r.created_at.strftime('%d/%m/%Y' if locale == 'en' else '%Y-%m-%d') }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <p x-show="reservationId" x-cloak class="text-xs text-slate-500 lg:order-last lg:col-span-2">{{ _('feedback.context_note') }}</p>
+                    <div class="mt-3 lg:mt-0">
+                        <label for="feedback-category" class="block text-sm font-medium text-slate-700 mb-1">
+                            {{ _('feedback.category_label') }}
+                        </label>
+                        <select id="feedback-category" x-model="category" required class="{{ field_class }}">
+                            <option value="" disabled>{{ _('feedback.category_placeholder') }}</option>
+                            {% for category in categories %}
+                            <option value="{{ category }}">{{ _('feedback.categories.' ~ category) }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="feedback-message" class="block text-sm font-medium text-slate-700 mb-1">
+                        {{ _('feedback.message_label') }}
+                    </label>
+                    <textarea id="feedback-message" x-model="message" rows="6" maxlength="{{ max_length }}" required
+                        placeholder="{{ _('feedback.message_placeholder') }}"
+                        class="{{ field_class }} resize-y"></textarea>
+                    <p class="mt-1 text-right text-xs text-slate-400 tabular-nums"
+                        x-text="message.length + '/' + {{ max_length }}">0/{{ max_length }}</p>
+                </div>
+
+                <div class="flex justify-end">
+                    <button type="submit" :disabled="submitting"
+                        class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors">
+                        <span x-show="!submitting">{{ _('feedback.submit') }}</span>
+                        <span x-show="submitting" x-cloak class="inline-flex items-center gap-2">
+                            <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            {{ _('feedback.submitting') }}
+                        </span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if can_submit %}
+<script>
+function feedbackForm() {
+    const submitFailed = {{ _('feedback.submit_failed') | tojson }};
+    const networkError = {{ _('feedback.network_error') | tojson }};
+
+    return {
+        reservationId: {{ (preselected_id | string if preselected_id else '') | tojson }},
+        category: '',
+        message: '',
+        submitting: false,
+        error: '',
+        sent: false,
+
+        async submit() {
+            if (this.submitting) return;
+            this.submitting = true;
+            this.error = '';
+            try {
+                const resp = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        reservation_id: this.reservationId ? Number(this.reservationId) : null,
+                        category: this.category,
+                        message: this.message,
+                    }),
+                });
+                const result = await resp.json().catch(() => ({}));
+                if (resp.ok) {
+                    this.sent = true;
+                } else {
+                    this.error = (typeof result.detail === 'string' && result.detail) || submitFailed;
+                }
+            } catch (err) {
+                this.error = networkError;
+            }
+            this.submitting = false;
+        },
+
+        reset() {
+            this.category = '';
+            this.message = '';
+            this.error = '';
+            this.sent = false;
+        },
+    };
+}
+</script>
+{% endif %}
+{% endblock %}

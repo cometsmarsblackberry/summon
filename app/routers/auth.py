@@ -431,6 +431,7 @@ async def export_account_data(
     db: AsyncSession = Depends(get_db),
 ):
     """Export all personal data for the current user (GDPR Art. 20)."""
+    from app.models.feedback import Feedback
     from app.models.reservation import Reservation
     from app.models.steam_trust_snapshot import SteamTrustSnapshot
     from app.models.upload_link import UploadLink
@@ -451,6 +452,15 @@ async def export_account_data(
         .order_by(SteamTrustSnapshot.fetched_at.desc())
     )
     snapshots = result.scalars().all()
+
+    # Feedback the user has written
+    result = await db.execute(
+        select(Feedback)
+        .where(Feedback.user_id == user.id)
+        .options(selectinload(Feedback.reservation))
+        .order_by(Feedback.created_at.desc())
+    )
+    feedback = result.scalars().all()
 
     def fmt_dt(dt: datetime | None) -> str | None:
         if dt is None:
@@ -511,6 +521,16 @@ async def export_account_data(
             }
             for s in snapshots
         ],
+        "feedback": [
+            {
+                "category": f.category,
+                "message": f.message,
+                "status": f.status,
+                "created_at": fmt_dt(f.created_at),
+                "reservation_number": f.reservation.reservation_number if f.reservation else None,
+            }
+            for f in feedback
+        ],
     }
     export_filename = f"{_site_name_filename_prefix()}_data_{user.steam_id}.json"
 
@@ -531,6 +551,7 @@ async def delete_account(
 
     Banned users keep a skeleton record so the ban persists.
     """
+    from app.models.feedback import Feedback
     from app.models.reservation import Reservation, ReservationStatus
     from app.models.steam_trust_snapshot import SteamTrustSnapshot
 
@@ -563,6 +584,9 @@ async def delete_account(
     # Delete steam trust snapshots
     from sqlalchemy import delete as sql_delete
     await db.execute(sql_delete(SteamTrustSnapshot).where(SteamTrustSnapshot.user_id == user.id))
+
+    # Delete feedback (user-authored text)
+    await db.execute(sql_delete(Feedback).where(Feedback.user_id == user.id))
 
     # Anonymize reservations by severing the user link
     from sqlalchemy import update as sql_update

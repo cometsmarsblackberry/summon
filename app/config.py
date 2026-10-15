@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # hCaptcha (optional)
     hcaptcha_site_key: str = ""
     hcaptcha_secret_key: str = ""
+
+    # Discord webhook notified of new feedback (optional)
+    discord_feedback_webhook_url: str = ""
     
     # Base URL for callbacks
     base_url: str = "http://localhost:8000"
@@ -154,6 +157,11 @@ class Settings(BaseSettings):
     def hcaptcha_configured(self) -> bool:
         """Check if hCaptcha is configured."""
         return bool(self.hcaptcha_site_key) and bool(self.hcaptcha_secret_key)
+
+    @property
+    def discord_feedback_webhook_configured(self) -> bool:
+        """Check if the feedback Discord webhook is configured."""
+        return bool(self.discord_feedback_webhook_url)
 
     @property
     def vultr_configured(self) -> bool:

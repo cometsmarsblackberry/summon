@@ -4,6 +4,7 @@ from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
 from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLocation, Provider, LocationProvider
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.models.cost import CostRecord, MonthlyCost
+from app.models.feedback import Feedback
 from app.models.ping import PingSubmission
 from app.models.setting import SiteSetting
 from app.models.steam_trust_snapshot import SteamTrustSnapshot
@@ -25,6 +26,7 @@ __all__ = [
     "InstantAssignment",
     "CostRecord",
     "MonthlyCost",
+    "Feedback",
     "PingSubmission",
     "SiteSetting",
     "SteamTrustSnapshot",

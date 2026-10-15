@@ -109,6 +109,7 @@ async def robots_txt():
         f"Allow: /\n"
         f"Disallow: /admin\n"
         f"Disallow: /api/\n"
+        f"Disallow: /feedback\n"
         f"Disallow: /my-reservations\n"
         f"Disallow: /profile\n"
         f"Disallow: /reservations/\n"
@@ -438,6 +439,71 @@ async def bans_page(
         request,
         "bans.html",
         {"user": user, "bans": bans},
+    )
+
+
+def _parse_reservation_id(value: str | None) -> int | None:
+    """Return a usable reservation ID from a query value, or None."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if 0 < parsed < 2**63 else None
+
+
+@router.get("/feedback", response_class=HTMLResponse)
+async def feedback_page(
+    request: Request,
+    reservation: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Feedback form for problem reports and suggestions."""
+    from app.services.feedback import FEEDBACK_CATEGORIES, MAX_MESSAGE_LENGTH
+
+    user = await get_current_user(request, db)
+    can_submit = user is not None and not user.is_banned and has_beta_access(user)
+
+    reservation_options = []
+    preselected_id = None
+    if can_submit:
+        reservations = await get_user_reservations(user, db)
+        requested_id = _parse_reservation_id(reservation)
+        if requested_id is not None:
+            if not any(r.id == requested_id for r in reservations):
+                # Shortcuts can point at reservations older than the recent list.
+                requested = await get_reservation_by_id(requested_id, db)
+                if requested and requested.user_id == user.id:
+                    reservations.append(requested)
+            if any(r.id == requested_id for r in reservations):
+                preselected_id = requested_id
+
+        from app.models.instance import EnabledLocation
+        loc_result = await db.execute(select(EnabledLocation))
+        location_cities = {
+            loc.code: loc.city or loc.code
+            for loc in loc_result.scalars().all()
+        }
+        reservation_options = [
+            {
+                "id": r.id,
+                "reservation_number": r.reservation_number,
+                "city": location_cities.get(r.location, r.location),
+                "created_at": r.created_at,
+            }
+            for r in reservations
+        ]
+
+    return templates.TemplateResponse(
+        request,
+        "feedback.html",
+        {
+            "user": user,
+            "can_submit": can_submit,
+            "reservations": reservation_options,
+            "preselected_id": preselected_id,
+            "categories": FEEDBACK_CATEGORIES,
+            "max_length": MAX_MESSAGE_LENGTH,
+        }
     )
 
 

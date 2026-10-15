@@ -14,6 +14,7 @@
     "footer": {
         "about": "Om",
         "stats": "Statistik",
+        "feedback": "Feedback",
         "discord": "Discord",
         "ping_tagline": "Låg ping, överallt",
         "privacy": "Integritet"
@@ -107,6 +108,7 @@
         "restart_failed": "Det gick inte att starta om servern.",
         "restarting": "Startar om servern...",
         "end_reservation": "Avsluta",
+        "send_feedback": "Skicka feedback",
         "competitive_config": "Kompetitiv konfiguration",
         "league": "Liga",
         "format": "Format",
@@ -276,6 +278,7 @@
         "col_status": "Status",
         "col_created": "Skapad",
         "view": "Visa",
+        "feedback": "Feedback",
         "no_reservations": "Du har inte gjort några reservationer ännu.",
         "reserve_server": "Reservera en server"
     },
@@ -359,6 +362,39 @@
         "no_reason": "Ingen anledning angiven",
         "no_bans": "Inga banningar att visa."
     },
+    "feedback": {
+        "title": "Feedback - {site_name}",
+        "description": "Rapportera ett problem eller föreslå en förbättring av {site_name}.",
+        "heading": "Feedback",
+        "intro": "Hade du lagg, en trasig konfiguration eller en server som inte startade? Har du en idé om något som kan bli bättre? Berätta här.",
+        "discord_hint": "Behöver du hjälp direkt? Fråga på Discord.",
+        "login_prompt": "Logga in med Steam för att skicka feedback.",
+        "unavailable": "Ditt konto kan inte skicka feedback just nu.",
+        "reservation_label": "Reservation",
+        "reservation_none": "Gäller ingen specifik reservation",
+        "category_label": "Kategori",
+        "category_placeholder": "Välj en kategori",
+        "categories": {
+            "lag": "Lagg eller prestanda",
+            "connection": "Anslutningsproblem",
+            "config": "Konfiguration eller inställningar",
+            "map": "Kartproblem",
+            "provisioning": "Servern startade inte",
+            "website": "Webbplatsen",
+            "suggestion": "Förslag",
+            "other": "Annat"
+        },
+        "message_label": "Meddelande",
+        "message_placeholder": "Vad hände? Tidpunkter, kartor och allt annat du märkte hjälper.",
+        "context_note": "Tekniska detaljer om den valda reservationen (plats, server, karta, konfiguration) bifogas automatiskt.",
+        "submit": "Skicka feedback",
+        "submitting": "Skickar...",
+        "success_heading": "Tack för din feedback!",
+        "success_body": "Ditt meddelande har skickats till teamet.",
+        "send_another": "Skicka mer feedback",
+        "submit_failed": "Det gick inte att skicka feedback. Försök igen.",
+        "network_error": "Nätverksfel — kontrollera din anslutning och försök igen."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Hittades inte",
@@ -418,7 +454,11 @@
         "command_unsafe": "Kommandoavgränsare och kontrolltecken är inte tillåtna.",
         "command_invalid_name": "Serverkommandots namn är ogiltigt.",
         "command_not_allowed": "Det serverkommandot är inte tillåtet.",
-        "profile_not_public": "Din Steam-profil måste vara offentlig för att skapa reservationer."
+        "profile_not_public": "Din Steam-profil måste vara offentlig för att skapa reservationer.",
+        "feedback_invalid_category": "Välj en kategori för din feedback.",
+        "feedback_message_required": "Skriv ett meddelande innan du skickar.",
+        "feedback_message_too_long": "Ditt meddelande är för långt. Gränsen är {max} tecken.",
+        "feedback_rate_limited": "Du har skickat mycket feedback nyligen. Försök igen senare."
     },
     "language": {
         "label": "Språk"
