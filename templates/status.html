@@ -992,6 +992,10 @@
                 </span>
             </div>
             <div class="flex justify-between text-sm">
+                <span class="text-slate-500">{{ _('status.config_short') }}</span>
+                <span class="text-slate-800">{{ reservation.config_file or '—' }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
                 {% if is_ended %}
                 <span class="text-slate-500">{{ _('status.ended_at') }}</span>
                 <span class="text-slate-800" :title="formatUtc(endedAt)" x-text="formatEndedTime(endedAt)"></span>
