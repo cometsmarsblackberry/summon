@@ -401,7 +401,7 @@ async def _instant_config(
 ) -> dict:
     from app.models.user import User
     from app.services.orchestrator import build_reservation_config
-    from app.services.settings import get_fastdl_url
+    from app.services.settings import get_container_image, get_fastdl_url
     from app.utils.steam import steamid64_to_steamid2
 
     slot = assignment.slot
@@ -409,7 +409,7 @@ async def _instant_config(
     owner = await db.get(User, reservation.user_id) if reservation.user_id else None
     loc = await db.get(EnabledLocation, reservation.location)
     admin_result = await db.execute(select(User.steam_id).where(User.is_admin.is_(True)))
-    desired_image = host.desired_image or (await get_instant_settings(db))["container_image"]
+    desired_image = await get_container_image(db)
     config = build_reservation_config(
         reservation=reservation,
         owner_steam_id=owner.steam_id if owner else "",

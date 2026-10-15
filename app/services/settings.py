@@ -96,15 +96,18 @@ async def get_fastdl_url(db: AsyncSession) -> str:
     return await get_setting("fastdl_url", db, cfg.fastdl_url)
 
 
+async def get_container_image(db: AsyncSession) -> str:
+    """Return the TF2 container image used by cloud servers and Instant hosts."""
+    cfg = get_settings()
+    return await get_setting("container_image", db, cfg.container_image)
+
+
 async def get_instant_settings(db: AsyncSession) -> dict:
-    """Return the Instant-host enablement and shared image settings."""
+    """Return the Instant-host enablement setting."""
     cfg = get_settings()
     enabled_default = "true" if cfg.instant_hosts_enabled else "false"
     return {
         "enabled": (
             await get_setting("instant_hosts_enabled", db, enabled_default)
         ).strip().lower() == "true",
-        "container_image": await get_setting(
-            "instant_container_image", db, cfg.instant_container_image
-        ),
     }

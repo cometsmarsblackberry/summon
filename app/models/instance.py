@@ -83,7 +83,6 @@ class Provider(Base):
     
     # Configurable settings
     instance_plan: Mapped[str] = mapped_column(String(32), nullable=False, default="vhf-1c-1gb")  # Instance type/plan
-    container_image: Mapped[str] = mapped_column(String(128), nullable=False, default="ghcr.io/cometsmarsblackberry/tf2-summon/i386:nightly")
     
     # Max concurrent instances.
     # For providers with global quotas (e.g., Vultr): applies across all regions.

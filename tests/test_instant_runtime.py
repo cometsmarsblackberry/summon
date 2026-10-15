@@ -413,7 +413,6 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 name="Test cloud",
                 billing_model="hourly",
                 instance_plan="small",
-                container_image="example.invalid/tf2:test",
                 instance_limit=1,
                 enabled=True,
             ))
@@ -1176,3 +1175,62 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
                 (7, "legacy-host", "legacy", "8.8.4.4"), tuple(instant_row)
             )
             self.assertEqual([], violations)
+
+    async def _migrate_legacy_images(self, instant_image: str | None):
+        """Migrate a schema that still has per-provider and per-host images."""
+        with tempfile.TemporaryDirectory() as directory:
+            engine = create_async_engine(
+                f"sqlite+aiosqlite:///{Path(directory) / 'images.db'}"
+            )
+            async with engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+                await connection.execute(text(
+                    "ALTER TABLE providers ADD COLUMN "
+                    "container_image VARCHAR(128) NOT NULL DEFAULT ''"
+                ))
+                await connection.execute(text(
+                    "ALTER TABLE instant_hosts ADD COLUMN desired_image VARCHAR(255)"
+                ))
+                await connection.execute(text(
+                    "INSERT INTO providers "
+                    "(code,name,billing_model,instance_plan,container_image,"
+                    "instance_limit,enabled,display_order) VALUES "
+                    "('off','Off','hourly','plan','example.invalid/tf2:disabled',1,0,0),"
+                    "('on','On','hourly','plan','example.invalid/tf2:cloud',1,1,1)"
+                ))
+                if instant_image is not None:
+                    await connection.execute(text(
+                        "INSERT INTO site_settings (key,value) "
+                        "VALUES ('instant_container_image', :value)"
+                    ), {"value": instant_image})
+                await _create_and_migrate(connection)
+                # A second startup must leave the folded setting alone.
+                await _create_and_migrate(connection)
+
+                settings = dict((await connection.execute(text(
+                    "SELECT key, value FROM site_settings"
+                ))).all())
+                columns = {
+                    table: {
+                        row[1] for row in (
+                            await connection.execute(text(f"PRAGMA table_info({table})"))
+                        ).all()
+                    }
+                    for table in ("providers", "instant_hosts")
+                }
+            await engine.dispose()
+        return settings, columns
+
+    async def test_instant_image_setting_becomes_shared_image(self):
+        settings, columns = await self._migrate_legacy_images("example.invalid/tf2:instant")
+
+        self.assertEqual("example.invalid/tf2:instant", settings["container_image"])
+        self.assertNotIn("instant_container_image", settings)
+        self.assertNotIn("container_image", columns["providers"])
+        self.assertNotIn("desired_image", columns["instant_hosts"])
+
+    async def test_enabled_provider_image_becomes_shared_image_without_instant_setting(self):
+        settings, columns = await self._migrate_legacy_images(None)
+
+        self.assertEqual("example.invalid/tf2:cloud", settings["container_image"])
+        self.assertNotIn("container_image", columns["providers"])

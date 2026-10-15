@@ -129,7 +129,6 @@ class UpdateProviderRequest(BaseModel):
     name: str | None = None
     billing_model: str | None = None
     instance_plan: str | None = None
-    container_image: str | None = None
     instance_limit: int | None = None
     enabled: bool | None = None
     display_order: int | None = None
@@ -297,7 +296,6 @@ async def admin_panel(
             "name": p.name,
             "billing_model": p.billing_model,
             "instance_plan": p.instance_plan,
-            "container_image": p.container_image,
             "instance_limit": p.instance_limit,
             "enabled": p.enabled,
             "display_order": p.display_order,
@@ -365,10 +363,11 @@ async def admin_panel(
     ]
 
     # Get rate limit settings, server settings, and steam trust settings
-    from app.services.settings import get_rate_limit_settings, get_fastdl_url, get_steam_trust_settings, get_reservation_settings
+    from app.services.settings import get_rate_limit_settings, get_fastdl_url, get_container_image, get_steam_trust_settings, get_reservation_settings
     from app.services.captcha import get_captcha_settings
     rate_limit_settings = await get_rate_limit_settings(db)
     fastdl_url = await get_fastdl_url(db)
+    container_image = await get_container_image(db)
     steam_trust_settings = await get_steam_trust_settings(db)
     reservation_settings = await get_reservation_settings(db)
     captcha_settings = await get_captcha_settings(db)
@@ -418,6 +417,7 @@ async def admin_panel(
             "total_reservations": total_count,
             "rate_limit_settings": rate_limit_settings,
             "fastdl_url": fastdl_url,
+            "container_image": container_image,
             "steam_trust_settings": steam_trust_settings,
             "reservation_settings": reservation_settings,
             "captcha_settings": captcha_settings,
@@ -651,7 +651,6 @@ class CreateInstantHostRequest(BaseModel):
     location: str
     slot_count: int = 1
     base_port: int = 27015
-    desired_image: str | None = None
 
 
 class UpdateInstantHostRequest(BaseModel):
@@ -660,7 +659,6 @@ class UpdateInstantHostRequest(BaseModel):
     public_ipv4: str | None = None
     slot_count: int | None = None
     base_port: int | None = None
-    desired_image: str | None = None
     version_pin: str | None = None
 
 
@@ -670,10 +668,6 @@ class InstantHostStateRequest(BaseModel):
 
 class InstantHostDrainRequest(BaseModel):
     draining: bool
-
-
-class PrepareInstantImageRequest(BaseModel):
-    image: str | None = None
 
 
 def _instant_host_install_payload(token: str) -> dict[str, str]:
@@ -762,7 +756,6 @@ async def create_instant_host(
             location=request.location,
             slot_count=request.slot_count,
             base_port=request.base_port,
-            desired_image=request.desired_image,
         )
     except InstantHostError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -786,7 +779,7 @@ async def update_instant_host(
 ):
     from app.services.instant_hosts import (
         InstantHostError, configure_slots, generate_slot_ports,
-        host_has_open_assignments, validate_image_reference, validate_public_ipv4,
+        host_has_open_assignments, validate_public_ipv4,
     )
     host = await _load_host_or_404(host_id, db)
     capacity_change = request.slot_count is not None or request.base_port is not None
@@ -820,14 +813,6 @@ async def update_instant_host(
         if duplicate.scalar_one_or_none() is not None:
             raise HTTPException(status_code=400, detail="Another Instant host uses this IPv4 address")
         host.public_ipv4 = address
-    if "desired_image" in request.model_fields_set:
-        try:
-            host.desired_image = (
-                validate_image_reference(request.desired_image)
-                if request.desired_image else None
-            )
-        except InstantHostError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "version_pin" in request.model_fields_set:
         version_pin = request.version_pin.strip() if request.version_pin else ""
         if len(version_pin) > 64 or any(ch.isspace() for ch in version_pin):
@@ -962,19 +947,12 @@ async def rotate_instant_host_credential(
 @router.post("/instant-hosts/{host_id}/image")
 async def prepare_instant_host_image(
     host_id: int,
-    request: PrepareInstantImageRequest,
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.services.instant_hosts import InstantHostError, validate_image_reference
-    from app.services.settings import get_instant_settings
+    from app.services.settings import get_container_image
     host = await _load_host_or_404(host_id, db)
-    if request.image:
-        try:
-            host.desired_image = validate_image_reference(request.image)
-        except InstantHostError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    desired = host.desired_image or (await get_instant_settings(db))["container_image"]
+    desired = await get_container_image(db)
     host.image_status = "preparing"
     host.image_error = None
     await db.commit()
@@ -1133,8 +1111,6 @@ async def update_provider(
         provider.billing_model = request.billing_model
     if request.instance_plan is not None:
         provider.instance_plan = request.instance_plan
-    if request.container_image is not None:
-        provider.container_image = request.container_image
     if request.instance_limit is not None:
         provider.instance_limit = request.instance_limit
     if request.enabled is not None:
@@ -1149,7 +1125,6 @@ async def update_provider(
         "name": provider.name,
         "billing_model": provider.billing_model,
         "instance_plan": provider.instance_plan,
-        "container_image": provider.container_image,
         "enabled": provider.enabled,
     }
 
@@ -1761,9 +1736,10 @@ class UpdateSettingsRequest(BaseModel):
     captcha_trust_after_n: int | None = None
     captcha_min_tf2_hours: int | None = None
     captcha_min_account_age_days: int | None = None
-    # Instant host availability and site-wide TF2 image
+    # TF2 container image for cloud servers and Instant hosts
+    container_image: str | None = None
+    # Instant host availability
     instant_hosts_enabled: bool | None = None
-    instant_container_image: str | None = None
 
 
 @router.get("/settings")
@@ -1772,9 +1748,12 @@ async def get_settings_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Get current rate limit settings."""
-    from app.services.settings import get_instant_settings, get_rate_limit_settings
+    from app.services.settings import (
+        get_container_image, get_instant_settings, get_rate_limit_settings,
+    )
     return {
         **await get_rate_limit_settings(db),
+        "container_image": await get_container_image(db),
         "instant": await get_instant_settings(db),
     }
 
@@ -1786,7 +1765,7 @@ async def update_settings_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Update rate limit settings."""
-    from app.services.settings import set_setting
+    from app.services.settings import get_container_image, set_setting
 
     # Reservation defaults (must be >= 1)
     reservation_mapping = {
@@ -1882,28 +1861,30 @@ async def update_settings_endpoint(
             "true" if request.instant_hosts_enabled else "false",
             db,
         )
-    if request.instant_container_image is not None:
-        image = request.instant_container_image.strip()
+    if request.container_image is not None:
+        image = request.container_image.strip()
         if not image or len(image) > 255 or any(ch.isspace() for ch in image):
-            raise HTTPException(status_code=400, detail="Invalid Instant container image")
-        await set_setting("instant_container_image", image, db)
-        inheriting_hosts = list((await db.execute(select(InstantHost).where(
-            InstantHost.deleted_at.is_(None),
-            InstantHost.desired_image.is_(None),
-        ))).scalars().all())
-        for host in inheriting_hosts:
-            host.image_status = "preparing"
-            host.image_error = None
-        await db.commit()
-        from app.routers.internal import send_instant_command
-        for host in inheriting_hosts:
-            await send_instant_command(host.id, {
-                "type": "image.prepare",
-                "protocol": 1,
-                "command_id": uuid.uuid4().hex,
-                "host_id": host.id,
-                "image": image,
-            })
+            raise HTTPException(status_code=400, detail="Invalid container image")
+        # The admin page sends every setting on save; only an actual image
+        # change should make Instant hosts prepare it.
+        if image != await get_container_image(db):
+            await set_setting("container_image", image, db)
+            hosts = list((await db.execute(select(InstantHost).where(
+                InstantHost.deleted_at.is_(None),
+            ))).scalars().all())
+            for host in hosts:
+                host.image_status = "preparing"
+                host.image_error = None
+            await db.commit()
+            from app.routers.internal import send_instant_command
+            for host in hosts:
+                await send_instant_command(host.id, {
+                    "type": "image.prepare",
+                    "protocol": 1,
+                    "command_id": uuid.uuid4().hex,
+                    "host_id": host.id,
+                    "image": image,
+                })
     return {"message": "Settings updated"}
 
 

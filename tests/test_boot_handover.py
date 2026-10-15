@@ -66,7 +66,7 @@ class BootHandoverTests(unittest.IsolatedAsyncioTestCase):
         now = datetime.utcnow()
         self.created_at = (now - timedelta(minutes=12)).replace(microsecond=0)
         async with self.sessions() as db:
-            db.add(Provider(code="vultr", name="Vultr", billing_model="hourly", container_image="image"))
+            db.add(Provider(code="vultr", name="Vultr", billing_model="hourly"))
             await db.commit()
             db.add(EnabledLocation(code="vultr-fra", name="Frankfurt", city="Frankfurt",
                                    provider="vultr", provider_region="fra"))

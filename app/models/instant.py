@@ -76,7 +76,6 @@ class InstantHost(Base):
     system_stats: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    desired_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ready_image_digest: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unprepared")
     image_error: Mapped[str | None] = mapped_column(Text, nullable=True)

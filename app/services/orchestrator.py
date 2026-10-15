@@ -385,8 +385,9 @@ async def provision_instance_for_reservation(
     owner_name = owner_user.display_name if owner_user else ""
     location_city = loc_record.city if loc_record.city else reservation.location
 
-    from app.services.settings import get_fastdl_url
+    from app.services.settings import get_container_image, get_fastdl_url
     fastdl_url = await get_fastdl_url(db)
+    container_image = await get_container_image(db)
 
     # Update reservation status and increment attempt counter
     reservation.status = ReservationStatus.PROVISIONING
@@ -422,13 +423,11 @@ async def provision_instance_for_reservation(
             logger.warning(f"Provider '{provider_code}' not configured (no API key?), skipping")
             continue
 
-        # Look up provider record for container_image
         from app.models.instance import Provider
         provider_result = await db.execute(
             select(Provider).where(Provider.code == provider_code)
         )
         provider_record = provider_result.scalar_one_or_none()
-        container_image = provider_record.container_image if provider_record else "ghcr.io/cometsmarsblackberry/tf2-summon/i386:nightly"
 
         # Check warm pool for this specific provider
         warm_instance = await get_warm_instance(reservation.location, db, provider_code=provider_code)

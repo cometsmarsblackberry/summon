@@ -191,7 +191,7 @@ def _export_providers(conn: sqlite3.Connection) -> list[dict]:
         return []
     cols = [
         "code", "name", "billing_model", "instance_plan",
-        "container_image", "instance_limit", "enabled", "display_order",
+        "instance_limit", "enabled", "display_order",
     ]
     existing = [c for c in cols if _table_has_column(conn, "providers", c)]
     cur = conn.execute(
@@ -220,7 +220,7 @@ def _export_instant_hosts(conn: sqlite3.Connection) -> list[dict]:
     if not _table_exists(conn, "instant_hosts"):
         return []
     host_columns = [
-        "id", "name", "location", "public_ipv4", "desired_image", "version_pin",
+        "id", "name", "location", "public_ipv4", "version_pin",
     ]
     existing = [
         column for column in host_columns
@@ -404,12 +404,11 @@ def _import_providers(conn: sqlite3.Connection, records: list[dict], mode: str) 
             if mode == "update":
                 conn.execute(
                     "UPDATE providers SET name=?, billing_model=?, instance_plan=?, "
-                    "container_image=?, instance_limit=?, enabled=?, display_order=? "
+                    "instance_limit=?, enabled=?, display_order=? "
                     "WHERE code=?",
                     (
                         rec["name"], rec.get("billing_model", "hourly"),
                         rec.get("instance_plan", "vhf-1c-1gb"),
-                        rec.get("container_image", ""),
                         rec.get("instance_limit", 10),
                         rec.get("enabled", 1), rec.get("display_order", 0),
                         rec["code"],
@@ -421,14 +420,13 @@ def _import_providers(conn: sqlite3.Connection, records: list[dict], mode: str) 
         else:
             conn.execute(
                 "INSERT INTO providers "
-                "(code, name, billing_model, instance_plan, container_image, "
+                "(code, name, billing_model, instance_plan, "
                 "instance_limit, enabled, display_order) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     rec["code"], rec["name"],
                     rec.get("billing_model", "hourly"),
                     rec.get("instance_plan", "vhf-1c-1gb"),
-                    rec.get("container_image", ""),
                     rec.get("instance_limit", 10),
                     rec.get("enabled", 1), rec.get("display_order", 0),
                 ),
@@ -528,14 +526,11 @@ def _import_instant_hosts(conn: sqlite3.Connection, records: list[dict], mode: s
                 skipped += 1
                 continue
             conn.execute(
-                "UPDATE instant_hosts SET name=?, location=?, desired_image=?, version_pin=?, "
+                "UPDATE instant_hosts SET name=?, location=?, version_pin=?, "
                 "enabled=0, draining=0, credential_hash=NULL, enrollment_token_hash=NULL, "
                 "enrollment_expires_at=NULL, enrollment_used_at=NULL, health_status='unenrolled' "
                 "WHERE id=?",
-                (
-                    rec["name"], rec["location"], rec.get("desired_image"),
-                    rec.get("version_pin"), host_id,
-                ),
+                (rec["name"], rec["location"], rec.get("version_pin"), host_id),
             )
             conn.execute("UPDATE instant_slots SET enabled=0 WHERE host_id=?", (host_id,))
 
@@ -576,11 +571,11 @@ def _import_instant_hosts(conn: sqlite3.Connection, records: list[dict], mode: s
             cursor = conn.execute(
                 "INSERT INTO instant_hosts "
                 "(name, location, public_ipv4, enabled, draining, health_status, "
-                "image_status, update_status, update_auto_drained, desired_image, version_pin) "
-                "VALUES (?, ?, ?, 0, 0, 'unenrolled', 'unprepared', 'idle', 0, ?, ?)",
+                "image_status, update_status, update_auto_drained, version_pin) "
+                "VALUES (?, ?, ?, 0, 0, 'unenrolled', 'unprepared', 'idle', 0, ?)",
                 (
                     rec["name"], rec["location"], rec["public_ipv4"],
-                    rec.get("desired_image"), rec.get("version_pin"),
+                    rec.get("version_pin"),
                 ),
             )
             host_id = cursor.lastrowid
@@ -651,14 +646,16 @@ def _import_maps(conn: sqlite3.Connection, records: list[dict], mode: str) -> di
 def _import_settings(conn: sqlite3.Connection, records: list[dict], mode: str) -> dict:
     created = updated = skipped = 0
     for rec in records:
+        # Accept the legacy Instant-only image key.
+        key = "container_image" if rec["key"] == "instant_container_image" else rec["key"]
         cur = conn.execute(
-            "SELECT key FROM site_settings WHERE key = ?", (rec["key"],)
+            "SELECT key FROM site_settings WHERE key = ?", (key,)
         )
         if cur.fetchone():
             if mode == "update":
                 conn.execute(
                     "UPDATE site_settings SET value = ? WHERE key = ?",
-                    (rec["value"], rec["key"]),
+                    (rec["value"], key),
                 )
                 updated += 1
             else:
@@ -666,7 +663,7 @@ def _import_settings(conn: sqlite3.Connection, records: list[dict], mode: str) -
         else:
             conn.execute(
                 "INSERT INTO site_settings (key, value) VALUES (?, ?)",
-                (rec["key"], rec["value"]),
+                (key, rec["value"]),
             )
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped}

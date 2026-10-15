@@ -337,16 +337,15 @@ def _host_token(websocket: WebSocket) -> str | None:
 
 
 async def _send_host_configuration(host: InstantHost, websocket: WebSocket) -> None:
-    from app.services.settings import get_instant_settings
+    from app.services.settings import get_container_image
 
     async with async_session_maker() as db:
-        instant_settings = await get_instant_settings(db)
+        desired_image = await get_container_image(db)
         slots = list((await db.execute(
             select(InstantSlot)
             .where(InstantSlot.host_id == host.id, InstantSlot.enabled.is_(True))
             .order_by(InstantSlot.slot_index)
         )).scalars().all())
-    desired_image = host.desired_image or instant_settings["container_image"]
     sent = await _send_instant_message(host.id, websocket, {
         "type": "host.configure",
         "protocol": 1,
@@ -1064,9 +1063,9 @@ async def _send_initial_config(instance_id: str, cloud_instance: CloudInstance, 
 
         # Build the full config
         from app.models.user import User
-        from app.models.instance import EnabledLocation, Provider
+        from app.models.instance import EnabledLocation
         from app.services.orchestrator import build_reservation_config
-        from app.services.settings import get_fastdl_url
+        from app.services.settings import get_container_image, get_fastdl_url
 
         user_result = await db.execute(select(User).where(User.id == reservation.user_id))
         owner = user_result.scalar_one_or_none()
@@ -1076,13 +1075,7 @@ async def _send_initial_config(instance_id: str, cloud_instance: CloudInstance, 
         )
         loc = loc_result.scalar_one_or_none()
 
-        container_image = ""
-        if loc:
-            prov_result = await db.execute(select(Provider).where(Provider.code == loc.provider))
-            prov = prov_result.scalar_one_or_none()
-            if prov:
-                container_image = prov.container_image
-
+        container_image = await get_container_image(db)
         fastdl_url = await get_fastdl_url(db)
 
         from app.services.orchestrator import get_admin_steam_ids
