@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     # default and can also be changed from the admin settings API.
     instant_hosts_enabled: bool = False
     instant_host_offline_seconds: int = 30
+    # How long a host stays out of scheduling after a host-level start failure
+    # (Podman, disk, image, ...). Administrators can clear it sooner.
+    instant_host_quarantine_seconds: int = 600
     instant_protocol_min: int = 1
     instant_protocol_max: int = 1
     agent_version: str = "0.2.6"

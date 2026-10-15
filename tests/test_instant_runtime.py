@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -48,7 +49,11 @@ from app.routers.internal import (
     pending_instant_rcon,
     send_instant_command,
 )
-from app.routers.admin import deregister_instant_host, update_instant_host_agent
+from app.routers.admin import (
+    clear_instant_host_quarantine,
+    deregister_instant_host,
+    update_instant_host_agent,
+)
 from app.routers.status import _build_status
 from scripts.migrate import _export_instant_hosts, _import_instant_hosts
 
@@ -975,6 +980,150 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("quarantined", host.health_status)
             self.assertIsNotNone(host.reconciliation_error)
             self.assertEqual("reconciliation_conflict", slot.error_code)
+
+    HEARTBEAT = {
+        "type": "host.status",
+        "agent_version": "test",
+        "protocol_version": 1,
+        "protocol_min": 1,
+        "protocol_max": 1,
+        "preflight_ok": True,
+        "health_error": "",
+        "image": {"status": "ready", "ready_digest": "sha256:prepared"},
+    }
+
+    async def test_reconciliation_conflict_outlasts_heartbeats_until_clean_inventory(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.41", "conflict-heartbeat", slots=2)
+            host_id = host.id
+            slot = (await db.execute(select(InstantSlot).where(
+                InstantSlot.host_id == host.id, InstantSlot.slot_index == 0
+            ))).scalar_one()
+            await _reconcile_host_inventory(host, [{
+                "assignment_id": 999,
+                "slot_id": slot.id,
+                "generation": 1,
+                "container_id": "unknown-container",
+            }], db)
+
+        with patch("app.routers.internal.async_session_maker", self.sessions):
+            await _handle_host_status(host_id, self.HEARTBEAT, hello=False)
+
+        async with self.sessions() as db:
+            host = await db.get(InstantHost, host_id)
+            self.assertEqual("ready", host.health_status)
+            self.assertEqual(0, await count_available_instant_slots("instant-only", db))
+            await _reconcile_host_inventory(host, [], db)
+            # The conflicting slot stays quarantined; the rest of the host returns.
+            self.assertEqual(1, await count_available_instant_slots("instant-only", db))
+
+    async def test_host_start_failure_quarantine_outlasts_heartbeats(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.42", "broken-podman")
+            host_id = host.id
+            reservation = self.reservation(410)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            with patch("app.services.runtime._fallback_to_cloud", new=AsyncMock()):
+                await handle_instant_start_failure(
+                    assignment,
+                    reservation,
+                    db,
+                    failure_class="podman",
+                    failure_code="podman_run",
+                    failure_message="no space left on device",
+                )
+
+        with patch("app.routers.internal.async_session_maker", self.sessions):
+            await _handle_host_status(host_id, self.HEARTBEAT, hello=False)
+
+        async with self.sessions() as db:
+            host = await db.get(InstantHost, host_id)
+            self.assertEqual("ready", host.health_status)
+            self.assertIsNone(host.health_error)
+            self.assertEqual("no space left on device", host.quarantine_reason)
+            self.assertTrue(serialize_host(host, slots=[])["quarantined"])
+            self.assertEqual(0, await count_available_instant_slots("instant-only", db))
+
+            host.quarantined_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await db.commit()
+            self.assertEqual(1, await count_available_instant_slots("instant-only", db))
+
+            host.quarantined_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+            await db.commit()
+            self.assertEqual(0, await count_available_instant_slots("instant-only", db))
+            await clear_instant_host_quarantine(host_id, user=None, db=db)
+            self.assertEqual(1, await count_available_instant_slots("instant-only", db))
+
+    async def test_disconnect_excludes_host_only_until_next_heartbeat(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.43", "flaky-network")
+            host_id = host.id
+            reservation = self.reservation(420)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            with patch("app.services.runtime._fallback_to_cloud", new=AsyncMock()):
+                await handle_instant_start_failure(
+                    assignment,
+                    reservation,
+                    db,
+                    failure_class="host",
+                    failure_code="disconnected",
+                    failure_message="Host disconnected before accepting start command",
+                )
+            self.assertIsNone(host.quarantined_until)
+            self.assertEqual(0, await count_available_instant_slots("instant-only", db))
+
+        with patch("app.routers.internal.async_session_maker", self.sessions):
+            await _handle_host_status(host_id, self.HEARTBEAT, hello=False)
+
+        async with self.sessions() as db:
+            self.assertEqual(1, await count_available_instant_slots("instant-only", db))
+
+    async def _offline_host_with_open_assignment(self, db, address, number, status):
+        host = await self.add_ready_host(db, address, f"dead-{number}")
+        reservation = self.reservation(number)
+        db.add(reservation)
+        await db.commit()
+        assignment = await claim_instant_slot(reservation, db)
+        reservation.status = status
+        host.last_heartbeat_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        await db.commit()
+        return host, assignment
+
+    async def test_offline_host_with_finished_reservation_can_be_deregistered(self):
+        async with self.sessions() as db:
+            host, assignment = await self._offline_host_with_open_assignment(
+                db, "203.0.113.44", 430, ReservationStatus.ENDED
+            )
+
+            response = await deregister_instant_host(host.id, user=None, db=db)
+
+            self.assertEqual({"id": host.id, "deleted": True}, response)
+            self.assertEqual("abandoned", assignment.state)
+            self.assertIsNotNone(assignment.closed_at)
+
+    async def test_deregister_refuses_running_reservation_or_online_host(self):
+        async with self.sessions() as db:
+            running_host, _ = await self._offline_host_with_open_assignment(
+                db, "203.0.113.45", 440, ReservationStatus.ACTIVE
+            )
+            with self.assertRaises(HTTPException) as running:
+                await deregister_instant_host(running_host.id, user=None, db=db)
+            self.assertEqual(409, running.exception.status_code)
+
+            online_host, _ = await self._offline_host_with_open_assignment(
+                db, "203.0.113.46", 441, ReservationStatus.ENDED
+            )
+            online_host.last_heartbeat_at = datetime.now(timezone.utc)
+            await db.commit()
+            with self.assertRaises(HTTPException) as online:
+                await deregister_instant_host(online_host.id, user=None, db=db)
+            self.assertEqual(409, online.exception.status_code)
+            self.assertIsNone(running_host.deleted_at)
+            self.assertIsNone(online_host.deleted_at)
 
     async def test_import_refuses_to_rewrite_host_with_open_assignment(self):
         async with self.sessions() as db:

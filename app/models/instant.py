@@ -71,6 +71,11 @@ class InstantHost(Base):
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     health_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unenrolled")
     health_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # health_status and health_error mirror the agent's heartbeats, which
+    # rewrite them every few seconds. A quarantine Summon imposes after a
+    # host-level start failure is kept here so heartbeats cannot lift it.
+    quarantined_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     preflight_report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     reconciliation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     system_stats: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

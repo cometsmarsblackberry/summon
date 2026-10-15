@@ -1027,6 +1027,19 @@ async def clear_instant_slot_error(
     return {"id": slot.id, "cleared": True}
 
 
+@router.post("/instant-hosts/{host_id}/clear-quarantine")
+async def clear_instant_host_quarantine(
+    host_id: int,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    host = await _load_host_or_404(host_id, db)
+    host.quarantined_until = None
+    host.quarantine_reason = None
+    await db.commit()
+    return {"id": host.id, "quarantined": False}
+
+
 @router.delete("/instant-hosts/{host_id}")
 async def deregister_instant_host(
     host_id: int,
