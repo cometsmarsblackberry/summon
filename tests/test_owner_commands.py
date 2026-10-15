@@ -141,6 +141,45 @@ class OwnerCommandPolicyTests(unittest.TestCase):
                     validate_owner_command_line(command, allowed)
                 self.assertEqual("invalid_arguments", invalid.exception.code)
 
+    def test_exec_takes_one_config_name_outside_the_allowlist(self):
+        allowed = ("mp_timelimit",)
+        accepted = (
+            "exec etf2l_6v6_5cp",
+            "EXEC rgl_6s_koth_bo5.cfg",
+            "exec etf2l_6v6_5cp.CFG",
+            "exec summon_reset",
+            "exec " + "a" * 63 + ".cfg",
+        )
+        for command in accepted:
+            with self.subTest(command=command):
+                self.assertEqual(
+                    command, validate_owner_command_line(f" {command} ", allowed)
+                )
+
+        rejected = (
+            "exec",
+            "exec etf2l_6v6_5cp extra",
+            "exec ../server",
+            "exec sourcemod/sourcemod",
+            "exec etf2l-6v6",
+            "exec .cfg",
+            "exec etf2l_6v6_5cp.txt",
+            'exec "etf2l_6v6_5cp"',
+            "exec " + "a" * 64,
+        )
+        for command in rejected:
+            with self.subTest(command=command):
+                with self.assertRaises(OwnerCommandValidationError) as invalid:
+                    validate_owner_command_line(command, allowed)
+                self.assertEqual("invalid_config", invalid.exception.code)
+
+        with self.assertRaises(OwnerCommandValidationError) as invalid:
+            validate_owner_command_line("exec etf2l_6v6_5cp; quit", allowed)
+        self.assertEqual("unsafe_command", invalid.exception.code)
+
+    def test_checked_in_allowlist_excludes_exec(self):
+        self.assertNotIn("exec", get_owner_commands())
+
     def test_checked_in_allowlist_includes_changelevel(self):
         self.assertIn("changelevel", get_owner_commands())
 
@@ -264,6 +303,7 @@ class OwnerCommandEndpointTests(unittest.IsolatedAsyncioTestCase):
                 db=object(),
             )
         self.assertIn("mp_timelimit", owner["commands"])
+        self.assertEqual(1, owner["commands"].count("exec"))
         self.assertEqual(owner, admin)
 
     async def test_inactive_and_non_owner_requests_are_rejected(self):
@@ -323,6 +363,50 @@ class OwnerCommandEndpointTests(unittest.IsolatedAsyncioTestCase):
             "sm_summon_owner_command 76561198000000000 mp_timelimit 30",
             timeout=12.0,
         )
+
+    async def test_exec_is_sent_to_the_plugin_and_bad_names_are_rejected(self):
+        transport = {
+            "output": "SUMMON_OWNER_COMMAND_RESULT OK\nLoaded config: etf2l_6v6_5cp",
+            "error": None,
+        }
+        with (
+            patch(
+                "app.routers.reservations.get_reservation_by_id",
+                new=AsyncMock(return_value=self.reservation),
+            ),
+            patch(
+                "app.routers.reservations.awaited_rcon_reservation_runtime",
+                new=AsyncMock(return_value=transport),
+            ) as execute,
+            patch("app.routers.reservations.t", side_effect=lambda key: key),
+        ):
+            response = await run_reservation_command(
+                9,
+                OwnerCommandRequest(command="exec etf2l_6v6_5cp.cfg"),
+                user=self.user,
+                db=object(),
+            )
+            with self.assertRaises(HTTPException) as rejected:
+                await run_reservation_command(
+                    9,
+                    OwnerCommandRequest(command="exec ../server"),
+                    user=self.user,
+                    db=object(),
+                )
+
+        self.assertTrue(response["ok"])
+        self.assertEqual("Loaded config: etf2l_6v6_5cp", response["output"])
+        execute.assert_awaited_once_with(
+            self.reservation,
+            ANY,
+            "sm_summon_owner_command 76561198000000000 exec etf2l_6v6_5cp.cfg",
+            timeout=12.0,
+        )
+        self.assertEqual(400, rejected.exception.status_code)
+        self.assertEqual({
+            "code": "invalid_config",
+            "message": "errors.invalid_config",
+        }, rejected.exception.detail)
 
     async def test_plugin_policy_rejection_is_a_completed_attempt(self):
         transport = {

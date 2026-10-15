@@ -596,7 +596,10 @@ async def get_reservation_commands(
         user, await get_reservation_by_id(reservation_id, db)
     )
     try:
-        from app.services.owner_commands import get_owner_commands
+        from app.services.owner_commands import (
+            OWNER_CONFIG_COMMAND,
+            get_owner_commands,
+        )
         commands = get_owner_commands()
     except Exception:
         logger.exception(
@@ -608,7 +611,8 @@ async def get_reservation_commands(
             status_code=503,
             detail=t("errors.command_interface_unavailable"),
         )
-    return {"commands": list(commands)}
+    # Suggest exec too; the console accepts it for loading configs.
+    return {"commands": list(dict.fromkeys((*commands, OWNER_CONFIG_COMMAND)))}
 
 
 @router.post("/{reservation_id}/commands")
@@ -643,6 +647,7 @@ async def run_reservation_command(
             "invalid_command": "errors.command_invalid_name",
             "command_not_allowed": "errors.command_not_allowed",
             "invalid_arguments": "errors.invalid_map_name",
+            "invalid_config": "errors.invalid_config",
         }.get(exc.code, "errors.command_failed")
         logger.warning(
             "Owner command rejected reservation=%s actor=%s command=%r outcome=%s",
