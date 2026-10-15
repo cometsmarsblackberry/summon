@@ -28,6 +28,11 @@ MAX_COMMAND_BYTES = 511
 MAX_COMMAND_NAME_BYTES = 63
 MAX_OUTPUT_BYTES = 4096
 _COMMAND_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+# "exec <config>" is accepted outside the allowlist because the plugin routes it
+# through !config's checks rather than the native exec, which would run every
+# command in the file.  The plugin decides whether the config exists.
+OWNER_CONFIG_COMMAND = "exec"
+_CONFIG_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,63}(?:\.cfg)?$", re.IGNORECASE)
 _ERROR_CODE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
@@ -223,6 +228,13 @@ def validate_owner_command_line(
         raise OwnerCommandValidationError(
             "invalid_command_name", "The command name is invalid."
         )
+    if operation.lower() == OWNER_CONFIG_COMMAND:
+        arguments = [argument for argument in command.split(" ")[1:] if argument]
+        if len(arguments) != 1 or _CONFIG_NAME_RE.fullmatch(arguments[0]) is None:
+            raise OwnerCommandValidationError(
+                "invalid_config", "Exec requires exactly one config name."
+            )
+        return command
     allowed = commands if commands is not None else get_owner_commands()
     if operation.lower() not in set(allowed):
         raise OwnerCommandValidationError(

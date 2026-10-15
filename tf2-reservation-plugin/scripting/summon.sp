@@ -18,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.5.1"
+#define PLUGIN_VERSION "1.5.2"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -28,6 +28,10 @@
 #define MAX_OWNER_COMMAND_NAME 64
 #define MAX_OWNER_COMMAND_LINE 512
 #define MAX_OWNER_COMMAND_RESPONSE 4096
+// Owners type "exec <config>" out of habit. It is never forwarded to the
+// native exec: a config is a command script, so that would grant every
+// command in every reachable .cfg. It loads through !config's checks instead.
+#define OWNER_CONFIG_COMMAND "exec"
 #define OWNER_COMMAND_RESULT_MARKER "SUMMON_OWNER_COMMAND_RESULT"
 
 // ConVars - set by agent RCON at boot
@@ -581,6 +585,32 @@ bool IsSafeMapName(const char[] mapName)
     return true;
 }
 
+bool GetOwnerConfigName(const char[] value, char[] name, int nameSize)
+{
+    // Accept the "exec name.cfg" spelling, but only as a plain identifier so
+    // the name cannot select a path or a different file after truncation.
+    int length = strlen(value);
+    if (length > 4 && StrEqual(value[length - 4], ".cfg", false))
+        length -= 4;
+
+    if (length <= 0 || length >= nameSize)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = value[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        if (!isLetter && !isDigit && character != '_')
+            return false;
+    }
+
+    strcopy(name, length + 1, value);
+    return true;
+}
+
 bool AreOwnerCommandArgumentsAllowed(
     const char[] operation,
     int valueArgumentCount,
@@ -589,6 +619,14 @@ bool AreOwnerCommandArgumentsAllowed(
 {
     if (StrEqual(operation, "changelevel"))
         return valueArgumentCount == 1 && IsSafeMapName(firstValue);
+
+    if (StrEqual(operation, OWNER_CONFIG_COMMAND))
+    {
+        char configName[64];
+        return valueArgumentCount == 1
+            && GetOwnerConfigName(firstValue, configName, sizeof(configName))
+            && IsAllowedConfig(configName);
+    }
 
     if (!StrEqual(operation, "mp_tournament_whitelist"))
         return true;
@@ -782,9 +820,9 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     if (!GetClientAuthId(client, AuthId_SteamID64, actorSteamID, sizeof(actorSteamID)))
         strcopy(actorSteamID, sizeof(actorSteamID), "unknown");
 
-    char whitelistPath[PLATFORM_MAX_PATH];
+    char firstValue[PLATFORM_MAX_PATH];
     if (args >= 2)
-        GetCmdArg(2, whitelistPath, sizeof(whitelistPath));
+        GetCmdArg(2, firstValue, sizeof(firstValue));
 
     char response[MAX_OWNER_COMMAND_RESPONSE];
     char errorCode[64];
@@ -796,7 +834,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
         commandLine,
         commandLength,
         args - 1,
-        whitelistPath,
+        firstValue,
         response,
         sizeof(response),
         errorCode,
@@ -812,7 +850,8 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
         return Plugin_Handled;
     }
 
-    if (!IsClientConnected(client))
+    // A loaded config is already announced to everyone, including the owner.
+    if (!IsClientConnected(client) || StrEqual(operation, OWNER_CONFIG_COMMAND))
         return Plugin_Handled;
 
     if (response[0] != '\0')
@@ -851,7 +890,7 @@ bool ExecuteOwnerServerCommand(
     const char[] commandLine,
     int commandLength,
     int valueArgumentCount,
-    const char[] whitelistPath,
+    const char[] firstValue,
     char[] response,
     int responseSize,
     char[] errorCode,
@@ -889,7 +928,8 @@ bool ExecuteOwnerServerCommand(
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
 
-    if (!g_mOwnerCommandAllowlist.ContainsKey(operation))
+    bool isConfigCommand = StrEqual(operation, OWNER_CONFIG_COMMAND);
+    if (!isConfigCommand && !g_mOwnerCommandAllowlist.ContainsKey(operation))
         return OwnerCommandFailure(
             actorSteamID, commandLine, "command_not_allowed",
             "That server command is not allowed.",
@@ -915,9 +955,16 @@ bool ExecuteOwnerServerCommand(
     }
 
     if (!AreOwnerCommandArgumentsAllowed(
-        operation, valueArgumentCount, whitelistPath
+        operation, valueArgumentCount, firstValue
     ))
     {
+        if (isConfigCommand)
+            return OwnerCommandFailure(
+                actorSteamID, commandLine, "unknown_config",
+                "Unknown config. Use !config to see available options.",
+                errorCode, errorCodeSize, errorMessage, errorMessageSize
+            );
+
         char argumentError[256];
         if (StrEqual(operation, "changelevel"))
         {
@@ -949,6 +996,17 @@ bool ExecuteOwnerServerCommand(
             "Please wait before running another server command.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
+
+    if (isConfigCommand)
+    {
+        char configName[64];
+        GetOwnerConfigName(firstValue, configName, sizeof(configName));
+        ExecuteConfig(configName);
+        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", configName);
+        Format(response, responseSize, "Loaded config: %s", configName);
+        LogOwnerCommand(actorSteamID, commandLine, "ok");
+        return true;
+    }
 
     // Match stock sm_rcon's synchronous execution/output behavior. The fixed
     // format string prevents user input from becoming format directives.
@@ -1012,9 +1070,9 @@ public Action Command_ServerOwnerCommand(int args)
 
     char operation[256];
     int operationLength = GetCmdArg(2, operation, sizeof(operation));
-    char whitelistPath[PLATFORM_MAX_PATH];
+    char firstValue[PLATFORM_MAX_PATH];
     if (args >= 3)
-        GetCmdArg(3, whitelistPath, sizeof(whitelistPath));
+        GetCmdArg(3, firstValue, sizeof(firstValue));
 
     char response[MAX_OWNER_COMMAND_RESPONSE];
     char errorCode[64];
@@ -1026,7 +1084,7 @@ public Action Command_ServerOwnerCommand(int args)
         commandLine,
         strlen(commandLine),
         args - 2,
-        whitelistPath,
+        firstValue,
         response,
         sizeof(response),
         errorCode,

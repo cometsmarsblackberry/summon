@@ -56,7 +56,7 @@ countdown. Both commands also support SourceMod's silent `/pause` and
 | `!changemap <map>`, `!map <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
 | `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, open the league/config menu. |
 | `!restart` | Open a menu to restart the tournament, game, or round. |
-| `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. |
+| `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. `exec <config>` is accepted too and loads the config like `!config`. |
 
 `!admin`, `!who`, `!map`, and `!rcon` overlap standard SourceMod commands.
 Summon listens for these commands without registering duplicate callbacks. A
