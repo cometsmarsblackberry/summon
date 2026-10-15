@@ -76,7 +76,25 @@ if ! grep -q "^${SERVICE_USER}:" /etc/subgid; then
   usermod --add-subgids "${SUBGID_START}-${SUBGID_END}" "$SERVICE_USER"
 fi
 SERVICE_UID="$(id -u "$SERVICE_USER")"
-install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR" "$STATE_DIR/slots" "$STATE_DIR/bin"
+
+# The agent account owns everything under $STATE_DIR, so on a reinstall its
+# contents may be links planted by a compromised agent. Root must not follow
+# them: root only touches $STATE_DIR itself (its parent is root-owned), stages
+# downloads in its own directory, and lets the agent account write its files.
+run_as_agent() {
+  setpriv --reuid="$SERVICE_USER" --regid="$SERVICE_USER" --init-groups --reset-env -- "$@"
+}
+
+# Replace a file under $STATE_DIR with stdin, as the agent account.
+write_agent_file() {
+  # shellcheck disable=SC2016 # expanded by the agent's shell
+  run_as_agent sh -c 'rm -f "$1.new" && cat >"$1.new" && chmod "$2" "$1.new" && mv -f "$1.new" "$1"' sh "$1" "$2"
+}
+
+install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
+run_as_agent install -d -m 0700 "$STATE_DIR/slots" "$STATE_DIR/bin"
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
 
 REPORTED_HOSTNAME="$(hostname -s 2>/dev/null || true)"
 REPORTED_HOSTNAME="$(printf '%s' "$REPORTED_HOSTNAME" | tr -cd '[:alnum:]._-')"
@@ -95,8 +113,7 @@ WEBSOCKET_URL="$(printf '%s' "$ENROLL_RESPONSE" | jq -er '.websocket_url')"
 AGENT_URL="$(printf '%s' "$ENROLL_RESPONSE" | jq -er '.agent_url')"
 AGENT_SHA256="$(printf '%s' "$ENROLL_RESPONSE" | jq -er '.agent_sha256')"
 
-install -m 0600 -o "$SERVICE_USER" -g "$SERVICE_USER" /dev/null "$STATE_DIR/credential"
-printf '%s' "$CREDENTIAL" >"$STATE_DIR/credential"
+printf '%s' "$CREDENTIAL" | write_agent_file "$STATE_DIR/credential" 0600
 
 PORT_PREFLIGHT_OK=true
 mapfile -t REQUIRED_PORTS < <(
@@ -112,20 +129,20 @@ for port in "${REQUIRED_PORTS[@]}"; do
 done
 
 curl --fail --location --retry 5 --retry-connrefused \
-  --output "$STATE_DIR/bin/tf2-agent.download" "$AGENT_URL"
-if ! printf '%s  %s\n' "$AGENT_SHA256" "$STATE_DIR/bin/tf2-agent.download" | sha256sum --check --status; then
-  DOWNLOADED_SHA256="$(sha256sum "$STATE_DIR/bin/tf2-agent.download" | awk '{print $1}')"
+  --output "$STAGING_DIR/tf2-agent" "$AGENT_URL"
+if ! printf '%s  %s\n' "$AGENT_SHA256" "$STAGING_DIR/tf2-agent" | sha256sum --check --status; then
+  DOWNLOADED_SHA256="$(sha256sum "$STAGING_DIR/tf2-agent" | awk '{print $1}')"
+  # Keep the download for inspection.
+  trap - EXIT
   echo "Agent download failed integrity verification." >&2
   echo "  Expected SHA-256:   $AGENT_SHA256" >&2
   echo "  Downloaded SHA-256: $DOWNLOADED_SHA256" >&2
-  echo "  Downloaded file:    $STATE_DIR/bin/tf2-agent.download" >&2
+  echo "  Downloaded file:    $STAGING_DIR/tf2-agent" >&2
   echo "The agent service was not created. A stale proxy/CDN cache or a corrupted download may be responsible." >&2
   echo "Purge the cached agent, request a new enrollment token, and run this installer again." >&2
   exit 1
 fi
-chmod 0755 "$STATE_DIR/bin/tf2-agent.download"
-chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR/bin/tf2-agent.download"
-mv "$STATE_DIR/bin/tf2-agent.download" "$STATE_DIR/bin/tf2-agent"
+write_agent_file "$STATE_DIR/bin/tf2-agent" 0755 <"$STAGING_DIR/tf2-agent"
 
 loginctl enable-linger "$SERVICE_USER" || true
 mkdir -p "/run/user/$SERVICE_UID"
