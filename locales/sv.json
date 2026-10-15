@@ -138,6 +138,7 @@
         "cpu_model": "CPU-modell",
         "logical_cpus": "Logiska CPU:er",
         "cpu": "CPU",
+        "cpu_steal": "CPU-stöld",
         "load_avg": "Genomsn. last",
         "ram": "RAM",
         "swap": "Swap",
