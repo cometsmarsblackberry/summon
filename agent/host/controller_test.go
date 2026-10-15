@@ -146,6 +146,7 @@ type sequenceHarness struct {
 	rconMaximum atomic.Int32
 	configMu    sync.Mutex
 	configs     []boot.ReservationConfig
+	runErr      error
 }
 
 type fakeSequence struct {
@@ -170,6 +171,9 @@ func (f *fakeSequence) RunReconfigure() error {
 		<-f.harness.release
 	}
 	f.harness.active.Add(-1)
+	if f.harness.runErr != nil {
+		return f.harness.runErr
+	}
 	return f.reporter.SendServerReadyWithSDR(wsprotocol.ServerReadyInfo{
 		SDRIP: "169.254.1.2", SDRPort: 30001, SDRTVPort: 30002, Map: f.config.FirstMap,
 	})
@@ -248,6 +252,110 @@ func startCommand(definition SlotDefinition, assignmentID, generation int, lease
 		SlotID: definition.SlotID, SlotIndex: definition.SlotIndex, Generation: generation,
 		LeaseExpiresAt: lease.Unix(), GamePort: definition.GamePort, TVPort: definition.TVPort,
 		ImageDigest: "sha256:prepared", Config: config,
+	}
+}
+
+// stopCommand uses the expiry reason, which skips the in-game ending notice
+// and its 10-second grace period.
+func stopCommand(start CommandEnvelope) CommandEnvelope {
+	stop := start
+	stop.Type = "server.stop"
+	stop.CommandID = fmt.Sprintf("stop-%d-%d", start.AssignmentID, start.Generation)
+	stop.Reason = "expiry"
+	return stop
+}
+
+func lastEventForAssignment(transport *fakeTransport, assignmentID int) map[string]any {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	for index := len(transport.sent) - 1; index >= 0; index-- {
+		if transport.sent[index]["assignment_id"] == float64(assignmentID) {
+			return transport.sent[index]
+		}
+	}
+	return nil
+}
+
+func TestEndedReservationReleasesSlotForNextReservation(t *testing.T) {
+	harness := &sequenceHarness{}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, &fakePodman{})
+	defer cleanup()
+
+	for _, previousGeneration := range []int{1, 2} {
+		// The previous reservation may have been retried onto this host, but
+		// every new reservation starts again at generation 1.
+		previous := startCommand(definition, 40+previousGeneration, previousGeneration, time.Now().Add(time.Hour))
+		controller.executeSlotCommand(controller.slotForCommand(previous), previous)
+		stop := stopCommand(previous)
+		controller.executeSlotCommand(controller.slotForCommand(stop), stop)
+		if event := lastEventForAssignment(transport, previous.AssignmentID); event["type"] != "server.stopped" {
+			t.Fatalf("previous reservation did not stop: %v", event)
+		}
+
+		next := startCommand(definition, 50+previousGeneration, 1, time.Now().Add(time.Hour))
+		controller.executeSlotCommand(controller.slotForCommand(next), next)
+		if event := lastEventForAssignment(transport, next.AssignmentID); event["type"] != "server.ready" {
+			t.Fatalf("next reservation after generation %d was rejected: %v", previousGeneration, event)
+		}
+		nextStop := stopCommand(next)
+		controller.executeSlotCommand(controller.slotForCommand(nextStop), nextStop)
+	}
+}
+
+func TestFailedStartReleasesSlotForNextReservation(t *testing.T) {
+	harness := &sequenceHarness{runErr: errors.New("srcds exited")}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, &fakePodman{})
+	defer cleanup()
+
+	failed := startCommand(definition, 60, 1, time.Now().Add(time.Hour))
+	controller.executeSlotCommand(controller.slotForCommand(failed), failed)
+	if event := lastEventForAssignment(transport, failed.AssignmentID); event["type"] != "server.failed" {
+		t.Fatalf("expected the first start to fail: %v", event)
+	}
+
+	harness.runErr = nil
+	next := startCommand(definition, 61, 1, time.Now().Add(time.Hour))
+	controller.executeSlotCommand(controller.slotForCommand(next), next)
+	if event := lastEventForAssignment(transport, next.AssignmentID); event["type"] != "server.ready" {
+		t.Fatalf("slot was not released after a failed start: %v", event)
+	}
+}
+
+func TestOccupiedSlotRejectsOtherAssignments(t *testing.T) {
+	harness := &sequenceHarness{}
+	runtime := &fakePodman{stopped: make(chan string, 1)}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+
+	owner := startCommand(definition, 70, 1, time.Now().Add(time.Hour))
+	controller.executeSlotCommand(controller.slotForCommand(owner), owner)
+
+	// A retried reservation has a higher generation than the slot's owner;
+	// it must still not take over or stop the running server.
+	intruder := startCommand(definition, 71, 2, time.Now().Add(time.Hour))
+	controller.executeSlotCommand(controller.slotForCommand(intruder), intruder)
+	event := lastEventForAssignment(transport, intruder.AssignmentID)
+	if event["type"] != "server.failed" || event["failure_class"] != "infrastructure" ||
+		event["failure_code"] != "slot_busy" {
+		t.Fatalf("start for another assignment should report a busy slot: %v", event)
+	}
+	stop := stopCommand(intruder)
+	controller.executeSlotCommand(controller.slotForCommand(stop), stop)
+	event = lastEventForAssignment(transport, intruder.AssignmentID)
+	if event["failure_code"] != "assignment_conflict" {
+		t.Fatalf("stop for another assignment should be rejected: %v", event)
+	}
+	select {
+	case id := <-runtime.stopped:
+		t.Fatalf("another assignment stopped the owner's container %q", id)
+	default:
+	}
+	if snapshot := snapshotSlot(controller.slotForCommand(owner)); snapshot.AssignmentID != owner.AssignmentID ||
+		snapshot.ContainerID == "" {
+		t.Fatalf("owner lost the slot: %#v", snapshot)
 	}
 }
 
