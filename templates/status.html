@@ -407,8 +407,8 @@
                     );
                     return { league, options };
                 })
-                .filter(group => group.options.length > 0)
-                .sort((a, b) => a.league.localeCompare(b.league));
+                // Leagues arrive in display order from the API.
+                .filter(group => group.options.length > 0);
         },
 
         get resetMatchesConfigSearch() {

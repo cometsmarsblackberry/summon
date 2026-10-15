@@ -41,6 +41,9 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
 
 _BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP}
 
+# Main leagues are listed first in the UI; the rest follow alphabetically.
+LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "FBTF")
+
 
 @dataclass(frozen=True)
 class CompetitiveConfig:
@@ -74,12 +77,21 @@ def filter_user_selectable(cfg_files: list[str]) -> list[str]:
     return sorted(set(out))
 
 
+def _league_sort_key(league: str) -> tuple[int, str]:
+    if league in LEAGUE_PRIORITY:
+        return LEAGUE_PRIORITY.index(league), ""
+    return len(LEAGUE_PRIORITY), league.casefold()
+
+
 def group_for_ui(cfg_files: list[str]) -> dict[str, dict[str, list[dict]]]:
-    """Return configs grouped by league -> format for API/UI consumption."""
+    """Return configs grouped by league -> format for API/UI consumption.
+
+    League keys are ordered for display (see LEAGUE_PRIORITY).
+    """
     grouped: dict[str, dict[str, list[dict]]] = {}
     for cfg_file in filter_user_selectable(cfg_files):
         league, fmt = classify_config(cfg_file)
         league_bucket = grouped.setdefault(league, {})
         fmt_bucket = league_bucket.setdefault(fmt, [])
         fmt_bucket.append({"cfg_file": cfg_file, "name": cfg_file})
-    return grouped
+    return {league: grouped[league] for league in sorted(grouped, key=_league_sort_key)}
