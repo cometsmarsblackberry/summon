@@ -145,6 +145,7 @@
         "disk": "Ổ đĩa",
         "uptime": "Thời gian hoạt động",
         "provider": "Nhà cung cấp",
+        "image_digest": "Digest của image",
         "back_to_home": "Về trang chủ",
         "download_map": "Tải xuống bản đồ",
         "change_map": "Đổi bản đồ",

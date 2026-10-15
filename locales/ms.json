@@ -145,6 +145,7 @@
         "disk": "Cakera",
         "uptime": "Masa operasi",
         "provider": "Pembekal",
+        "image_digest": "Digest imej",
         "back_to_home": "Kembali ke laman utama",
         "download_map": "Muat turun peta",
         "change_map": "Tukar peta",

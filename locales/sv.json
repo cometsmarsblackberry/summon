@@ -145,6 +145,7 @@
         "disk": "Disk",
         "uptime": "Drifttid",
         "provider": "Leverantör",
+        "image_digest": "Avbildens digest",
         "back_to_home": "Tillbaka till startsidan",
         "download_map": "Ladda ner karta",
         "change_map": "Ändra karta",

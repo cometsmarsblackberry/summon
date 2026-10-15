@@ -145,6 +145,7 @@
         "disk": "Disk",
         "uptime": "Uptime",
         "provider": "Provider",
+        "image_digest": "Image digest",
         "back_to_home": "Bumalik sa home",
         "download_map": "I-download ang mapa",
         "change_map": "Baguhin ang mapa",

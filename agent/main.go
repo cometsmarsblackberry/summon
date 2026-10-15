@@ -605,6 +605,9 @@ func runHeartbeat(client *websocket.Client, interval time.Duration) {
 		extra := map[string]interface{}{
 			"sysinfo": stats,
 		}
+		if digest := boot.RunningImageDigest(); digest != "" {
+			extra["image_digest"] = digest
+		}
 		if err := client.SendStatus("running", stats.UptimeSec, extra); err != nil {
 			log.Printf("Failed to send heartbeat: %v", err)
 		}
