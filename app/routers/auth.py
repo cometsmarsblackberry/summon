@@ -419,15 +419,18 @@ async def get_current_user(
     try:
         data = _session_serializer().loads(session_cookie, max_age=60 * 60 * 24 * 7)  # 7 days
         user_id = data.get("user_id")
+        steam_id = data.get("steam_id")
     except Exception:
         return None
-    
-    if not user_id:
+
+    if not user_id or not steam_id:
         return None
-    
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    if user is None or user.deleted_at is not None:
+    # SQLite gives a deleted account's ID to the next signup, so a session is
+    # valid only for the Steam account it was issued to.
+    if user is None or user.deleted_at is not None or user.steam_id != steam_id:
         return None
 
     # Admin status is configured via env (`ADMIN_STEAM_IDS`) and can change while a user
