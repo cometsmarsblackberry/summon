@@ -1,5 +1,6 @@
 """Ping results collection and statistics API."""
 
+import ipaddress
 import json
 import logging
 import time
@@ -29,10 +30,14 @@ MIN_PING_MS = 1
 MAX_PING_MS = 5000
 
 # ---------------------------------------------------------------------------
-# In-memory rate limiting: {ip: [timestamp, ...]}
+# In-memory rate limiting: {client key: [timestamp, ...]}
 # ---------------------------------------------------------------------------
 _submit_timestamps: dict[str, list[float]] = {}
+_sitewide_submit_timestamps: list[float] = []
 SUBMIT_LIMIT = 3
+# Submissions need no login, so a client with many addresses could get past the
+# per-client limit; this caps every lookup and stored submission regardless.
+SITEWIDE_SUBMIT_LIMIT = 60
 SUBMIT_WINDOW = 3600  # 1 hour
 
 # ---------------------------------------------------------------------------
@@ -54,19 +59,44 @@ def get_client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _rate_limit_key(ip: str) -> str:
+    """Group IPv6 clients by /64 for rate limiting."""
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped:
+            return str(address.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
+def _prune_submissions(now: float) -> None:
+    """Forget submissions older than the window, and clients with none left."""
+    for key in list(_submit_timestamps):
+        recent = [t for t in _submit_timestamps[key] if now - t < SUBMIT_WINDOW]
+        if recent:
+            _submit_timestamps[key] = recent
+        else:
+            del _submit_timestamps[key]
+    _sitewide_submit_timestamps[:] = [
+        t for t in _sitewide_submit_timestamps if now - t < SUBMIT_WINDOW
+    ]
+
+
 def _check_rate_limit(ip: str) -> bool:
     """Return True if allowed, False if rate-limited."""
-    now = time.time()
-    timestamps = _submit_timestamps.get(ip, [])
-    # Prune old entries
-    timestamps = [t for t in timestamps if now - t < SUBMIT_WINDOW]
-    _submit_timestamps[ip] = timestamps
-    return len(timestamps) < SUBMIT_LIMIT
+    _prune_submissions(time.time())
+    if len(_sitewide_submit_timestamps) >= SITEWIDE_SUBMIT_LIMIT:
+        return False
+    return len(_submit_timestamps.get(_rate_limit_key(ip), [])) < SUBMIT_LIMIT
 
 
 def _record_submission(ip: str):
     now = time.time()
-    _submit_timestamps.setdefault(ip, []).append(now)
+    _submit_timestamps.setdefault(_rate_limit_key(ip), []).append(now)
+    _sitewide_submit_timestamps.append(now)
 
 
 async def _resolve_location(ip: str) -> dict:
@@ -122,7 +152,7 @@ async def submit_ping_results(
     # Rate limit
     if not _check_rate_limit(ip):
         return JSONResponse(
-            {"error": "Rate limit exceeded. Max 3 submissions per hour."},
+            {"error": "Rate limit exceeded. Try again later."},
             status_code=429,
         )
 
