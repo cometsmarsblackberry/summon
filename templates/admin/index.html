@@ -40,8 +40,8 @@
         captcha_min_tf2_hours: {{ captcha_settings.min_tf2_hours }},
         captcha_min_account_age_days: {{ captcha_settings.min_account_age_days }},
         fastdl_url: {{ fastdl_url | tojson }},
+        container_image: {{ container_image | tojson }},
         instant_hosts_enabled: {{ instant_settings.enabled | tojson }},
-        instant_container_image: {{ instant_settings.container_image | tojson }},
     };
 
     function adminPanel() {
@@ -231,7 +231,7 @@
             showInstantEditModal: false,
             editingInstantHost: null,
             instantEditForm: {},
-            instantHostForm: { location: '', slot_count: 2, base_port: 27015, desired_image: '' },
+            instantHostForm: { location: '', slot_count: 2, base_port: 27015 },
             get alphabetizedLocations() {
                 return [...this.allLocations].sort((a, b) =>
                     (a.name || a.code).localeCompare(b.name || b.code, undefined, { sensitivity: 'base' })
@@ -243,7 +243,7 @@
             openAddInstantHost() {
                 this.instantHostForm = {
                     location: this.alphabetizedLocations[0]?.code || '',
-                    slot_count: 2, base_port: 27015, desired_image: ''
+                    slot_count: 2, base_port: 27015
                 };
                 this.enrollmentToken = '';
                 this.enrollmentInstallCommand = '';
@@ -254,7 +254,6 @@
                 const payload = { ...this.instantHostForm };
                 payload.slot_count = parseInt(payload.slot_count, 10);
                 payload.base_port = parseInt(payload.base_port, 10);
-                if (!payload.desired_image) delete payload.desired_image;
                 const res = await fetch('/admin/instant-hosts', {
                     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
                 });
@@ -300,7 +299,6 @@
                     public_ipv4: host.public_ipv4 || '',
                     slot_count: enabledSlots.length,
                     base_port: enabledSlots.length ? Math.min(...enabledSlots.map(slot => slot.game_port)) : 27015,
-                    desired_image: host.desired_image || '',
                     version_pin: host.version_pin || '',
                 };
                 this.showInstantEditModal = true;
@@ -315,7 +313,6 @@
                 if (!payload.public_ipv4 || payload.public_ipv4 === this.editingInstantHost.public_ipv4) delete payload.public_ipv4;
                 if (payload.slot_count === enabledSlots.length) delete payload.slot_count;
                 if (payload.base_port === currentBasePort) delete payload.base_port;
-                payload.desired_image = payload.desired_image || null;
                 payload.version_pin = payload.version_pin || null;
                 const res = await fetch('/admin/instant-hosts/' + this.editingInstantHost.id, {
                     method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
@@ -373,7 +370,7 @@
                 if (res.ok) { p.enabled = !p.enabled; }
             },
             openEditProvider(p) {
-                this.providerFormData = { instance_plan: p.instance_plan, container_image: p.container_image, instance_limit: p.instance_limit };
+                this.providerFormData = { instance_plan: p.instance_plan, instance_limit: p.instance_limit };
                 this.editingProviderCode = p.code; this.showProviderModal = true;
             },
             async saveProvider() {
@@ -969,8 +966,6 @@
                         Use Instant hosts for new reservations
                     </label>
                     <p class="ml-5 text-xs text-slate-400">Uses an available Instant host first, then falls back to cloud capacity.</p>
-                    <input x-model="settingsForm.instant_container_image" placeholder="Site-wide TF2 image"
-                        class="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800">
                 </div>
                 <button @click="saveSettings()" class="self-end px-2 py-1 text-xs bg-slate-200 hover:bg-slate-300 rounded">Save</button>
             </div>
@@ -1094,7 +1089,6 @@
                         </div>
                         <div class="text-xs text-slate-400 mt-1">
                             Plan: <code x-text="p.instance_plan"></code> &bull;
-                            Image: <code x-text="p.container_image"></code> &bull;
                             Limit: <span x-text="p.instance_limit || 'none'"></span>
                         </div>
                     </div>
@@ -1595,6 +1589,11 @@
                         <input x-model="settingsForm.fastdl_url" type="text" placeholder="https://fastdl.example.com/"
                             class="w-48 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800">
                     </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <label class="text-xs text-slate-500 flex-1">TF2 container image</label>
+                        <input x-model="settingsForm.container_image" type="text" placeholder="ghcr.io/owner/image:tag"
+                            class="w-48 sm:w-80 px-2 py-1 text-xs bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
                 </div>
             </div>
 
@@ -1780,7 +1779,6 @@
                             </select>
                             <input x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                             <input x-model.number="instantHostForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                            <input x-model="instantHostForm.desired_image" placeholder="Image override (optional)" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                         </div>
                         <p class="text-xs text-slate-400">Ports use base + slot × 10; SourceTV uses game port + 5. The host starts disabled.</p>
                         <div class="flex gap-2 justify-end">
@@ -1816,7 +1814,7 @@
             <div class="fixed inset-0 bg-black/20" @click="showInstantEditModal = false"></div>
             <div class="relative bg-white rounded-lg shadow-xl max-w-lg w-full p-5 space-y-3">
                 <h3 class="text-sm font-semibold text-slate-900">Edit Instant host</h3>
-                <p class="text-xs text-amber-700">Address, location, ports, and capacity require the host to be drained and idle. Image changes affect only future containers.</p>
+                <p class="text-xs text-amber-700">Address, location, ports, and capacity require the host to be drained and idle.</p>
                 <div class="grid grid-cols-2 gap-2">
                     <input x-model="instantEditForm.name" placeholder="Host name" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                     <select x-model="instantEditForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
@@ -1826,7 +1824,6 @@
                     <input x-model.number="instantEditForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                     <input x-model.number="instantEditForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                     <input x-model="instantEditForm.version_pin" placeholder="Agent version pin (optional)" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                    <input x-model="instantEditForm.desired_image" placeholder="Image override (optional)" class="col-span-2 px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                 </div>
                 <div class="flex gap-2 justify-end">
                     <button @click="showInstantEditModal=false" class="px-3 py-1.5 text-xs bg-slate-200 rounded">Cancel</button>
@@ -1949,11 +1946,6 @@
                     <div>
                         <label class="text-xs text-slate-500">Instance plan</label>
                         <input x-model="providerFormData.instance_plan" placeholder="Instance plan"
-                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                    </div>
-                    <div>
-                        <label class="text-xs text-slate-500">Container image</label>
-                        <input x-model="providerFormData.container_image" placeholder="Container image"
                             class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                     </div>
                     <div>

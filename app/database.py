@@ -133,6 +133,7 @@ async def _create_and_migrate(conn) -> None:
     )
     await _migrate_enabled_locations_nullable(conn)
     await _migrate_instant_hosts_public_ipv4_nullable(conn)
+    await _migrate_shared_container_image(conn)
     await _backfill_motd_tokens(conn)
     await _correct_sdr_source_tv_ports(conn)
     await _migrate_create_indexes(conn)
@@ -166,6 +167,54 @@ async def _migrate_add_column(conn, table: str, column: str, column_def: str):
     if column not in columns:
         await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}"))
 
+
+
+async def _migrate_drop_column(conn, table: str, column: str) -> None:
+    """Drop a column the models no longer map, if it still exists."""
+    import re
+
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"Table '{table}' not in migration allowlist")
+    if not re.match(r'^[a-z_][a-z0-9_]*$', column):
+        raise ValueError(f"Invalid column name: '{column}'")
+
+    columns = await conn.run_sync(
+        lambda sync_conn: {c["name"] for c in inspect(sync_conn).get_columns(table)}
+    )
+    if column in columns:
+        await conn.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+
+
+async def _migrate_shared_container_image(conn) -> None:
+    """Fold the per-provider and per-Instant-host images into one site setting.
+
+    An explicitly saved Instant image wins because it was the newest admin
+    choice; otherwise the image cloud providers were using is kept.
+    """
+    existing = (await conn.execute(text(
+        "SELECT value FROM site_settings WHERE key = 'container_image'"
+    ))).scalar_one_or_none()
+    if existing is None:
+        image = (await conn.execute(text(
+            "SELECT value FROM site_settings WHERE key = 'instant_container_image'"
+        ))).scalar_one_or_none()
+        provider_columns = await conn.run_sync(
+            lambda sync_conn: {c["name"] for c in inspect(sync_conn).get_columns("providers")}
+        )
+        if not image and "container_image" in provider_columns:
+            image = (await conn.execute(text(
+                "SELECT container_image FROM providers WHERE container_image != '' "
+                "ORDER BY enabled DESC, display_order LIMIT 1"
+            ))).scalar_one_or_none()
+        if image:
+            await conn.execute(text(
+                "INSERT INTO site_settings (key, value) VALUES ('container_image', :value)"
+            ), {"value": image})
+    await conn.execute(text(
+        "DELETE FROM site_settings WHERE key = 'instant_container_image'"
+    ))
+    await _migrate_drop_column(conn, "providers", "container_image")
+    await _migrate_drop_column(conn, "instant_hosts", "desired_image")
 
 
 async def _backfill_motd_tokens(conn):

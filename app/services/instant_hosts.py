@@ -110,14 +110,6 @@ def automatic_host_name(
     return prefix + hostname[: max(1, 64 - len(prefix))]
 
 
-def validate_image_reference(value: str) -> str:
-    """Return a safe, bounded container-image reference."""
-    image = value.strip()
-    if not image or len(image) > 255 or any(character.isspace() for character in image):
-        raise InstantHostError("container image must be a non-empty reference without whitespace")
-    return image
-
-
 def new_enrollment_token(host: InstantHost) -> str:
     token = secrets.token_urlsafe(32)
     host.enrollment_token_hash = hash_host_secret(token)
@@ -139,7 +131,6 @@ async def create_host(
     location: str,
     slot_count: int,
     base_port: int = DEFAULT_BASE_PORT,
-    desired_image: str | None = None,
     name: str | None = None,
     public_ipv4: str | None = None,
 ) -> tuple[InstantHost, str]:
@@ -171,9 +162,6 @@ async def create_host(
         enabled=False,
         draining=False,
         health_status="unenrolled",
-        desired_image=(
-            validate_image_reference(desired_image) if desired_image else None
-        ),
     )
     token = new_enrollment_token(host)
     db.add(host)
@@ -438,7 +426,6 @@ def serialize_host(
         "platform": host.platform,
         "architecture": host.architecture,
         "last_heartbeat_at": _datetime_iso(host.last_heartbeat_at),
-        "desired_image": host.desired_image,
         "ready_image_digest": host.ready_image_digest,
         "image_status": host.image_status,
         "image_error": host.image_error,

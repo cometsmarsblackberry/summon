@@ -70,6 +70,9 @@ class Settings(BaseSettings):
 
     # TF2 Server settings
     fastdl_url: str = "https://fastdl.serveme.tf/"
+    # TF2 container image for cloud servers and Instant hosts alike. Fallback
+    # default; administrators can change it from the admin settings.
+    container_image: str = "ghcr.io/cometsmarsblackberry/tf2-summon/i386:nightly"
     tf2_hostname_format: str = "{site_name} #{number} | {location_city}"
 
     # Agent heartbeat interval (system stats update frequency)
@@ -78,7 +81,6 @@ class Settings(BaseSettings):
     # Operator-owned Instant hosts. The rollout switch is intentionally off by
     # default and can also be changed from the admin settings API.
     instant_hosts_enabled: bool = False
-    instant_container_image: str = "ghcr.io/cometsmarsblackberry/tf2-summon/i386:nightly"
     instant_host_offline_seconds: int = 30
     instant_protocol_min: int = 1
     instant_protocol_max: int = 1
