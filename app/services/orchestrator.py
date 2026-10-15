@@ -5,6 +5,8 @@ import base64
 import hashlib
 import json
 import logging
+import math
+import weakref
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -31,6 +33,37 @@ from app.services.provider_priority import (
 logger = logging.getLogger(__name__)
 settings = get_settings()
 _AGENT_BINARY_PATH = Path(__file__).resolve().parents[2] / "static" / "tf2-agent"
+
+# A handover extends billing to the new reservation's end; stay clear of the
+# cleanup that destroys servers in the last minutes of their billing hour.
+HANDOVER_BILLING_MARGIN = timedelta(minutes=5)
+
+_cloud_instance_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def cloud_instance_lock(cloud_id: str) -> asyncio.Lock:
+    """Serialize handing over a booting server with its readiness and failure handling."""
+    lock = _cloud_instance_locks.get(cloud_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _cloud_instance_locks[cloud_id] = lock
+    return lock
+
+
+def next_billing_boundary(created_at: datetime, now: datetime) -> datetime:
+    """Return when the hourly billing period running at `now` ends (UTC-aware)."""
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    elapsed_hours = (now - created_at).total_seconds() / 3600
+    return created_at + timedelta(hours=max(1, math.ceil(elapsed_hours)))
+
+
+async def get_admin_steam_ids(db: AsyncSession) -> list[str]:
+    """Admin Steam IDs (Steam2 format) for the server's SM_ADMINS."""
+    from app.models.user import User
+    from app.utils.steam import steamid64_to_steamid2
+    result = await db.execute(select(User.steam_id).where(User.is_admin == True))
+    return [steamid64_to_steamid2(row[0]) for row in result.all()]
 
 
 @lru_cache(maxsize=1)
@@ -412,7 +445,31 @@ async def provision_instance_for_reservation(
                 record_provider_success(reservation.location, provider_code)
                 return result
 
-        # No warm instance — create a new one with this provider
+        # Then a server still booting for a reservation cancelled before it
+        # was ready: it is further along than a new one would be.
+        booting_instance = await get_booting_instance(reservation.location, db, provider_code=provider_code)
+        if booting_instance:
+            result = None
+            async with cloud_instance_lock(booting_instance.id):
+                # Recheck under the lock: it may have become ready or failed meanwhile.
+                booting_instance = await get_booting_instance(
+                    reservation.location, db, provider_code=provider_code, cloud_id=booting_instance.id,
+                )
+                if booting_instance:
+                    logger.info(
+                        "Handing booting instance %s (%s) to reservation #%s",
+                        booting_instance.id, booting_instance.instance_id, reservation_number,
+                    )
+                    result = await _reuse_warm_instance(
+                        booting_instance, reservation, client, loc_provider,
+                        auth_token, instance_id, location_city, container_image,
+                        owner_steam_id, owner_name, fastdl_url, db,
+                    )
+            if result:
+                record_provider_success(reservation.location, provider_code)
+                return result
+
+        # No warm or booting instance — create a new one with this provider
         try:
             result = await _create_new_instance(
                 reservation, client, loc_provider, provider_record,
@@ -511,42 +568,17 @@ async def _reuse_warm_instance(
                 warm_instance.id, region_id, DIRECT_CONNECT_SG_NAME
             )
 
-    reconfigure_data = {
-        "reservation_id": reservation.id,
-        "reservation_number": reservation.reservation_number,
-        "location": reservation.location,
-        "location_city": location_city,
-        "password": reservation.password,
-        "rcon_password": reservation.rcon_password,
-        "tv_password": reservation.tv_password,
-        "first_map": reservation.first_map,
-        "config_file": reservation.config_file or "",
-        "logsecret": reservation.logsecret,
-        "owner_steam_id": owner_steam_id,
-        "owner_name": owner_name,
-        "enable_direct_connect": reservation.enable_direct_connect,
-        "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
-        "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
-        "ends_at": int(reservation.ends_at.timestamp()),
-        "backend_url": settings.base_url,
-        "internal_api_key": reservation.plugin_api_key,
-        "container_image": container_image,
-        "demos_tf_apikey": settings.demos_tf_apikey,
-        "logs_tf_apikey": settings.logs_tf_apikey,
-        "server_settings": {
-            "fastdl_url": fastdl_url,
-            "hostname_format": settings.tf2_hostname_format.replace("{site_name}", settings.site_name),
-        },
-        "auth_token": auth_token,
-        "instance_id": instance_id,
-        "s3_config": {
-            "endpoint": settings.s3_endpoint,
-            "access_key": settings.s3_access_key,
-            "secret_key": settings.s3_secret_key,
-            "bucket": settings.s3_bucket,
-            "region": settings.s3_region,
-        },
-    }
+    reconfigure_data = build_reservation_config(
+        reservation=reservation,
+        owner_steam_id=owner_steam_id,
+        owner_name=owner_name,
+        location_city=location_city,
+        container_image=container_image,
+        fastdl_url=fastdl_url,
+        auth_token=auth_token,
+        instance_id=instance_id,
+        admin_steam_ids=await get_admin_steam_ids(db),
+    )
 
     from app.routers.internal import send_reconfigure_command, connected_agents, reassign_agent_instance_id
     if old_agent_id and old_agent_id in connected_agents:
@@ -833,16 +865,9 @@ async def release_to_warm_pool(instance_id: str, db: AsyncSession) -> bool:
     # During reservations, billing_hour_ends_at gets extended to protect
     # the active session — but on release we need the actual billing boundary.
     now = datetime.now(timezone.utc)
-    created = instance.created_at
-    if created:
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
+    if instance.created_at:
         # Hourly providers bill in 1-hour increments from creation time.
-        # Find the next billing boundary after now.
-        import math
-        elapsed_hours = (now - created).total_seconds() / 3600
-        next_boundary_hours = math.ceil(elapsed_hours)
-        billing_end = created + timedelta(hours=next_boundary_hours)
+        billing_end = next_billing_boundary(instance.created_at, now)
         instance.billing_hour_ends_at = billing_end.replace(tzinfo=None)  # naive for DB
 
         if billing_end <= now + timedelta(minutes=2):
@@ -873,6 +898,78 @@ async def release_to_warm_pool(instance_id: str, db: AsyncSession) -> bool:
 
     logger.info(f"Released instance {instance_id} to warm pool (expires {instance.billing_hour_ends_at})")
     return True
+
+
+async def end_cancelled_boot_billing(reservation: Reservation, db: AsyncSession) -> None:
+    """Stop extending billing for a server whose reservation ended before it was ready.
+
+    While a reservation runs, billing_hour_ends_at is extended to its end. A
+    server cancelled during boot is released to the warm pool once ready or
+    handed to another reservation; if neither happens (e.g. a pull that never
+    finishes), the cleanup safety net destroys it at the end of this billing
+    hour instead of at the cancelled reservation's end.
+    """
+    async with cloud_instance_lock(reservation.instance_id):
+        result = await db.execute(
+            select(CloudInstance)
+            .where(CloudInstance.id == reservation.instance_id)
+            .execution_options(populate_existing=True)
+        )
+        instance = result.scalar_one_or_none()
+        if not instance or instance.current_reservation_id != reservation.id or not instance.created_at:
+            return
+        billing_end = next_billing_boundary(instance.created_at, datetime.now(timezone.utc))
+        instance.billing_hour_ends_at = billing_end.replace(tzinfo=None)  # naive for DB
+        await db.commit()
+        logger.info(
+            f"Instance {instance.id} still booting for cancelled reservation "
+            f"#{reservation.reservation_number}, billing ends {billing_end}"
+        )
+
+
+async def get_booting_instance(
+    location: str,
+    db: AsyncSession,
+    provider_code: Optional[str] = None,
+    cloud_id: Optional[str] = None,
+) -> Optional[CloudInstance]:
+    """Get a server still booting for a reservation cancelled before it was ready.
+
+    Only servers whose agent can switch its boot to another reservation and
+    whose image pull is visibly progressing qualify; a stalled server is left
+    to fail instead of being handed on.
+
+    Args:
+        location: Location code
+        db: Database session
+        provider_code: If set, only return instances from this provider
+        cloud_id: If set, only consider this instance
+
+    Returns:
+        Booting CloudInstance or None
+    """
+    from app.routers.internal import boot_handover_ready
+
+    query = (
+        select(CloudInstance)
+        .join(Reservation, CloudInstance.current_reservation_id == Reservation.id)
+        .where(CloudInstance.location == location)
+        .where(CloudInstance.is_available == False)
+        .where(Reservation.status == ReservationStatus.ENDED)
+        .where(Reservation.started_at == None)
+        .where(CloudInstance.billing_hour_ends_at > datetime.utcnow() + HANDOVER_BILLING_MARGIN)
+        .order_by(CloudInstance.created_at)
+        .execution_options(populate_existing=True)
+    )
+    if provider_code:
+        query = query.where(CloudInstance.provider_code == provider_code)
+    if cloud_id:
+        query = query.where(CloudInstance.id == cloud_id)
+
+    for instance in (await db.execute(query)).scalars():
+        if boot_handover_ready(instance.instance_id):
+            return instance
+    return None
 
 
 async def get_warm_instance(

@@ -744,7 +744,12 @@ async def end_reservation_runtime(
     # Cloud behavior remains exactly where it was: hourly servers may return to
     # the warm pool, while per-second/expired servers are destroyed.
     from app.routers.internal import send_to_agent
-    from app.services.orchestrator import destroy_instance, is_hourly_billing, release_to_warm_pool
+    from app.services.orchestrator import (
+        destroy_instance,
+        end_cancelled_boot_billing,
+        is_hourly_billing,
+        release_to_warm_pool,
+    )
     cloud = await _get_cloud_instance(reservation, db)
     if cloud and (was_active or had_started):
         await send_to_agent(cloud.instance_id, {"type": "reservation.end"})
@@ -753,6 +758,9 @@ async def end_reservation_runtime(
     if await is_hourly_billing(reservation.location, db):
         if was_active or had_started:
             return await release_to_warm_pool(reservation.instance_id, db)
+        # Still booting: released to the warm pool once ready, or handed to
+        # another reservation meanwhile.
+        await end_cancelled_boot_billing(reservation, db)
         return True
     return await destroy_instance(reservation.instance_id, db)
 

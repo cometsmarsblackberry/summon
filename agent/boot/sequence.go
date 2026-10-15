@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/summon/agent/podman"
@@ -106,12 +107,50 @@ type Reporter interface {
 	SendCompetitiveConfigs(configs []string, containerImage string) error
 }
 
+// gatedReporter stops forwarding lifecycle events once its sequence has been
+// superseded, so a boot replaced by a reconfigure cannot report progress or
+// readiness for the reservation that replaced it.
+type gatedReporter struct {
+	Reporter
+	closed atomic.Bool
+}
+
+func (r *gatedReporter) SendBootProgress(stage string, progress int, message string) error {
+	if r.closed.Load() {
+		return nil
+	}
+	return r.Reporter.SendBootProgress(stage, progress, message)
+}
+
+func (r *gatedReporter) SendServerReady(ip string, port, tvPort int) error {
+	if r.closed.Load() {
+		return nil
+	}
+	return r.Reporter.SendServerReady(ip, port, tvPort)
+}
+
+func (r *gatedReporter) SendServerReadyWithSDR(info websocket.ServerReadyInfo) error {
+	if r.closed.Load() {
+		return nil
+	}
+	return r.Reporter.SendServerReadyWithSDR(info)
+}
+
 // Sequence manages the boot sequence
 type Sequence struct {
 	ws          Reporter
+	gate        *gatedReporter
 	podman      *podman.Client
 	config      *ReservationConfig
 	containerID string
+
+	// mu guards config, which a handover may replace until the container is
+	// started with it (configFixed), and the run state below.
+	mu          sync.Mutex
+	configFixed bool
+	started     bool
+	finished    bool
+	done        chan struct{}
 }
 
 var (
@@ -122,33 +161,102 @@ var (
 	safeConfigNameRE           = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 )
 
+func newSequence(ws Reporter, config *ReservationConfig, containerID string) *Sequence {
+	gate := &gatedReporter{Reporter: ws}
+	return &Sequence{
+		ws:          gate,
+		gate:        gate,
+		podman:      podman.NewClient(""),
+		config:      config,
+		containerID: containerID,
+		done:        make(chan struct{}),
+	}
+}
+
 // NewSequence creates a new boot sequence
 func NewSequence(ws Reporter) *Sequence {
-	return &Sequence{
-		ws:     ws,
-		podman: podman.NewClient(""),
-	}
+	return newSequence(ws, nil, "")
 }
 
 // NewSequenceWithConfig creates a new boot sequence with a pre-loaded config.
 // Used for warm pool reconfiguration where config comes from WebSocket, not disk.
 func NewSequenceWithConfig(ws Reporter, config *ReservationConfig) *Sequence {
-	return &Sequence{
-		ws:     ws,
-		podman: podman.NewClient(""),
-		config: config,
-	}
+	return newSequence(ws, config, "")
 }
 
 // NewAttachedSequence reconstructs a sequence for a labeled container found
 // after a persistent host-agent restart. It does not start another container.
 func NewAttachedSequence(ws Reporter, config *ReservationConfig, containerID string) *Sequence {
-	return &Sequence{
-		ws:          ws,
-		podman:      podman.NewClient(""),
-		config:      config,
-		containerID: containerID,
+	return newSequence(ws, config, containerID)
+}
+
+// errSuperseded stops a sequence that was replaced before it began.
+var errSuperseded = errors.New("boot sequence superseded before it started")
+
+func (s *Sequence) begin(configFixed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.started = true
+	s.configFixed = configFixed
+	if s.gate.closed.Load() {
+		return errSuperseded
 	}
+	return nil
+}
+
+func (s *Sequence) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.finished {
+		s.finished = true
+		close(s.done)
+	}
+}
+
+// InProgress reports whether Run or RunReconfigure is still executing.
+func (s *Sequence) InProgress() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started && !s.finished
+}
+
+// AdoptConfig hands a boot that has not started its container yet to another
+// reservation, which keeps the image pull already under way. It returns false
+// once the container has been started with the current config or the
+// sequence is not running; the caller must then Supersede it and start over.
+func (s *Sequence) AdoptConfig(config *ReservationConfig) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started || s.finished || s.configFixed || s.config == nil {
+		return false
+	}
+	s.config = config
+	return true
+}
+
+// fixConfig fixes the config for the container about to start, unless a
+// handover changed the image since pulledImage was requested.
+func (s *Sequence) fixConfig(pulledImage string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.config.ContainerImage != pulledImage {
+		return false
+	}
+	s.configFixed = true
+	return true
+}
+
+// Supersede stops this sequence from reporting lifecycle events. The returned
+// channel closes when the sequence finishes; it never closes for a sequence
+// that is not InProgress.
+func (s *Sequence) Supersede() <-chan struct{} {
+	s.gate.closed.Store(true)
+	return s.done
+}
+
+// Superseded reports whether Supersede has been called.
+func (s *Sequence) Superseded() bool {
+	return s.gate.closed.Load()
 }
 
 // LoadReservationConfig reads the slot-local configuration persisted by
@@ -291,6 +399,10 @@ func (s *Sequence) ensureDesiredMap(ctx context.Context, progress int, phase str
 
 // Run executes the full boot sequence with retries
 func (s *Sequence) Run() error {
+	defer s.finish()
+	if err := s.begin(false); err != nil {
+		return err
+	}
 	ctx := context.Background()
 
 	// Stage 1: Report agent started
@@ -303,34 +415,43 @@ func (s *Sequence) Run() error {
 
 	// If the agent was started/reconfigured with a config already (delivered via
 	// authenticated WebSocket), skip legacy disk-based loading.
-	if s.config == nil {
+	if config := s.GetConfig(); config == nil {
 		if err := s.loadConfig(); err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
 	} else {
-		log.Printf("Using preloaded config for reservation #%d", s.config.ReservationNumber)
+		log.Printf("Using preloaded config for reservation #%d", config.ReservationNumber)
 	}
 
-	// Stage 3: Pull container image (with retries)
+	// Stage 3: Pull container image (with retries). Until the container
+	// starts, a handover may replace the config; if it changes the image,
+	// pull that one too.
 	log.Println("Boot stage: pulling_container")
-	pullAttempt := 0
-	err := retry("pull image", MaxRetries, func() error {
-		pullAttempt++
-		if pullAttempt > 1 {
-			log.Printf("Retrying image pull (attempt %d)", pullAttempt)
-			s.ws.SendBootProgress("pulling_container", 5, fmt.Sprintf("Retrying image download (attempt %d)...", pullAttempt))
-		}
-		return s.podman.PullImage(ctx, s.config.ContainerImage, func(stage string, progress int, message string) {
-			// Scale progress to 5-78% range (pull reports 0-100)
-			scaledProgress := 5 + int(float64(progress)*0.73)
-			if scaledProgress > 78 {
-				scaledProgress = 78
+	for {
+		image := s.GetConfig().ContainerImage
+		pullAttempt := 0
+		err := retry("pull image", MaxRetries, func() error {
+			pullAttempt++
+			if pullAttempt > 1 {
+				log.Printf("Retrying image pull (attempt %d)", pullAttempt)
+				s.ws.SendBootProgress("pulling_container", 5, fmt.Sprintf("Retrying image download (attempt %d)...", pullAttempt))
 			}
-			s.ws.SendBootProgress(stage, scaledProgress, message)
+			return s.podman.PullImage(ctx, image, func(stage string, progress int, message string) {
+				// Scale progress to 5-78% range (pull reports 0-100)
+				scaledProgress := 5 + int(float64(progress)*0.73)
+				if scaledProgress > 78 {
+					scaledProgress = 78
+				}
+				s.ws.SendBootProgress(stage, scaledProgress, message)
+			})
 		})
-	})
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+		if s.fixConfig(image) {
+			break
+		}
+		log.Printf("Container image changed by handover; pulling %s", s.GetConfig().ContainerImage)
 	}
 
 	// Stage 4: Start container (with retries)
@@ -338,7 +459,7 @@ func (s *Sequence) Run() error {
 	s.ws.SendBootProgress("starting_container", 80, "Starting TF2 server...")
 
 	var containerID string
-	err = retry("start container", MaxRetries, func() error {
+	err := retry("start container", MaxRetries, func() error {
 		var startErr error
 		containerName := s.config.ContainerName
 		if containerName == "" {
@@ -479,6 +600,10 @@ func (s *Sequence) Run() error {
 // RunReconfigure performs a boot sequence for warm pool reuse.
 // It skips config loading (config comes from WebSocket) and image pull (image already present).
 func (s *Sequence) RunReconfigure() error {
+	defer s.finish()
+	if err := s.begin(true); err != nil {
+		return err
+	}
 	ctx := context.Background()
 
 	// Stage 1: Report reconfigure started
@@ -850,7 +975,9 @@ func (s *Sequence) loadConfig() error {
 			return fmt.Errorf("parse config: %w", err)
 		}
 
+		s.mu.Lock()
 		s.config = &config
+		s.mu.Unlock()
 		log.Printf("Loaded config for reservation #%d from %s", config.ReservationNumber, configPath)
 		return nil
 	}
@@ -865,13 +992,14 @@ func (s *Sequence) loadConfig() error {
 // This is used during warm pool reconfigure to persist new credentials
 // so the agent can reconnect if restarted.
 func (s *Sequence) SaveConfig() error {
-	if s.config == nil {
+	config := s.GetConfig()
+	if config == nil {
 		return fmt.Errorf("no config to save")
 	}
 
 	configPath := ""
-	if s.config.StateDir != "" {
-		configPath = filepath.Join(s.config.StateDir, "reservation.json")
+	if config.StateDir != "" {
+		configPath = filepath.Join(config.StateDir, "reservation.json")
 	} else {
 		configPaths := ConfigFilePaths()
 		if len(configPaths) == 0 {
@@ -880,7 +1008,7 @@ func (s *Sequence) SaveConfig() error {
 		configPath = configPaths[0]
 	}
 
-	data, err := json.MarshalIndent(s.config, "", "  ")
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -892,7 +1020,7 @@ func (s *Sequence) SaveConfig() error {
 		return fmt.Errorf("write config: %w", err)
 	}
 
-	log.Printf("Saved config for reservation #%d to %s", s.config.ReservationNumber, configPath)
+	log.Printf("Saved config for reservation #%d to %s", config.ReservationNumber, configPath)
 	return nil
 }
 
@@ -903,6 +1031,8 @@ func (s *Sequence) GetContainerID() string {
 
 // GetConfig returns the current reservation config
 func (s *Sequence) GetConfig() *ReservationConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.config
 }
 
