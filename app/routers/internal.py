@@ -5,7 +5,7 @@ import hmac
 import logging
 import uuid
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -34,6 +34,19 @@ agent_instance_ids: dict[int, str] = {}
 
 # Track boot progress for SSE broadcasting (instance_id -> progress data)
 boot_progress: dict[str, dict] = {}
+
+# Optional behaviours each cloud agent advertised on connect (WebSocket id -> features)
+agent_features: dict[int, frozenset[str]] = {}
+BOOT_HANDOVER_FEATURE = "boot-handover"
+
+# Server-side view of whether a boot is moving (instance_id -> activity). Pull
+# progress repeats unchanged as a heartbeat, so only changes count.
+boot_activity: dict[str, dict] = {}
+
+# Stages before the agent starts the container, while it can still switch the
+# boot to another reservation.
+HANDOVER_BOOT_STAGES = frozenset({"agent_started", "loading_config", "pulling_container"})
+HANDOVER_PROGRESS_WINDOW = timedelta(seconds=60)
 
 # Track player data from SourceMod plugin (reservation_number -> player data)
 player_data: dict[int, dict] = {}
@@ -130,6 +143,25 @@ def get_boot_progress(instance_id: str) -> Optional[dict]:
     return boot_progress.get(instance_id)
 
 
+def boot_handover_ready(instance_id: str) -> bool:
+    """Whether a booting agent can be handed to another reservation now.
+
+    Requires an agent that supports it, a boot that has not started its
+    container, a pull that has not needed a retry, and recent progress.
+    """
+    websocket = connected_agents.get(instance_id)
+    activity = boot_activity.get(instance_id)
+    if websocket is None or activity is None:
+        return False
+    if BOOT_HANDOVER_FEATURE not in agent_features.get(id(websocket), ()):
+        return False
+    return (
+        activity["stage"] in HANDOVER_BOOT_STAGES
+        and not activity["pull_retried"]
+        and datetime.now(timezone.utc) - activity["changed_at"] < HANDOVER_PROGRESS_WINDOW
+    )
+
+
 def get_agent_stats(instance_id: str) -> Optional[dict]:
     """Get current system stats for an instance."""
     return agent_stats.get(instance_id)
@@ -215,9 +247,11 @@ def reassign_agent_instance_id(old_instance_id: str, new_instance_id: str) -> bo
     ws_id = id(websocket)
     agent_instance_ids[ws_id] = new_instance_id
     
-    # Migrate any existing boot_progress (shouldn't have any for new reservation, but just in case)
+    # Migrate any existing boot_progress (a handed-over boot is still pulling)
     if old_instance_id in boot_progress:
         boot_progress[new_instance_id] = boot_progress.pop(old_instance_id)
+    if old_instance_id in boot_activity:
+        boot_activity[new_instance_id] = boot_activity.pop(old_instance_id)
 
     # Migrate competitive configs so they're available under the new instance_id
     if old_instance_id in competitive_configs:
@@ -255,6 +289,11 @@ async def agent_websocket(
     connected_agents[instance_id] = websocket
     ws_id = id(websocket)
     agent_instance_ids[ws_id] = instance_id  # Track effective instance_id
+    agent_features[ws_id] = frozenset(
+        feature.strip()
+        for feature in websocket.headers.get("x-summon-agent-features", "").split(",")
+        if feature.strip()
+    )
     logger.info(f"Agent connected for instance {instance_id}")
 
     # Send reservation config to agent on connect (secrets delivered via
@@ -279,12 +318,14 @@ async def agent_websocket(
     finally:
         # Clean up using effective instance_id
         effective_id = agent_instance_ids.pop(ws_id, instance_id)
+        agent_features.pop(ws_id, None)
         if connected_agents.get(effective_id) is websocket:
             connected_agents.pop(effective_id, None)
             _fail_cloud_rcon_for_instance(
                 effective_id, "Cloud agent disconnected during RCON request"
             )
         boot_progress.pop(effective_id, None)
+        boot_activity.pop(effective_id, None)
         agent_stats.pop(effective_id, None)
 
 
@@ -1044,14 +1085,8 @@ async def _send_initial_config(instance_id: str, cloud_instance: CloudInstance, 
 
         fastdl_url = await get_fastdl_url(db)
 
-        # Fetch admin Steam IDs (Steam2 format) for SM_ADMINS
-        from app.utils.steam import steamid64_to_steamid2
-        admin_result = await db.execute(
-            select(User.steam_id).where(User.is_admin == True)
-        )
-        admin_steam_ids = [
-            steamid64_to_steamid2(row[0]) for row in admin_result.all()
-        ]
+        from app.services.orchestrator import get_admin_steam_ids
+        admin_steam_ids = await get_admin_steam_ids(db)
 
         config = build_reservation_config(
             reservation=reservation,
@@ -1092,12 +1127,25 @@ async def handle_agent_message(instance_id: str, data: dict):
         logger.info(f"Agent {instance_id} boot: {stage} ({progress}%)")
         
         # Store for SSE broadcasting
+        now = datetime.now(timezone.utc)
+        previous = boot_progress.get(instance_id)
         boot_progress[instance_id] = {
             "stage": stage,
             "progress": progress,
             "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now.isoformat(),
         }
+
+        activity = boot_activity.get(instance_id)
+        if activity is None or previous is None or (
+            (previous["stage"], previous["progress"], previous["message"]) != (stage, progress, message)
+        ):
+            boot_activity[instance_id] = {
+                "stage": stage,
+                "changed_at": now,
+                "pull_retried": bool(activity and activity["pull_retried"])
+                or str(message).startswith("Retrying image download"),
+            }
         
         # Handle special stages
         if stage == "server_ready":
@@ -1192,13 +1240,26 @@ async def handle_server_ready(instance_id: str, data: dict):
 
         if reservation.status == ReservationStatus.ENDED:
             # User cancelled during provisioning — warm pool or destroy based on billing model
-            from app.services.orchestrator import release_to_warm_pool, destroy_instance, is_hourly_billing
-            if await is_hourly_billing(reservation.location, db):
-                logger.info(f"Cancelled reservation #{reservation.reservation_number} server ready — releasing to warm pool")
-                await release_to_warm_pool(reservation.instance_id, db)
-            else:
-                logger.info(f"Cancelled reservation #{reservation.reservation_number} server ready — destroying (per-second billing)")
-                await destroy_instance(reservation.instance_id, db)
+            from app.services.orchestrator import (
+                cloud_instance_lock,
+                destroy_instance,
+                is_hourly_billing,
+                release_to_warm_pool,
+            )
+            async with cloud_instance_lock(reservation.instance_id):
+                # The boot may have been handed to another reservation since the lookup.
+                current_reservation_id = (await db.execute(
+                    select(CloudInstance.current_reservation_id)
+                    .where(CloudInstance.id == reservation.instance_id)
+                )).scalar_one_or_none()
+                if current_reservation_id != reservation.id:
+                    return
+                if await is_hourly_billing(reservation.location, db):
+                    logger.info(f"Cancelled reservation #{reservation.reservation_number} server ready — releasing to warm pool")
+                    await release_to_warm_pool(reservation.instance_id, db)
+                else:
+                    logger.info(f"Cancelled reservation #{reservation.reservation_number} server ready — destroying (per-second billing)")
+                    await destroy_instance(reservation.instance_id, db)
             return
 
         # Normal PROVISIONING → ACTIVE transition
@@ -1268,10 +1329,11 @@ async def handle_boot_failed(instance_id: str, error_message: str):
     logger.error(f"Boot failed for {instance_id}: {error_message}")
 
     async with async_session_maker() as db:
-        # Find the reservation and instance (match PROVISIONING or ENDED)
+        # Find the reservation the instance currently serves (match PROVISIONING
+        # or ENDED). Earlier reservations of a reused instance also reference it.
         result = await db.execute(
             select(Reservation, CloudInstance)
-            .join(CloudInstance, Reservation.instance_id == CloudInstance.id)
+            .join(CloudInstance, CloudInstance.current_reservation_id == Reservation.id)
             .where(CloudInstance.instance_id == instance_id)
             .where(Reservation.status.in_([ReservationStatus.PROVISIONING, ReservationStatus.ENDED]))
         )
@@ -1285,9 +1347,17 @@ async def handle_boot_failed(instance_id: str, error_message: str):
 
         if reservation.status == ReservationStatus.ENDED:
             # Cancelled reservation — just destroy, no retry, no status change
-            logger.info(f"Boot failed on cancelled reservation #{reservation.reservation_number}, destroying instance {cloud_id}")
-            from app.services.orchestrator import destroy_instance
-            await destroy_instance(cloud_id, db)
+            from app.services.orchestrator import cloud_instance_lock, destroy_instance
+            async with cloud_instance_lock(cloud_id):
+                # The boot may have been handed to another reservation since the lookup.
+                current_reservation_id = (await db.execute(
+                    select(CloudInstance.current_reservation_id)
+                    .where(CloudInstance.id == cloud_id)
+                )).scalar_one_or_none()
+                if current_reservation_id != reservation.id:
+                    return
+                logger.info(f"Boot failed on cancelled reservation #{reservation.reservation_number}, destroying instance {cloud_id}")
+                await destroy_instance(cloud_id, db)
             return
 
         # PROVISIONING — check if we can retry

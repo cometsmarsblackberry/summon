@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 type Client struct {
 	url         string
 	token       string
+	headers     http.Header
 	conn        *websocket.Conn
 	messages    chan []byte
 	done        chan struct{}
@@ -31,6 +34,7 @@ func NewClient(backendURL, token string) *Client {
 	return &Client{
 		url:         backendURL,
 		token:       token,
+		headers:     http.Header{},
 		messages:    make(chan []byte, 100),
 		done:        make(chan struct{}),
 		connectedCh: make(chan struct{}, 4),
@@ -50,7 +54,7 @@ func (c *Client) Connect() error {
 
 	log.Printf("Connecting to %s://%s%s", u.Scheme, u.Host, u.EscapedPath())
 
-	headers := http.Header{}
+	headers := c.headers.Clone()
 	headers.Set("Authorization", "Bearer "+c.token)
 
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), headers)
@@ -70,6 +74,39 @@ func (c *Client) Connect() error {
 
 	log.Println("Connected to backend")
 	return nil
+}
+
+// SetHeader adds a header sent with every connection attempt.
+func (c *Client) SetHeader(key, value string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.headers.Set(key, value)
+}
+
+// SetIdentity changes the instance that reconnects authenticate as, after the
+// backend reassigns this agent to another reservation.
+func (c *Client) SetIdentity(instanceID, token string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, err := WithInstanceID(c.url, instanceID)
+	if err != nil {
+		return err
+	}
+	c.url = u
+	c.token = token
+	return nil
+}
+
+// WithInstanceID points an agent WebSocket URL (.../ws/agent/{instance_id})
+// at another instance ID.
+func WithInstanceID(rawURL, instanceID string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL: %w", err)
+	}
+	u.Path = path.Join(path.Dir(strings.TrimSuffix(u.Path, "/")), instanceID)
+	u.RawPath = ""
+	return u.String(), nil
 }
 
 // Close closes the WebSocket connection

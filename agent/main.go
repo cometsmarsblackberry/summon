@@ -38,11 +38,19 @@ type Config struct {
 // agentVersion is injected by release builds with -X main.agentVersion=...
 var agentVersion = "0.2.6"
 
+// agentFeatures tells the backend which optional behaviours this cloud agent
+// supports. boot-handover: a container.reconfigure received while the image is
+// still pulling switches the boot to the new reservation.
+const agentFeatures = "boot-handover"
+
 // Global state
 var (
 	bootSeq         *boot.Sequence
 	podmanClient    *podman.Client
 	initialConfigCh = make(chan boot.ReservationConfig, 1)
+	// Closed when the latest reconfigure has finished replacing the previous
+	// boot, so reconfigures never run two containers at once.
+	reconfigureDone chan struct{}
 )
 
 func loadConfig() *Config {
@@ -131,6 +139,12 @@ func loadConfig() *Config {
 		// Config file has credentials - use them instead of env vars.
 		// This happens after a warm pool reconfigure.
 		log.Printf("Found updated credentials in config file %s, using instance_id: %s", configPath, fileConfig.InstanceID)
+		backendURL, err := websocket.WithInstanceID(cfg.BackendURL, fileConfig.InstanceID)
+		if err != nil {
+			log.Printf("Warning: Failed to point backend URL at %s: %v", fileConfig.InstanceID, err)
+			continue
+		}
+		cfg.BackendURL = backendURL
 		cfg.AuthToken = fileConfig.AuthToken
 		cfg.InstanceID = fileConfig.InstanceID
 		break
@@ -167,6 +181,7 @@ func runCloud(cfg *Config) {
 
 	// Create WebSocket client
 	wsClient := websocket.NewClient(cfg.BackendURL, cfg.AuthToken)
+	wsClient.SetHeader("X-Summon-Agent-Features", agentFeatures)
 
 	// Connect to backend
 	if err := wsClient.Connect(); err != nil {
@@ -193,18 +208,22 @@ func runCloud(cfg *Config) {
 	}
 
 	// Run boot sequence with the received config (or fall back to local file)
+	var seq *boot.Sequence
 	if reservationConfig != nil {
-		bootSeq = boot.NewSequenceWithConfig(wsClient, reservationConfig)
+		seq = boot.NewSequenceWithConfig(wsClient, reservationConfig)
 		// Save config locally so agent can reconnect after restart
-		if err := bootSeq.SaveConfig(); err != nil {
+		if err := seq.SaveConfig(); err != nil {
 			log.Printf("Warning: Failed to save config: %v", err)
 		}
 	} else {
-		bootSeq = boot.NewSequence(wsClient)
+		seq = boot.NewSequence(wsClient)
 	}
-	if err := bootSeq.Run(); err != nil {
+	bootSeq = seq
+	if err := seq.Run(); err != nil {
 		log.Printf("Boot sequence failed: %v", err)
-		wsClient.SendBootProgress("boot_failed", 0, err.Error())
+		if !seq.Superseded() {
+			wsClient.SendBootProgress("boot_failed", 0, err.Error())
+		}
 		// Keep running to allow debugging
 	}
 
@@ -347,32 +366,81 @@ func handleContainerReconfigure(msg []byte, client *websocket.Client) {
 		return
 	}
 
-	log.Printf("Reconfiguring for reservation #%d", reconfigMsg.Config.ReservationNumber)
-	client.SendBootProgress("reconfiguring", 5, "Reconfiguring server for new reservation...")
+	config := &reconfigMsg.Config
 
-	// Stop existing container (if any)
-	if bootSeq != nil && bootSeq.GetContainerID() != "" {
-		log.Println("Stopping existing container for reconfigure...")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := podmanClient.StopContainer(ctx, bootSeq.GetContainerID()); err != nil {
-			log.Printf("Failed to stop existing container: %v (continuing anyway)", err)
+	// The backend has reassigned this agent; reconnects must authenticate as
+	// the new reservation's instance.
+	if config.InstanceID != "" && config.AuthToken != "" {
+		if err := client.SetIdentity(config.InstanceID, config.AuthToken); err != nil {
+			log.Printf("Warning: Failed to update reconnect identity: %v", err)
 		}
-		cancel()
 	}
 
+	previous := bootSeq
+
+	// A boot still pulling the image continues for the new reservation.
+	if previous != nil && previous.AdoptConfig(config) {
+		log.Printf("Handed in-progress boot to reservation #%d", config.ReservationNumber)
+		if err := previous.SaveConfig(); err != nil {
+			log.Printf("Warning: Failed to save config: %v (agent may fail to reconnect after restart)", err)
+		}
+		return
+	}
+
+	log.Printf("Reconfiguring for reservation #%d", config.ReservationNumber)
+	client.SendBootProgress("reconfiguring", 5, "Reconfiguring server for new reservation...")
+
 	// Create new boot sequence with the received config
-	bootSeq = boot.NewSequenceWithConfig(client, &reconfigMsg.Config)
+	next := boot.NewSequenceWithConfig(client, config)
+	bootSeq = next
 
 	// Save the new config to disk so agent can reconnect after restart
-	if err := bootSeq.SaveConfig(); err != nil {
+	if err := next.SaveConfig(); err != nil {
 		log.Printf("Warning: Failed to save config: %v (agent may fail to reconnect after restart)", err)
 	}
 
-	// Run reconfigure sequence (skips image pull since image is already present)
+	var previousFinished <-chan struct{}
+	if previous != nil {
+		previousFinished = previous.Supersede()
+	}
+	priorReconfigure := reconfigureDone
+	done := make(chan struct{})
+	reconfigureDone = done
+
 	go func() {
-		if err := bootSeq.RunReconfigure(); err != nil {
+		defer close(done)
+		if priorReconfigure != nil {
+			<-priorReconfigure
+		}
+		if previous != nil {
+			if previous.InProgress() {
+				// Its container already started with the previous config. Let
+				// that boot finish silently, then replace its container.
+				log.Println("Waiting for the in-progress boot to finish before reconfiguring...")
+				<-previousFinished
+			}
+
+			// Stop existing container (if any)
+			if containerID := previous.GetContainerID(); containerID != "" {
+				log.Println("Stopping existing container for reconfigure...")
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := podmanClient.StopContainer(ctx, containerID); err != nil {
+					log.Printf("Failed to stop existing container: %v (continuing anyway)", err)
+				}
+				cancel()
+			}
+		}
+
+		if next.Superseded() {
+			return // A later reconfigure replaced this one before it started.
+		}
+
+		// Run reconfigure sequence (skips image pull since image is already present)
+		if err := next.RunReconfigure(); err != nil {
 			log.Printf("Reconfigure boot sequence failed: %v", err)
-			client.SendBootProgress("boot_failed", 0, err.Error())
+			if !next.Superseded() {
+				client.SendBootProgress("boot_failed", 0, err.Error())
+			}
 		}
 	}()
 }
