@@ -18,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.5.0"
+#define PLUGIN_VERSION "1.5.1"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1553,7 +1553,9 @@ static const char g_sAllowedPrefixes[][] = {
     "tfarena_",
     "ultitrio_",
     "ozfortress_",
-    "cltf2_"
+    "cltf2_",
+    "afc_",
+    "af_"
 };
 
 // RGL plugins to move between disabled/ and plugins/ when RGL configs are loaded.

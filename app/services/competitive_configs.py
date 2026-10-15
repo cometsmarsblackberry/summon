@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-ALLOWED_PREFIXES = ("rgl_", "etf2l_", "fbtf_", "tfarena_", "ultitrio_", "ozfortress_", "cltf2_")
+ALLOWED_PREFIXES = ("rgl_", "etf2l_", "fbtf_", "tfarena_", "ultitrio_", "ozfortress_", "cltf2_", "afc_", "af_")
 _SKIP_SUFFIXES = ("_base", "_custom", "_common")
 
 _FORMAT_MAP: list[tuple[str, str, str]] = [
@@ -33,6 +33,11 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
     ("ozfortress_", "ozfortress", "Other"),
     ("cltf2_4s_", "CLTF2", "4v4"),
     ("cltf2_", "CLTF2", "Other"),
+    # AsiaFortress names its 6s configs afc_* and its Highlander configs af_*
+    ("afc_6s_", "AsiaFortress", "6v6"),
+    ("afc_", "AsiaFortress", "Other"),
+    ("af_HL_", "AsiaFortress", "Highlander"),
+    ("af_", "AsiaFortress", "Other"),
     # Fallback single-prefix entries for configs like etf2l_ultiduo
     ("etf2l_", "ETF2L", "Other"),
     ("fbtf_", "FBTF", "Other"),
@@ -42,7 +47,7 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
 _BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP}
 
 # Main leagues are listed first in the UI; the rest follow alphabetically.
-LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "FBTF")
+LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "AsiaFortress", "FBTF")
 
 
 @dataclass(frozen=True)

@@ -172,6 +172,8 @@ _PREVIEW_MAPS = (
 )
 
 _PREVIEW_CONFIGS = (
+    "af_HL_koth",
+    "afc_6s_5cp_match_pro",
     "etf2l_6v6_5cp",
     "etf2l_6v6_koth",
     "etf2l_9v9_5cp",

@@ -74,7 +74,7 @@ Competitive config names must match an existing `cfg/<name>.cfg` file and
 start with one of these prefixes:
 
 ```text
-rgl_  etf2l_  fbtf_  tfarena_  ultitrio_  ozfortress_  cltf2_
+rgl_  etf2l_  fbtf_  tfarena_  ultitrio_  ozfortress_  cltf2_  afc_  af_
 ```
 
 The special `summon_reset` config resets the server to its defaults. Loading an
