@@ -47,6 +47,8 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
 _BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP}
 
 # Main leagues are listed first in the UI; the rest follow alphabetically.
+# The in-game config menu mirrors this order in
+# tf2-reservation-plugin/scripting/summon.sp.
 LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "AsiaFortress", "FBTF")
 
 

@@ -18,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.5.3"
+#define PLUGIN_VERSION "1.5.4"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1606,17 +1606,31 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
 // Competitive Config
 // ============================================================================
 
-// Allowed config prefixes -- any cfg file starting with one of these is valid
-static const char g_sAllowedPrefixes[][] = {
-    "rgl_",
-    "etf2l_",
-    "fbtf_",
-    "tfarena_",
-    "ultitrio_",
-    "ozfortress_",
-    "cltf2_",
-    "afc_",
-    "af_"
+// Allowed config prefixes -- any cfg file starting with one of these is valid.
+// Each prefix is paired with the league whose menu lists its configs. The names
+// match the web panel's. AsiaFortress names its 6s configs afc_* and its
+// Highlander configs af_*, so both share one league.
+static const char g_sConfigPrefixes[][][] = {
+    { "rgl_", "RGL" },
+    { "etf2l_", "ETF2L" },
+    { "fbtf_", "FBTF" },
+    { "tfarena_", "TFArena" },
+    { "ultitrio_", "Ultitrio" },
+    { "ozfortress_", "ozfortress" },
+    { "cltf2_", "CLTF2" },
+    { "afc_", "AsiaFortress" },
+    { "af_", "AsiaFortress" }
+};
+
+// Main leagues are listed first in the config menu; the rest follow
+// alphabetically. Keep in sync with LEAGUE_PRIORITY in
+// app/services/competitive_configs.py.
+static const char g_sLeaguePriority[][] = {
+    "ETF2L",
+    "RGL",
+    "ozfortress",
+    "AsiaFortress",
+    "FBTF"
 };
 
 // RGL plugins to move between disabled/ and plugins/ when RGL configs are loaded.
@@ -1734,13 +1748,38 @@ bool IsAllowedConfig(const char[] cfgFile)
     {
         return FileExists("cfg/summon_reset.cfg");
     }
-    for (int i = 0; i < sizeof(g_sAllowedPrefixes); i++)
+    for (int i = 0; i < sizeof(g_sConfigPrefixes); i++)
     {
-        if (strncmp(cfgFile, g_sAllowedPrefixes[i], strlen(g_sAllowedPrefixes[i]), false) == 0)
+        if (strncmp(cfgFile, g_sConfigPrefixes[i][0], strlen(g_sConfigPrefixes[i][0]), false) == 0)
         {
             char path[PLATFORM_MAX_PATH];
             Format(path, sizeof(path), "cfg/%s.cfg", cfgFile);
             return FileExists(path);
+        }
+    }
+    return false;
+}
+
+// Gets the league of a cfg/ file name for the config menus. Returns false if
+// the file is not a selectable config.
+bool GetConfigFileLeague(const char[] filename, char[] league, int leagueSize)
+{
+    int len = strlen(filename);
+    if (len < 5 || strcmp(filename[len - 4], ".cfg") != 0)
+        return false;
+
+    // Skip base/internal configs
+    if ((len >= 9 && strcmp(filename[len - 9], "_base.cfg") == 0) ||
+        (len >= 11 && strcmp(filename[len - 11], "_custom.cfg") == 0) ||
+        (len >= 12 && strcmp(filename[len - 12], "_common.cfg") == 0))
+        return false;
+
+    for (int i = 0; i < sizeof(g_sConfigPrefixes); i++)
+    {
+        if (strncmp(filename, g_sConfigPrefixes[i][0], strlen(g_sConfigPrefixes[i][0]), false) == 0)
+        {
+            strcopy(league, leagueSize, g_sConfigPrefixes[i][1]);
+            return true;
         }
     }
     return false;
@@ -1815,46 +1854,26 @@ void ShowLeagueMenu(int client)
     if (dir != null)
     {
         char filename[PLATFORM_MAX_PATH];
+        char league[32];
         FileType type;
         while (dir.GetNext(filename, sizeof(filename), type))
         {
             if (type != FileType_File)
                 continue;
 
-            int len = strlen(filename);
-            if (len < 5 || strcmp(filename[len - 4], ".cfg") != 0)
-                continue;
-
-            // Skip base/internal configs
-            if ((len >= 9 && strcmp(filename[len - 9], "_base.cfg") == 0) ||
-                (len >= 11 && strcmp(filename[len - 11], "_custom.cfg") == 0) ||
-                (len >= 12 && strcmp(filename[len - 12], "_common.cfg") == 0))
-                continue;
-
-            // Check if it matches any allowed prefix
-            for (int i = 0; i < sizeof(g_sAllowedPrefixes); i++)
+            // Add if not already in the list
+            if (GetConfigFileLeague(filename, league, sizeof(league)) && leagues.FindString(league) == -1)
             {
-                if (strncmp(filename, g_sAllowedPrefixes[i], strlen(g_sAllowedPrefixes[i]), false) == 0)
-                {
-                    // Extract league name (prefix without trailing _)
-                    char league[32];
-                    strcopy(league, sizeof(league), g_sAllowedPrefixes[i]);
-                    league[strlen(league) - 1] = '\0';
-
-                    // Add if not already in the list
-                    if (leagues.FindString(league) == -1)
-                    {
-                        leagues.PushString(league);
-                    }
-                    break;
-                }
+                leagues.PushString(league);
             }
         }
         delete dir;
     }
 
-    // Sort alphabetically
     leagues.SortCustom(SortLeagueStrings);
+
+    // Listed first so it stays on the first page as leagues are added
+    menu.AddItem("summon_reset", "Reset to Defaults");
 
     for (int i = 0; i < leagues.Length; i++)
     {
@@ -1865,7 +1884,6 @@ void ShowLeagueMenu(int client)
 
     delete leagues;
 
-    menu.AddItem("summon_reset", "Reset to Defaults");
     menu.Display(client, 30);
 }
 
@@ -1875,7 +1893,22 @@ public int SortLeagueStrings(int index1, int index2, Handle array, Handle hndl)
     char str1[32], str2[32];
     list.GetString(index1, str1, sizeof(str1));
     list.GetString(index2, str2, sizeof(str2));
+
+    int priority1 = GetLeaguePriority(str1);
+    int priority2 = GetLeaguePriority(str2);
+    if (priority1 != priority2)
+        return priority1 - priority2;
     return strcmp(str1, str2, false);
+}
+
+int GetLeaguePriority(const char[] league)
+{
+    for (int i = 0; i < sizeof(g_sLeaguePriority); i++)
+    {
+        if (StrEqual(league, g_sLeaguePriority[i]))
+            return i;
+    }
+    return sizeof(g_sLeaguePriority);
 }
 
 public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param2)
@@ -1919,11 +1952,7 @@ void ShowConfigMenu(int client, const char[] league)
     menu.SetTitle("Select Config");
     menu.ExitBackButton = true;
 
-    // Build prefix to match (e.g. "rgl_", "etf2l_", "fbtf_")
-    char prefix[32];
-    Format(prefix, sizeof(prefix), "%s_", league);
-
-    // Scan cfg/ directory for matching .cfg files
+    // Scan cfg/ directory for the league's .cfg files
     DirectoryListing dir = OpenDirectory("cfg");
     if (dir == null)
     {
@@ -1933,31 +1962,18 @@ void ShowConfigMenu(int client, const char[] league)
     }
 
     char filename[PLATFORM_MAX_PATH];
+    char fileLeague[32];
     FileType type;
     while (dir.GetNext(filename, sizeof(filename), type))
     {
         if (type != FileType_File)
             continue;
 
-        // Must start with the league prefix
-        if (strncmp(filename, prefix, strlen(prefix), false) != 0)
-            continue;
-
-        // Must end with .cfg
-        int len = strlen(filename);
-        if (len < 5 || strcmp(filename[len - 4], ".cfg") != 0)
-            continue;
-
-        // Skip summon_reset (handled separately as Reset)
-        if (strncmp(filename, "summon_reset", 12, false) == 0)
-            continue;
-
-        // Skip base/internal configs (*_base.cfg, *_custom.cfg)
-        if ((len >= 9 && strcmp(filename[len - 9], "_base.cfg") == 0) ||
-            (len >= 11 && strcmp(filename[len - 11], "_custom.cfg") == 0))
+        if (!GetConfigFileLeague(filename, fileLeague, sizeof(fileLeague)) || !StrEqual(fileLeague, league))
             continue;
 
         // Strip .cfg extension for the menu item
+        int len = strlen(filename);
         char cfgName[64];
         strcopy(cfgName, sizeof(cfgName), filename);
         cfgName[len - 4] = '\0';
