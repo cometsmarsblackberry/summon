@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,9 @@ def load_failure_messages_module():
 
 class PublicFailureReasonTests(unittest.TestCase):
     def setUp(self):
-        self.module, self.status = load_failure_messages_module()
+        # Restore sys.modules afterwards so the stubs don't leak into later tests.
+        with patch.dict(sys.modules):
+            self.module, self.status = load_failure_messages_module()
 
     def test_failed_reservation_hides_raw_provider_details_before_exhaustion(self):
         message = self.module.public_failure_reason(
