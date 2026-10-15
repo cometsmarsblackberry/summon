@@ -917,6 +917,13 @@
                     class="px-2.5 py-1 text-xs rounded border transition-colors bg-red-50 hover:bg-red-100 border-red-200 text-red-700">
                     {{ _('status.end_reservation') }}
                 </button>
+                {% if user.id == reservation.user_id %}
+                <a href="/feedback?reservation={{ reservation.id }}"
+                    x-show="['ended', 'failed', 'cancelled', 'no_show'].includes(status)" x-cloak
+                    class="px-2.5 py-1 text-xs rounded border transition-colors bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700">
+                    {{ _('status.send_feedback') }}
+                </a>
+                {% endif %}
             </div>
             {% endif %}
         </div>

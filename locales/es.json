@@ -14,6 +14,7 @@
     "footer": {
         "about": "Acerca de",
         "stats": "Estadísticas",
+        "feedback": "Comentarios",
         "discord": "Discord",
         "ping_tagline": "Bajo ping, en todas partes",
         "privacy": "Privacidad"
@@ -107,6 +108,7 @@
         "restart_failed": "Error al reiniciar el servidor.",
         "restarting": "Reiniciando el servidor...",
         "end_reservation": "Terminar",
+        "send_feedback": "Enviar comentarios",
         "competitive_config": "Configuración competitiva",
         "league": "Liga",
         "format": "Formato",
@@ -276,6 +278,7 @@
         "col_status": "Estado",
         "col_created": "Creado",
         "view": "Ver",
+        "feedback": "Comentarios",
         "no_reservations": "Aún no has hecho ninguna reserva.",
         "reserve_server": "Reservar un servidor"
     },
@@ -359,6 +362,39 @@
         "no_reason": "Sin razón proporcionada",
         "no_bans": "No hay bans para mostrar."
     },
+    "feedback": {
+        "title": "Comentarios - {site_name}",
+        "description": "Informa de un problema o sugiere una mejora para {site_name}.",
+        "heading": "Comentarios",
+        "intro": "¿Tuviste lag, una configuración rota o un servidor que no se inició? ¿Tienes una idea para mejorar algo? Cuéntanoslo aquí.",
+        "discord_hint": "¿Necesitas ayuda ahora mismo? Pregunta en Discord.",
+        "login_prompt": "Inicia sesión con Steam para enviar comentarios.",
+        "unavailable": "Tu cuenta no puede enviar comentarios en este momento.",
+        "reservation_label": "Reserva",
+        "reservation_none": "No es sobre una reserva concreta",
+        "category_label": "Categoría",
+        "category_placeholder": "Elige una categoría",
+        "categories": {
+            "lag": "Lag o rendimiento",
+            "connection": "Problema de conexión",
+            "config": "Configuración o ajustes",
+            "map": "Problema con el mapa",
+            "provisioning": "El servidor no se inició",
+            "website": "Sitio web",
+            "suggestion": "Sugerencia",
+            "other": "Otro"
+        },
+        "message_label": "Mensaje",
+        "message_placeholder": "¿Qué pasó? Las horas, los mapas y cualquier otro detalle que notaras ayudan.",
+        "context_note": "Los detalles técnicos de la reserva seleccionada (ubicación, servidor, mapa, configuración) se adjuntan automáticamente.",
+        "submit": "Enviar comentarios",
+        "submitting": "Enviando...",
+        "success_heading": "¡Gracias por tus comentarios!",
+        "success_body": "Tu mensaje se ha enviado al equipo.",
+        "send_another": "Enviar más comentarios",
+        "submit_failed": "No se pudieron enviar los comentarios. Inténtalo de nuevo.",
+        "network_error": "Error de red — verifica tu conexión e inténtalo de nuevo."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 No encontrado",
@@ -418,7 +454,11 @@
         "command_unsafe": "No se permiten separadores de comandos ni caracteres de control.",
         "command_invalid_name": "El nombre del comando del servidor no es válido.",
         "command_not_allowed": "Ese comando del servidor no está permitido.",
-        "profile_not_public": "Tu perfil de Steam debe ser público para crear reservas."
+        "profile_not_public": "Tu perfil de Steam debe ser público para crear reservas.",
+        "feedback_invalid_category": "Elige una categoría para tus comentarios.",
+        "feedback_message_required": "Escribe un mensaje antes de enviar.",
+        "feedback_message_too_long": "Tu mensaje es demasiado largo. El límite es de {max} caracteres.",
+        "feedback_rate_limited": "Has enviado muchos comentarios recientemente. Inténtalo de nuevo más tarde."
     },
     "language": {
         "label": "Idioma"

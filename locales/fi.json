@@ -14,6 +14,7 @@
     "footer": {
         "about": "Tietoa",
         "stats": "Tilastot",
+        "feedback": "Palaute",
         "discord": "Discord",
         "ping_tagline": "Matala ping kaikkialla",
         "privacy": "Tietosuoja"
@@ -107,6 +108,7 @@
         "restart_failed": "Palvelimen uudelleenkäynnistys epäonnistui.",
         "restarting": "Käynnistetään palvelinta uudelleen...",
         "end_reservation": "Lopeta",
+        "send_feedback": "Lähetä palautetta",
         "competitive_config": "Kilpailuasetukset",
         "league": "Liiga",
         "format": "Formaatti",
@@ -276,6 +278,7 @@
         "col_status": "Tila",
         "col_created": "Luotu",
         "view": "Näytä",
+        "feedback": "Palaute",
         "no_reservations": "Et ole vielä tehnyt yhtään varausta.",
         "reserve_server": "Varaa palvelin"
     },
@@ -359,6 +362,39 @@
         "no_reason": "Ei syytä annettu",
         "no_bans": "Ei kieltoja näytettäväksi."
     },
+    "feedback": {
+        "title": "Palaute - {site_name}",
+        "description": "Ilmoita ongelmasta tai ehdota parannusta palveluun {site_name}.",
+        "heading": "Palaute",
+        "intro": "Oliko lagia, rikkinäinen asetus tai palvelin, joka ei käynnistynyt? Onko sinulla idea parannukseksi? Kerro siitä täällä.",
+        "discord_hint": "Tarvitsetko apua heti? Kysy Discordissa.",
+        "login_prompt": "Kirjaudu sisään Steamillä lähettääksesi palautetta.",
+        "unavailable": "Tililläsi ei voi lähettää palautetta juuri nyt.",
+        "reservation_label": "Varaus",
+        "reservation_none": "Ei koske tiettyä varausta",
+        "category_label": "Luokka",
+        "category_placeholder": "Valitse luokka",
+        "categories": {
+            "lag": "Lagi tai suorituskyky",
+            "connection": "Yhteysongelma",
+            "config": "Asetukset",
+            "map": "Karttaongelma",
+            "provisioning": "Palvelin ei käynnistynyt",
+            "website": "Verkkosivusto",
+            "suggestion": "Ehdotus",
+            "other": "Muu"
+        },
+        "message_label": "Viesti",
+        "message_placeholder": "Mitä tapahtui? Ajankohdat, kartat ja kaikki muu huomaamasi auttavat.",
+        "context_note": "Valitun varauksen tekniset tiedot (sijainti, palvelin, kartta, asetus) liitetään automaattisesti.",
+        "submit": "Lähetä palautetta",
+        "submitting": "Lähetetään...",
+        "success_heading": "Kiitos palautteestasi!",
+        "success_body": "Viestisi on lähetetty tiimille.",
+        "send_another": "Lähetä lisää palautetta",
+        "submit_failed": "Palautteen lähettäminen epäonnistui. Yritä uudelleen.",
+        "network_error": "Verkkovirhe — tarkista yhteytesi ja yritä uudelleen."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Ei löydy",
@@ -418,7 +454,11 @@
         "command_unsafe": "Komentojen erottimia ja ohjausmerkkejä ei sallita.",
         "command_invalid_name": "Palvelinkomennon nimi on virheellinen.",
         "command_not_allowed": "Tätä palvelinkomentoa ei sallita.",
-        "profile_not_public": "Steam-profiilisi täytyy olla julkinen luodaksesi varauksia."
+        "profile_not_public": "Steam-profiilisi täytyy olla julkinen luodaksesi varauksia.",
+        "feedback_invalid_category": "Valitse palautteen luokka.",
+        "feedback_message_required": "Kirjoita viesti ennen lähettämistä.",
+        "feedback_message_too_long": "Viestisi on liian pitkä. Enimmäispituus on {max} merkkiä.",
+        "feedback_rate_limited": "Olet lähettänyt paljon palautetta lyhyessä ajassa. Yritä myöhemmin uudelleen."
     },
     "language": {
         "label": "Kieli"

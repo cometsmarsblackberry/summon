@@ -45,7 +45,13 @@
                         x-text="summonIntl.dateTime(iso, locale)">
                         {{ reservation.created_at.strftime('%d/%m/%Y %H:%M' if request.state.locale|default('en') == 'en' else '%Y-%m-%d %H:%M') }}
                     </td>
-                    <td class="px-4 py-3 text-right">
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        {% if reservation.status.value in ['ended', 'failed', 'cancelled', 'no_show'] %}
+                        <a href="/feedback?reservation={{ reservation.id }}"
+                            class="text-sm text-brand-400 hover:text-brand-300 mr-3">
+                            {{ _('my_reservations.feedback') }}
+                        </a>
+                        {% endif %}
                         <a href="/reservations/{{ reservation.id }}"
                             class="text-sm text-brand-400 hover:text-brand-300">
                             {{ _('my_reservations.view') }}

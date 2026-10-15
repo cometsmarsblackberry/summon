@@ -7,6 +7,7 @@
     var _adminLocations = {{ locations | tojson }};
     var _adminMaps = {{ maps | tojson }};
     var _adminTrivia = {{ trivia | tojson }};
+    var _adminFeedback = {{ feedback | tojson }};
     var _adminUsers = {{ users | tojson }};
     var _adminProviders = {{ providers | tojson }};
     var _adminLocationProviders = {{ location_providers | tojson }};
@@ -48,7 +49,7 @@
             /* ── Tab state ── */
             tab: 'dashboard',
             init() {
-                const valid = ['dashboard','locations','instant-hosts','providers','maps','trivia','users','settings'];
+                const valid = ['dashboard','locations','instant-hosts','providers','maps','trivia','users','feedback','settings'];
                 const hash = window.location.hash.slice(1);
                 if (valid.includes(hash)) this.tab = hash;
                 this.$watch('tab', v => { window.location.hash = v; });
@@ -58,6 +59,9 @@
                 this.$watch('resSearch', () => { this.resPage = 1; });
                 this.$watch('userSearch', () => { this.userPage = 1; });
                 this.$watch('triviaSearch', () => { this.triviaPage = 1; });
+                this.$watch('feedbackSearch', () => { this.feedbackPage = 1; });
+                this.$watch('feedbackStatusFilter', () => { this.feedbackPage = 1; });
+                this.$watch('feedbackCategoryFilter', () => { this.feedbackPage = 1; });
             },
 
             /* ── Instances ── */
@@ -594,6 +598,46 @@
                 } else { const err = await res.json(); alert(err.detail || 'Error'); }
             },
 
+            /* ── Feedback ── */
+            allFeedback: _adminFeedback,
+            feedbackSearch: '',
+            feedbackStatusFilter: 'new',
+            feedbackCategoryFilter: '',
+            feedbackPage: 1,
+            feedbackPerPage: 20,
+            get newFeedbackCount() { return this.allFeedback.filter(f => f.status === 'new').length; },
+            get feedbackCategories() { return [...new Set(this.allFeedback.map(f => f.category))].sort(); },
+            get filteredFeedback() {
+                let items = this.allFeedback;
+                if (this.feedbackStatusFilter) items = items.filter(f => f.status === this.feedbackStatusFilter);
+                if (this.feedbackCategoryFilter) items = items.filter(f => f.category === this.feedbackCategoryFilter);
+                const q = this.feedbackSearch.toLowerCase();
+                if (q) items = items.filter(f => f.message.toLowerCase().includes(q)
+                    || (f.user_name||'').toLowerCase().includes(q)
+                    || (f.user_steam_id||'').includes(q)
+                    || (f.reservation_number != null && String(f.reservation_number).includes(q)));
+                return items;
+            },
+            get feedbackTotalPages() { return Math.max(1, Math.ceil(this.filteredFeedback.length / this.feedbackPerPage)); },
+            get paginatedFeedback() {
+                const p = Math.min(this.feedbackPage, this.feedbackTotalPages);
+                return this.filteredFeedback.slice((p - 1) * this.feedbackPerPage, p * this.feedbackPerPage);
+            },
+            async setFeedbackStatus(f, status) {
+                const res = await fetch('/admin/feedback/' + f.id, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+                if (res.ok) { const d = await res.json(); f.status = d.status; }
+                else { const e = await res.json().catch(() => ({})); alert(e.detail || 'Error'); }
+            },
+            async deleteFeedback(f) {
+                if (!confirm('Delete this feedback from ' + f.user_name + '?')) return;
+                const res = await fetch('/admin/feedback/' + f.id, { method: 'DELETE' });
+                if (res.ok) this.allFeedback = this.allFeedback.filter(x => x.id !== f.id);
+                else { const e = await res.json().catch(() => ({})); alert(e.detail || 'Error'); }
+            },
+
             /* ── Users ── */
             allUsers: _adminUsers,
             userSearch: '',
@@ -703,6 +747,7 @@
             {id:'maps', label:'Maps'},
             {id:'trivia', label:'Trivia'},
             {id:'users', label:'Users'},
+            {id:'feedback', label: newFeedbackCount ? 'Feedback (' + newFeedbackCount + ')' : 'Feedback'},
             {id:'settings', label:'Settings'}
         ]" :key="t.id">
             <button @click="tab = t.id"
@@ -1434,6 +1479,86 @@
                     <span class="px-2" x-text="Math.min(userPage,userTotalPages) + ' / ' + userTotalPages"></span>
                     <button @click="userPage++" :disabled="userPage >= userTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
                     <button @click="userPage = userTotalPages" :disabled="userPage >= userTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <!-- FEEDBACK TAB                                                -->
+    <!-- ════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'feedback'" x-cloak>
+        <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-4">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">
+                    Feedback
+                    <span class="text-xs font-normal text-slate-400 ml-1" x-text="'(' + newFeedbackCount + ' new, ' + allFeedback.length + ' total)'"></span>
+                </h2>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select x-model="feedbackStatusFilter"
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <option value="new">New</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="">All</option>
+                    </select>
+                    <select x-model="feedbackCategoryFilter"
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                        <option value="">All categories</option>
+                        <template x-for="c in feedbackCategories" :key="c">
+                            <option :value="c" x-text="c"></option>
+                        </template>
+                    </select>
+                    <input x-model="feedbackSearch" placeholder="Search feedback..."
+                        class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-48">
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <template x-for="f in paginatedFeedback" :key="f.id">
+                    <div class="border border-slate-200 rounded-lg p-3">
+                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 mb-2">
+                            <span class="px-1.5 py-0.5 rounded bg-brand-100 text-brand-700" x-text="f.category"></span>
+                            <span x-show="f.status === 'resolved'" class="px-1.5 py-0.5 rounded bg-green-100 text-green-800">resolved</span>
+                            <a :href="'https://steamcommunity.com/profiles/' + f.user_steam_id" target="_blank"
+                                class="text-brand-400 hover:underline" x-text="f.user_name"></a>
+                            <template x-if="f.reservation_id">
+                                <a :href="'/reservations/' + f.reservation_id" class="text-slate-700 hover:underline"
+                                    x-text="'Reservation #' + (f.reservation_number ?? f.reservation_id)"></a>
+                            </template>
+                            <span :title="f.created_at" x-text="summonIntl.dateTime(f.created_at, 'en')"></span>
+                            <div class="ml-auto flex items-center gap-3">
+                                <button @click="setFeedbackStatus(f, f.status === 'new' ? 'resolved' : 'new')"
+                                    class="text-xs text-brand-600 hover:text-brand-800"
+                                    x-text="f.status === 'new' ? 'Resolve' : 'Reopen'"></button>
+                                <button @click="deleteFeedback(f)" class="text-xs text-red-500 hover:text-red-700">Delete</button>
+                            </div>
+                        </div>
+                        <p class="text-sm text-slate-800 whitespace-pre-wrap break-words" x-text="f.message"></p>
+                        <template x-if="f.context">
+                            <details class="mt-2">
+                                <summary class="text-xs text-slate-500 cursor-pointer">Reservation context</summary>
+                                <pre class="mt-1 p-2 bg-slate-50 border border-slate-200 rounded text-xs text-slate-700 whitespace-pre-wrap break-words"
+                                    x-text="JSON.stringify(f.context, null, 2)"></pre>
+                            </details>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Empty state -->
+            <div x-show="filteredFeedback.length === 0" class="text-center py-8 text-sm text-slate-400" x-cloak>
+                No feedback found.
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex items-center justify-between mt-3 text-xs text-slate-500" x-show="feedbackTotalPages > 1" x-cloak>
+                <span x-text="'Showing ' + ((Math.min(feedbackPage,feedbackTotalPages)-1)*feedbackPerPage+1) + '\u2013' + Math.min(Math.min(feedbackPage,feedbackTotalPages)*feedbackPerPage, filteredFeedback.length) + ' of ' + filteredFeedback.length"></span>
+                <div class="flex items-center gap-1">
+                    <button @click="feedbackPage = 1" :disabled="feedbackPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&laquo;</button>
+                    <button @click="feedbackPage--" :disabled="feedbackPage <= 1" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&lsaquo;</button>
+                    <span class="px-2" x-text="Math.min(feedbackPage,feedbackTotalPages) + ' / ' + feedbackTotalPages"></span>
+                    <button @click="feedbackPage++" :disabled="feedbackPage >= feedbackTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&rsaquo;</button>
+                    <button @click="feedbackPage = feedbackTotalPages" :disabled="feedbackPage >= feedbackTotalPages" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed">&raquo;</button>
                 </div>
             </div>
         </div>

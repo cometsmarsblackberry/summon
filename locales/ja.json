@@ -14,6 +14,7 @@
     "footer": {
         "about": "概要",
         "stats": "統計",
+        "feedback": "フィードバック",
         "discord": "Discord",
         "ping_tagline": "どこでも低レイテンシ",
         "privacy": "プライバシー"
@@ -107,6 +108,7 @@
         "restart_failed": "サーバーの再起動に失敗しました。",
         "restarting": "サーバーを再起動中...",
         "end_reservation": "終了",
+        "send_feedback": "フィードバックを送信",
         "competitive_config": "競技設定",
         "league": "リーグ",
         "format": "フォーマット",
@@ -276,6 +278,7 @@
         "col_status": "状態",
         "col_created": "作成日",
         "view": "表示",
+        "feedback": "フィードバック",
         "no_reservations": "まだ予約を作成していません。",
         "reserve_server": "サーバーを予約する"
     },
@@ -359,6 +362,39 @@
         "no_reason": "理由なし",
         "no_bans": "表示するBANはありません。"
     },
+    "feedback": {
+        "title": "フィードバック - {site_name}",
+        "description": "{site_name}の問題を報告したり、改善案を提案したりできます。",
+        "heading": "フィードバック",
+        "intro": "ラグ、設定の不具合、サーバーが起動しないなどの問題がありましたか？改善のアイデアはありますか？こちらからお知らせください。",
+        "discord_hint": "今すぐサポートが必要ですか？Discordで質問してください。",
+        "login_prompt": "フィードバックを送信するにはSteamでログインしてください。",
+        "unavailable": "現在、お使いのアカウントではフィードバックを送信できません。",
+        "reservation_label": "予約",
+        "reservation_none": "特定の予約に関するものではない",
+        "category_label": "カテゴリ",
+        "category_placeholder": "カテゴリを選択",
+        "categories": {
+            "lag": "ラグ・パフォーマンス",
+            "connection": "接続の問題",
+            "config": "設定",
+            "map": "マップの問題",
+            "provisioning": "サーバーが起動しなかった",
+            "website": "ウェブサイト",
+            "suggestion": "提案",
+            "other": "その他"
+        },
+        "message_label": "メッセージ",
+        "message_placeholder": "何が起きましたか？時刻やマップなど、気づいたことを書いていただけると助かります。",
+        "context_note": "選択した予約の技術情報（ロケーション、サーバー、マップ、設定）が自動的に添付されます。",
+        "submit": "フィードバックを送信",
+        "submitting": "送信中...",
+        "success_heading": "フィードバックありがとうございます！",
+        "success_body": "メッセージはチームに送信されました。",
+        "send_another": "さらにフィードバックを送信",
+        "submit_failed": "フィードバックの送信に失敗しました。もう一度お試しください。",
+        "network_error": "ネットワークエラー — 接続を確認して再試行してください。"
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Not Found",
@@ -418,7 +454,11 @@
         "command_unsafe": "コマンド区切り文字と制御文字は使用できません。",
         "command_invalid_name": "サーバーコマンド名が無効です。",
         "command_not_allowed": "そのサーバーコマンドは許可されていません。",
-        "profile_not_public": "予約を作成するにはSteamプロフィールを公開に設定する必要があります。"
+        "profile_not_public": "予約を作成するにはSteamプロフィールを公開に設定する必要があります。",
+        "feedback_invalid_category": "フィードバックのカテゴリを選択してください。",
+        "feedback_message_required": "送信する前にメッセージを入力してください。",
+        "feedback_message_too_long": "メッセージが長すぎます。上限は{max}文字です。",
+        "feedback_rate_limited": "短時間に多くのフィードバックが送信されました。しばらくしてからもう一度お試しください。"
     },
     "language": {
         "label": "言語"

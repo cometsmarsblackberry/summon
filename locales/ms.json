@@ -14,6 +14,7 @@
     "footer": {
         "about": "Tentang",
         "stats": "Statistik",
+        "feedback": "Maklum Balas",
         "discord": "Discord",
         "ping_tagline": "Latensi rendah, di mana-mana",
         "privacy": "Privasi"
@@ -107,6 +108,7 @@
         "restart_failed": "Gagal memulakan semula pelayan.",
         "restarting": "Memulakan semula pelayan...",
         "end_reservation": "Tamatkan",
+        "send_feedback": "Hantar maklum balas",
         "competitive_config": "Konfigurasi Kompetitif",
         "league": "Liga",
         "format": "Format",
@@ -276,6 +278,7 @@
         "col_status": "Status",
         "col_created": "Dicipta",
         "view": "Lihat",
+        "feedback": "Maklum Balas",
         "no_reservations": "Anda belum membuat sebarang tempahan.",
         "reserve_server": "Tempah Pelayan"
     },
@@ -359,6 +362,39 @@
         "no_reason": "Tiada sebab diberikan",
         "no_bans": "Tiada larangan untuk ditunjukkan."
     },
+    "feedback": {
+        "title": "Maklum Balas - {site_name}",
+        "description": "Laporkan masalah atau cadangkan penambahbaikan untuk {site_name}.",
+        "heading": "Maklum Balas",
+        "intro": "Mengalami lag, konfigurasi rosak atau pelayan yang tidak bermula? Ada idea untuk penambahbaikan? Beritahu kami di sini.",
+        "discord_hint": "Perlukan bantuan sekarang? Tanya di Discord.",
+        "login_prompt": "Log masuk dengan Steam untuk menghantar maklum balas.",
+        "unavailable": "Akaun anda tidak boleh menghantar maklum balas buat masa ini.",
+        "reservation_label": "Tempahan",
+        "reservation_none": "Bukan tentang tempahan tertentu",
+        "category_label": "Kategori",
+        "category_placeholder": "Pilih kategori",
+        "categories": {
+            "lag": "Lag atau prestasi",
+            "connection": "Masalah sambungan",
+            "config": "Konfigurasi atau tetapan",
+            "map": "Masalah peta",
+            "provisioning": "Pelayan tidak bermula",
+            "website": "Laman web",
+            "suggestion": "Cadangan",
+            "other": "Lain-lain"
+        },
+        "message_label": "Mesej",
+        "message_placeholder": "Apa yang berlaku? Masa, peta dan apa-apa lagi yang anda perasan sangat membantu.",
+        "context_note": "Butiran teknikal tempahan yang dipilih (lokasi, pelayan, peta, konfigurasi) dilampirkan secara automatik.",
+        "submit": "Hantar maklum balas",
+        "submitting": "Menghantar...",
+        "success_heading": "Terima kasih atas maklum balas anda!",
+        "success_body": "Mesej anda telah dihantar kepada pasukan.",
+        "send_another": "Hantar lagi maklum balas",
+        "submit_failed": "Gagal menghantar maklum balas. Sila cuba lagi.",
+        "network_error": "Ralat rangkaian — periksa sambungan anda dan cuba lagi."
+    },
     "error_404": {
         "title": "404 — {site_name}",
         "heading": "404 Tidak Dijumpai",
@@ -418,7 +454,11 @@
         "command_unsafe": "Pemisah arahan dan aksara kawalan tidak dibenarkan.",
         "command_invalid_name": "Nama arahan pelayan tidak sah.",
         "command_not_allowed": "Arahan pelayan itu tidak dibenarkan.",
-        "profile_not_public": "Profil Steam anda mesti awam untuk membuat tempahan."
+        "profile_not_public": "Profil Steam anda mesti awam untuk membuat tempahan.",
+        "feedback_invalid_category": "Pilih kategori maklum balas.",
+        "feedback_message_required": "Tulis mesej sebelum menghantar.",
+        "feedback_message_too_long": "Mesej anda terlalu panjang. Hadnya ialah {max} aksara.",
+        "feedback_rate_limited": "Anda telah menghantar banyak maklum balas baru-baru ini. Sila cuba lagi kemudian."
     },
     "language": {
         "label": "Bahasa"
