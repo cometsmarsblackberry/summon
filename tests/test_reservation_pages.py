@@ -105,6 +105,18 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
+    def test_provisioning_layout_shows_selected_config(self):
+        template = (
+            Path(__file__).resolve().parents[1] / "templates" / "status.html"
+        ).read_text(encoding="utf-8")
+        legacy_layout = template[
+            template.index("{% if uses_legacy_layout %}"):
+            template.index("<!-- Location row -->")
+        ]
+
+        self.assertIn("_('status.config_short')", legacy_layout)
+        self.assertIn("reservation.config_file or '—'", legacy_layout)
+
     def test_auto_end_translations_accept_configured_minutes(self):
         with patch(
             "app.config.get_settings",
