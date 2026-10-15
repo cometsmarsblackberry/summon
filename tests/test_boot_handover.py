@@ -48,7 +48,9 @@ class BillingBoundaryTests(unittest.TestCase):
         )
 
 
-class BootHandoverTests(unittest.IsolatedAsyncioTestCase):
+class CloudInstanceTestCase(unittest.IsolatedAsyncioTestCase):
+    """A booting cloud server of ended #135, and #138 waiting for a server."""
+
     async def asyncSetUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.engine = create_async_engine(
@@ -127,6 +129,8 @@ class BootHandoverTests(unittest.IsolatedAsyncioTestCase):
                     await db.get(Reservation, 138), db,
                 )
 
+
+class BootHandoverTests(CloudInstanceTestCase):
     async def test_cancel_during_boot_bills_only_to_the_next_hour(self):
         async with self.sessions() as db:
             reservation = await db.get(Reservation, 135)
@@ -290,6 +294,72 @@ class BootHandoverTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertIsNone((await db.get(Reservation, 138)).instance_id)
             self.assertEqual(ReservationStatus.ENDED, (await db.get(Reservation, 135)).status)
+
+
+class WarmPoolClaimTests(CloudInstanceTestCase):
+    """Concurrent provisioning must never give one server to two reservations."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        now = datetime.utcnow()
+        async with self.sessions() as db:
+            # #135 ended and released the server to the warm pool.
+            instance = await db.get(CloudInstance, CLOUD_ID)
+            instance.is_available = True
+            instance.current_reservation_id = None
+            instance.available_since = now
+            db.add(Reservation(
+                id=139, reservation_number=139, location="vultr-fra",
+                starts_at=now, ends_at=now + timedelta(hours=4),
+                password="password-139", rcon_password="rcon-139", tv_password="tv",
+                motd_token="motd-139", logsecret="log", status=ReservationStatus.PROVISIONING,
+            ))
+            await db.commit()
+
+    async def claim(self, db, warm, reservation_id):
+        return await orchestrator._reuse_warm_instance(
+            warm, await db.get(Reservation, reservation_id), SimpleNamespace(),
+            SimpleNamespace(provider_code="vultr", provider_region="fra"),
+            f"token-{reservation_id}", f"tf2-{reservation_id}-test", "Frankfurt",
+            "image", "76561197960287930", "Owner", "https://fastdl.example/", db,
+        )
+
+    async def test_only_one_reservation_claims_a_warm_server_both_found(self):
+        async with self.sessions() as first, self.sessions() as second:
+            warm_for_138 = await orchestrator.get_warm_instance("vultr-fra", first, provider_code="vultr")
+            warm_for_139 = await orchestrator.get_warm_instance("vultr-fra", second, provider_code="vultr")
+            self.assertEqual(CLOUD_ID, warm_for_138.id)
+            self.assertEqual(CLOUD_ID, warm_for_139.id)
+
+            self.assertIsNotNone(await self.claim(first, warm_for_138, 138))
+            self.assertIsNone(await self.claim(second, warm_for_139, 139))
+
+        async with self.sessions() as db:
+            instance = await db.get(CloudInstance, CLOUD_ID)
+            self.assertEqual(138, instance.current_reservation_id)
+            self.assertEqual("tf2-138-test", instance.instance_id)
+            self.assertEqual("token-138", instance.auth_token)
+            self.assertEqual(CLOUD_ID, (await db.get(Reservation, 138)).instance_id)
+            self.assertIsNone((await db.get(Reservation, 139)).instance_id)
+
+    async def test_earlier_reservation_cannot_control_or_end_a_reused_server(self):
+        async with self.sessions() as db:
+            warm = await orchestrator.get_warm_instance("vultr-fra", db, provider_code="vultr")
+            await self.claim(db, warm, 138)
+        self.agent.send_json.reset_mock()
+
+        from app.services.runtime import rcon_reservation_runtime
+        with (patch.object(orchestrator, "destroy_instance", AsyncMock()) as destroy,
+              patch.object(orchestrator, "release_to_warm_pool", AsyncMock()) as release):
+            async with self.sessions() as db:
+                earlier = await db.get(Reservation, 135)
+                self.assertFalse(await rcon_reservation_runtime(earlier, db, "mp_restartgame 1"))
+                self.assertTrue(await end_reservation_runtime(earlier, db, at_expiry=True))
+                self.assertTrue(await end_reservation_runtime(earlier, db))
+
+        destroy.assert_not_awaited()
+        release.assert_not_awaited()
+        self.agent.send_json.assert_not_awaited()
 
 
 if __name__ == "__main__":

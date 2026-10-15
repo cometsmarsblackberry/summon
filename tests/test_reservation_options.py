@@ -92,7 +92,7 @@ class ActiveUploadSettingsTests(unittest.IsolatedAsyncioTestCase):
             enable_logs_tf_upload=True,
             enable_demos_tf_upload=True,
         )
-        cloud_instance = SimpleNamespace(instance_id="agent-id")
+        cloud_instance = SimpleNamespace(instance_id="agent-id", current_reservation_id=9)
         result = SimpleNamespace(scalar_one_or_none=lambda: cloud_instance)
         db = SimpleNamespace(execute=AsyncMock(return_value=result), commit=AsyncMock())
         user = SimpleNamespace(id=3, is_admin=False)

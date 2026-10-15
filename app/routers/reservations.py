@@ -182,7 +182,12 @@ def reservation_to_response(
         response.direct_tv_port = getattr(reservation, "direct_tv_port", None)
         if response.direct_ip:
             response.ip_address = response.direct_ip
-        elif reservation.enable_direct_connect and cloud_instance:
+        elif (
+            reservation.enable_direct_connect
+            and cloud_instance
+            # A reused instance's address belongs to its current reservation.
+            and cloud_instance.current_reservation_id == reservation.id
+        ):
             ip = cloud_instance.ip_address
             if ip and ip != "0.0.0.0":
                 response.ip_address = ip
