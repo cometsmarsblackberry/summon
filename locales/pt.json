@@ -145,6 +145,7 @@
         "disk": "Disco",
         "uptime": "Tempo ativo",
         "provider": "Provedor",
+        "image_digest": "Digest da imagem",
         "back_to_home": "Voltar ao início",
         "download_map": "Baixar mapa",
         "change_map": "Mudar mapa",

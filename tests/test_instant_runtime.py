@@ -588,6 +588,7 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stats["host_shared"])
             self.assertEqual({"cpu": "1%"}, stats["container"])
             self.assertEqual(assignment.slot.host.system_stats, stats["host"])
+            self.assertEqual("sha256:prepared", stats["image_digest"])
 
     async def test_instant_rcon_awaits_only_valid_correlated_result(self):
         class FakeWebSocket:

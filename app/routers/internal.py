@@ -1107,10 +1107,14 @@ async def handle_agent_message(instance_id: str, data: dict):
     if message_type == "status":
         logger.debug(f"Agent {instance_id} status: {data}")
         if "sysinfo" in data:
-            agent_stats[instance_id] = {
+            entry = {
                 **data["sysinfo"],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            image_digest = data.get("image_digest")
+            if isinstance(image_digest, str) and image_digest:
+                entry["image_digest"] = image_digest[:255]
+            agent_stats[instance_id] = entry
         
     elif message_type == "boot_progress":
         stage = data.get("stage")

@@ -1637,6 +1637,10 @@
                 fmtLoad(v) {
                     if (v === null || v === undefined) return '--';
                     return v.toFixed(2);
+                },
+
+                fmtDigest(digest) {
+                    return digest.split('@').pop().replace(/^sha256:/, '').slice(0, 7);
                 }
             }">
             <button @click="open = !open; if (open && !statsPollInterval) startStatsPolling(); if (!open) stopStatsPolling();"
@@ -1697,6 +1701,13 @@
                             <div class="contents">
                                 <div class="text-slate-400">{{ _('status.provider') }}</div>
                                 <div class="text-slate-700 text-right" x-text="providerName"></div>
+                            </div>
+                        </template>
+
+                        <template x-if="stats && stats.image_digest">
+                            <div class="contents">
+                                <div class="text-slate-400">{{ _('status.image_digest') }}</div>
+                                <div class="text-slate-700 text-right" :title="stats.image_digest" x-text="fmtDigest(stats.image_digest)"></div>
                             </div>
                         </template>
                     </div>

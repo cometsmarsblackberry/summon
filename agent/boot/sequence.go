@@ -156,6 +156,8 @@ var (
 	competitiveConfigsMu       sync.Mutex
 	competitiveConfigsReported bool
 	competitiveConfigsImage    string
+	runningImageDigestMu       sync.Mutex
+	runningImageDigest         string
 	safeMapNameRE              = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	safeConfigNameRE           = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 )
@@ -492,6 +494,7 @@ func (s *Sequence) Run() error {
 	}
 	s.containerID = containerID
 	s.maybeReportCompetitiveConfigsAsync()
+	s.recordImageDigestAsync()
 
 	// Stage 5: Wait for RCON to become available (polls instead of fixed sleep)
 	log.Println("Boot stage: waiting_for_server")
@@ -650,6 +653,7 @@ func (s *Sequence) RunReconfigure() error {
 	}
 	s.containerID = containerID
 	s.maybeReportCompetitiveConfigsAsync()
+	s.recordImageDigestAsync()
 
 	// Stage 3: Wait for RCON to become available (polls instead of fixed sleep)
 	log.Println("Boot stage: waiting_for_server (reconfigure)")
@@ -837,6 +841,33 @@ func (s *Sequence) maybeReportCompetitiveConfigsAsync() {
 		}
 		log.Printf("Giving up reporting competitive config list (non-fatal)")
 	}(s.containerID, s.config.ContainerImage)
+}
+
+// RunningImageDigest returns the digest of the image the most recently
+// started container runs, or "" until it has been resolved.
+func RunningImageDigest() string {
+	runningImageDigestMu.Lock()
+	defer runningImageDigestMu.Unlock()
+	return runningImageDigest
+}
+
+// recordImageDigestAsync resolves the digest of the image the container was
+// started from, so the heartbeat can report which build is running.
+func (s *Sequence) recordImageDigestAsync() {
+	if s.podman == nil || s.config == nil {
+		return
+	}
+	go func(containerImage string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		digest, err := s.podman.ImageDigest(ctx, containerImage)
+		if err != nil {
+			log.Printf("Could not resolve image digest (non-fatal): %v", err)
+		}
+		runningImageDigestMu.Lock()
+		runningImageDigest = digest
+		runningImageDigestMu.Unlock()
+	}(s.config.ContainerImage)
 }
 
 // waitForRCON polls the server's RCON port until it responds or the timeout

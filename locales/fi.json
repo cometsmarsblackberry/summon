@@ -145,6 +145,7 @@
         "disk": "Levy",
         "uptime": "Käyttöaika",
         "provider": "Palveluntarjoaja",
+        "image_digest": "Levykuvan tiiviste",
         "back_to_home": "Takaisin kotisivulle",
         "download_map": "Lataa kartta",
         "change_map": "Vaihda kartta",

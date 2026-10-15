@@ -156,6 +156,7 @@
         "disk": "Disk",
         "uptime": "Uptime",
         "provider": "Provider",
+        "image_digest": "Image digest",
         "back_to_home": "Back to home",
         "download_map": "Download map",
         "change_map": "Change map",

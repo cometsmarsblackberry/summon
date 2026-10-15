@@ -924,6 +924,7 @@ async def get_runtime_stats(reservation: Reservation, db: AsyncSession) -> dict 
         "host": assignment.slot.host.system_stats,
         "container": get_instant_container_stats(assignment.id),
         "host_shared": True,
+        "image_digest": assignment.image_digest,
     }
 
 

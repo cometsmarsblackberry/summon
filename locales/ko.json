@@ -145,6 +145,7 @@
         "disk": "디스크",
         "uptime": "가동 시간",
         "provider": "제공업체",
+        "image_digest": "이미지 다이제스트",
         "back_to_home": "홈으로 돌아가기",
         "download_map": "맵 다운로드",
         "change_map": "맵 변경",

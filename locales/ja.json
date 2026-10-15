@@ -145,6 +145,7 @@
         "disk": "ディスク",
         "uptime": "稼働時間",
         "provider": "プロバイダー",
+        "image_digest": "イメージダイジェスト",
         "back_to_home": "ホームに戻る",
         "download_map": "マップをダウンロード",
         "change_map": "マップを変更",
