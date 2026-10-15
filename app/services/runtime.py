@@ -40,6 +40,9 @@ TERMINAL_FAILURE_CLASSES = frozenset({
 HOST_FAILURE_CLASSES = frozenset({
     "host", "podman", "podman_unavailable", "disk", "memory", "preflight", "image",
 })
+# A dropped connection or an agent update drain clears up on its own, and the
+# host's next heartbeat proves it; these do not start a quarantine cooldown.
+TRANSIENT_HOST_FAILURE_CODES = frozenset({"disconnected", "host_draining"})
 
 
 class LocationCapacityError(RuntimeError):
@@ -145,6 +148,11 @@ async def count_available_instant_slots(location: str, db: AsyncSession) -> int:
             InstantHost.last_heartbeat_at >= _host_cutoff(),
             InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
             InstantHost.health_error.is_(None),
+            InstantHost.reconciliation_error.is_(None),
+            or_(
+                InstantHost.quarantined_until.is_(None),
+                InstantHost.quarantined_until <= _now(),
+            ),
             InstantHost.ready_image_digest.is_not(None),
             InstantHost.image_status.in_(("ready", "failed")),
             InstantHost.protocol_min <= settings.instant_protocol_max,
@@ -317,6 +325,11 @@ async def claim_instant_slot(
             InstantHost.last_heartbeat_at >= _host_cutoff(),
             InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
             InstantHost.health_error.is_(None),
+            InstantHost.reconciliation_error.is_(None),
+            or_(
+                InstantHost.quarantined_until.is_(None),
+                InstantHost.quarantined_until <= _now(),
+            ),
             InstantHost.ready_image_digest.is_not(None),
             InstantHost.image_status.in_(("ready", "failed")),
             InstantHost.protocol_min <= settings.instant_protocol_max,
@@ -542,8 +555,15 @@ async def _close_failed_assignment(
     slot = assignment.slot
     host = slot.host
     if failure_class in HOST_FAILURE_CLASSES:
+        # The agent's next heartbeat rewrites these, which is enough for a
+        # transient failure. Anything else also starts a cooldown.
         host.health_status = "quarantined"
         host.health_error = assignment.failure_message or failure_code
+        if failure_code not in TRANSIENT_HOST_FAILURE_CODES:
+            host.quarantined_until = now + timedelta(
+                seconds=settings.instant_host_quarantine_seconds
+            )
+            host.quarantine_reason = assignment.failure_message or failure_code
     elif failure_class not in TERMINAL_FAILURE_CLASSES:
         # Reservation/configuration failures belong to the reservation, not
         # the infrastructure. The agent rejects these before accepting a game

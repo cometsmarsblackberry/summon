@@ -338,6 +338,10 @@
                 const data = await this.hostAction(host, '/slots/' + slot.id + '/clear-error');
                 if (data) { slot.error_code = null; slot.error_message = null; slot.quarantined_at = null; }
             },
+            async clearHostQuarantine(host) {
+                const data = await this.hostAction(host, '/clear-quarantine');
+                if (data) { host.quarantined = false; host.quarantined_until = null; host.quarantine_reason = null; }
+            },
             async prepareImage(host) {
                 const data = await this.hostAction(host, '/image', {});
                 if (data) host.image_status = data.status;
@@ -1014,6 +1018,7 @@
                                         :class="host.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700'"
                                         x-text="host.connected ? 'connected' : 'offline'"></span>
                                     <span x-show="host.draining" class="text-xs px-1.5 py-0.5 rounded bg-yellow-100 text-yellow-800">draining</span>
+                                    <span x-show="host.quarantined" class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">quarantined</span>
                                     <span class="text-xs text-slate-400" :title="host.location" x-text="locationName(host.location)"></span>
                                 </div>
                                 <div class="text-xs text-slate-400 mt-1">
@@ -1025,6 +1030,10 @@
                                 <p x-show="host.health_error || host.image_error || host.reconciliation_error"
                                     class="text-xs text-red-600 mt-1 break-words"
                                     x-text="host.health_error || host.image_error || host.reconciliation_error"></p>
+                                <p x-show="host.quarantined" class="text-xs text-red-600 mt-1 break-words">
+                                    <span x-text="'Not scheduled until ' + (host.quarantined_until ? new Date(host.quarantined_until).toLocaleTimeString() : '') + ': ' + (host.quarantine_reason || 'start failure')"></span>
+                                    <button @click="clearHostQuarantine(host)" class="underline">clear</button>
+                                </p>
                             </div>
                             <div class="flex gap-1 flex-wrap justify-end">
                                 <button @click="openEditInstantHost(host)" class="px-2 py-1 text-xs rounded bg-slate-100 text-slate-700">Edit</button>

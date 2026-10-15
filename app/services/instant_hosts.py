@@ -13,6 +13,7 @@ from typing import Iterable
 from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models.instance import EnabledLocation
@@ -360,8 +361,37 @@ async def configure_slots(
 
 
 async def soft_delete_host(db: AsyncSession, host: InstantHost) -> None:
-    if await host_has_open_assignments(db, host.id):
-        raise InstantHostError("host still has active assignments")
+    from app.models.reservation import ReservationStatus
+
+    result = await db.execute(
+        select(InstantAssignment)
+        .options(selectinload(InstantAssignment.reservation))
+        .join(InstantSlot, InstantAssignment.slot_id == InstantSlot.id)
+        .where(InstantSlot.host_id == host.id, InstantAssignment.closed_at.is_(None))
+    )
+    open_assignments = list(result.scalars().all())
+    now = utcnow()
+    if open_assignments:
+        if host_is_online(host, now=now):
+            raise InstantHostError("host still has active assignments")
+        # An offline host never confirms that it stopped its servers, so these
+        # leases would stay open forever. Once their reservations are over it
+        # is safe to close them: the agent also stops containers at lease end.
+        finished = {
+            ReservationStatus.ENDED, ReservationStatus.CANCELLED,
+            ReservationStatus.NO_SHOW, ReservationStatus.FAILED,
+        }
+        if any(
+            assignment.reservation.status not in finished
+            and _as_utc(assignment.reservation.ends_at) > now
+            for assignment in open_assignments
+        ):
+            raise InstantHostError(
+                "host has reservations that are still running; end them first"
+            )
+        for assignment in open_assignments:
+            assignment.state = "abandoned"
+            assignment.closed_at = now
     host.enabled = False
     host.draining = True
     host.deleted_at = utcnow()
@@ -380,6 +410,11 @@ def host_is_online(host: InstantHost, *, now: datetime | None = None) -> bool:
     return heartbeat >= current - timedelta(
         seconds=get_settings().instant_host_offline_seconds
     )
+
+
+def host_is_quarantined(host: InstantHost, *, now: datetime | None = None) -> bool:
+    until = _as_utc(host.quarantined_until)
+    return until is not None and until > (now or utcnow())
 
 
 def protocol_is_compatible(host: InstantHost) -> bool:
@@ -415,6 +450,9 @@ def serialize_host(
         "connected": host_is_online(host),
         "health_status": host.health_status,
         "health_error": host.health_error,
+        "quarantined": host_is_quarantined(host),
+        "quarantined_until": _datetime_iso(host.quarantined_until),
+        "quarantine_reason": host.quarantine_reason,
         "preflight_report": host.preflight_report,
         "reconciliation_error": host.reconciliation_error,
         "agent_version": host.agent_version,
@@ -485,6 +523,11 @@ async def get_admin_counters(db: AsyncSession) -> dict:
             ),
             InstantHost.health_status.in_(("ready", "healthy", "online", "degraded")),
             InstantHost.health_error.is_(None),
+            InstantHost.reconciliation_error.is_(None),
+            or_(
+                InstantHost.quarantined_until.is_(None),
+                InstantHost.quarantined_until <= utcnow(),
+            ),
             InstantHost.ready_image_digest.is_not(None),
             InstantHost.image_status.in_(("ready", "failed")),
             InstantSlot.enabled.is_(True),
