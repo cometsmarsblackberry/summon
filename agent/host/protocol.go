@@ -75,6 +75,7 @@ type restartConfig struct {
 	Password            *string `json:"password"`
 	RCONPassword        *string `json:"rcon_password"`
 	TVPassword          *string `json:"tv_password"`
+	MOTDURL             *string `json:"motd_url"`
 	ConfigFile          *string `json:"config_file"`
 	EnableLogsTFUpload  *bool   `json:"enable_logs_tf_upload"`
 	EnableDemosTFUpload *bool   `json:"enable_demos_tf_upload"`
@@ -96,6 +97,9 @@ func mergeRestartConfig(config *boot.ReservationConfig, raw json.RawMessage) err
 	}
 	if update.TVPassword != nil {
 		config.TVPassword = *update.TVPassword
+	}
+	if update.MOTDURL != nil {
+		config.MOTDURL = *update.MOTDURL
 	}
 	if update.ConfigFile != nil {
 		config.ConfigFile = *update.ConfigFile

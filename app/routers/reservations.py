@@ -895,7 +895,8 @@ async def restart_reservation_endpoint(
         )
 
     from app.routers.internal import clear_player_data
-    from app.utils.passwords import generate_password
+    from app.services.orchestrator import reservation_motd_url
+    from app.utils.passwords import generate_motd_token, generate_password
 
     clear_player_data(reservation.reservation_number)
     # Do not dirty the reservation before the runtime accepts the command:
@@ -904,11 +905,15 @@ async def restart_reservation_endpoint(
     password = generate_password(8)
     rcon_password = generate_password(12)
     tv_password = generate_password(8)
+    # The MOTD page shows the passwords to anyone with its link, which every
+    # player who joined received, so the link changes with them.
+    motd_token = generate_motd_token()
 
     if not await restart_reservation_runtime(reservation, db, {
         "password": password,
         "rcon_password": rcon_password,
         "tv_password": tv_password,
+        "motd_url": reservation_motd_url(motd_token),
         "config_file": reservation.config_file or "",
         "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
         "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
@@ -917,6 +922,7 @@ async def restart_reservation_endpoint(
     reservation.password = password
     reservation.rcon_password = rcon_password
     reservation.tv_password = tv_password
+    reservation.motd_token = motd_token
     reservation.status = ReservationStatus.PROVISIONING
     reservation.empty_since = None  # Clear during restart; reset when server is ready
     await db.commit()
