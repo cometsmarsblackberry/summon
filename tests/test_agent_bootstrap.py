@@ -118,6 +118,18 @@ class AgentBootstrapTests(unittest.TestCase):
         self.assertIn("command -v pasta", script)
         self.assertIn("requires the pasta executable", script)
 
+    def test_instant_host_installer_never_follows_agent_paths_as_root(self):
+        script = Path("static/install-instant-host.sh").read_text()
+
+        # Downloads are staged and verified in root's own directory, and the
+        # agent account writes its files, so links it planted are harmless.
+        self.assertIn('--output "$STAGING_DIR/tf2-agent"', script)
+        self.assertIn('write_agent_file "$STATE_DIR/bin/tf2-agent" 0755', script)
+        self.assertIn('write_agent_file "$STATE_DIR/credential" 0600', script)
+        self.assertIn('run_as_agent install -d -m 0700 "$STATE_DIR/slots" "$STATE_DIR/bin"', script)
+        self.assertNotIn('chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR', script)
+        self.assertNotIn('>"$STATE_DIR/', script)
+
     def test_instant_host_card_resolves_location_display_name(self):
         template = Path("templates/admin/index.html").read_text()
 
