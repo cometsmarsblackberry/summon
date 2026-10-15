@@ -48,7 +48,8 @@ _BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP}
 
 # Main leagues are listed first in the UI; the rest follow alphabetically.
 # ETF2L leads because most Summon users play it. The others are ordered by the
-# size of their recent 6s seasons (checked October 2026).
+# size of their recent 6s seasons (checked October 2026). The in-game config
+# menu mirrors this order in tf2-reservation-plugin/scripting/summon.sp.
 LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "AsiaFortress", "FBTF")
 
 
