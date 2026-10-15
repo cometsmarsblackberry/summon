@@ -10,6 +10,7 @@ from app.models.upload_link import UploadLink  # noqa: F401 - registers relation
 from app.routers.reservations import (
     CreateReservationRequest,
     UploadSettingsRequest,
+    restart_reservation_endpoint,
     update_upload_settings,
 )
 from app.services.orchestrator import build_reservation_config
@@ -155,6 +156,61 @@ class ActiveUploadSettingsTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         self.assertEqual(400, exc.exception.status_code)
+
+
+class RestartRotatesMotdLinkTests(unittest.IsolatedAsyncioTestCase):
+    def _reservation(self):
+        return SimpleNamespace(
+            id=9,
+            user_id=3,
+            reservation_number=9,
+            status=ReservationStatus.ACTIVE,
+            password="old-password",
+            rcon_password="old-rcon",
+            tv_password="old-tv",
+            motd_token="old-motd-token",
+            config_file=None,
+            enable_logs_tf_upload=True,
+            enable_demos_tf_upload=True,
+            empty_since=None,
+        )
+
+    async def _restart(self, reservation, accepted):
+        db = SimpleNamespace(commit=AsyncMock())
+        user = SimpleNamespace(id=3, is_admin=False)
+        with (
+            patch(
+                "app.routers.reservations.get_reservation_by_id",
+                new=AsyncMock(return_value=reservation),
+            ),
+            patch(
+                "app.routers.reservations.restart_reservation_runtime",
+                new=AsyncMock(return_value=accepted),
+            ) as restart,
+        ):
+            try:
+                await restart_reservation_endpoint(reservation_id=9, user=user, db=db)
+            except HTTPException as exc:
+                self.assertEqual(503, exc.status_code)
+        return restart.await_args.args[2]
+
+    async def test_restart_moves_the_motd_page_to_a_new_link(self):
+        reservation = self._reservation()
+
+        config = await self._restart(reservation, accepted=True)
+
+        self.assertNotEqual("old-motd-token", reservation.motd_token)
+        self.assertTrue(config["motd_url"].endswith(f"/motd/{reservation.motd_token}"))
+        self.assertEqual(config["password"], reservation.password)
+        self.assertNotEqual("old-password", reservation.password)
+
+    async def test_unaccepted_restart_keeps_the_current_link(self):
+        reservation = self._reservation()
+
+        await self._restart(reservation, accepted=False)
+
+        self.assertEqual("old-motd-token", reservation.motd_token)
+        self.assertEqual("old-password", reservation.password)
 
 
 if __name__ == "__main__":

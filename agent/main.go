@@ -469,6 +469,7 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 			Password            string  `json:"password"`
 			RCONPassword        string  `json:"rcon_password"`
 			TVPassword          string  `json:"tv_password"`
+			MOTDURL             string  `json:"motd_url"`
 			ConfigFile          *string `json:"config_file"`
 			EnableLogsTFUpload  *bool   `json:"enable_logs_tf_upload"`
 			EnableDemosTFUpload *bool   `json:"enable_demos_tf_upload"`
@@ -483,6 +484,9 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 		}
 		if restartMsg.Config.TVPassword != "" {
 			cfg.TVPassword = restartMsg.Config.TVPassword
+		}
+		if restartMsg.Config.MOTDURL != "" {
+			cfg.MOTDURL = restartMsg.Config.MOTDURL
 		}
 		if restartMsg.Config.ConfigFile != nil {
 			cfg.ConfigFile = *restartMsg.Config.ConfigFile

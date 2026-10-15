@@ -235,6 +235,11 @@ WantedBy=multi-user.target
     return base64.b64encode(json.dumps(ignition_config).encode()).decode()
 
 
+def reservation_motd_url(motd_token: str) -> str:
+    """Return the in-game MOTD page URL for a reservation's MOTD token."""
+    return f"{settings.base_url}/motd/{motd_token}"
+
+
 def build_reservation_config(
     reservation: Reservation,
     owner_steam_id: str = "",
@@ -279,7 +284,7 @@ def build_reservation_config(
         },
         "auth_token": auth_token,
         "instance_id": instance_id,
-        "motd_url": f"{settings.base_url}/motd/{reservation.motd_token}",
+        "motd_url": reservation_motd_url(reservation.motd_token),
         "admin_steam_ids": admin_steam_ids or [],
         "s3_config": {
             "endpoint": settings.s3_endpoint,
