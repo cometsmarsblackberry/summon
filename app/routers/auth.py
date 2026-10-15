@@ -6,7 +6,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 from typing import Optional
 
 import httpx
@@ -28,12 +28,22 @@ router = APIRouter(tags=["auth"])
 settings = get_settings()
 
 # Steam OpenID constants
+OPENID_NS = "http://specs.openid.net/auth/2.0"
 STEAM_OPENID_URL = "https://steamcommunity.com/openid/login"
 STEAM_API_URL = "https://api.steampowered.com"
+STEAM_CLAIMED_ID_RE = re.compile(r"https://steamcommunity\.com/openid/id/(\d{17})")
+# Steam signs these fields; the checks on the assertion rely on each of them.
+OPENID_REQUIRED_SIGNED_FIELDS = frozenset({
+    "op_endpoint", "claimed_id", "identity", "return_to", "response_nonce", "assoc_handle",
+})
 LOGIN_STATE_COOKIE = "steam_login_state"
 LOGIN_STATE_MAX_AGE = 60 * 10  # 10 minutes
-OPENID_NONCE_MAX_AGE = timedelta(hours=6)
-OPENID_NONCE_MAX_SIZE = 10_000  # Hard cap to prevent memory exhaustion under attack
+# Steam nonces begin with their UTC issue time. A response older than the login
+# state it answers cannot complete a login, so nonces are only remembered (and
+# accepted) for that long, plus some clock skew.
+OPENID_NONCE_MAX_AGE = timedelta(seconds=LOGIN_STATE_MAX_AGE)
+OPENID_NONCE_CLOCK_SKEW = timedelta(minutes=5)
+OPENID_NONCE_MAX_SIZE = 50_000  # Hard cap to prevent memory exhaustion under attack
 _used_openid_nonces: dict[str, datetime] = {}
 STEAM_OPENID_VERIFY_ATTEMPTS = 3
 STEAM_OPENID_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
@@ -77,16 +87,31 @@ def _validate_login_state(cookie_state: str | None, query_state: str | None) -> 
     return True
 
 
+def _openid_nonce_issued_at(nonce: str) -> datetime | None:
+    """Return the issue time an OpenID 2.0 response nonce starts with."""
+    try:
+        return datetime.strptime(nonce[:20], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def _consume_openid_nonce(params: dict) -> bool:
-    """Return True only once for each OpenID response nonce."""
+    """Return True only once for each recent OpenID response nonce."""
     nonce = params.get("openid.response_nonce")
     if not nonce:
         return False
+    issued_at = _openid_nonce_issued_at(nonce)
+    if issued_at is None:
+        return False
 
     now = datetime.now(timezone.utc)
-    cutoff = now - OPENID_NONCE_MAX_AGE
+    cutoff = now - OPENID_NONCE_MAX_AGE - OPENID_NONCE_CLOCK_SKEW
+    if not cutoff <= issued_at <= now + OPENID_NONCE_CLOCK_SKEW:
+        return False
 
-    stale = [key for key, seen_at in _used_openid_nonces.items() if seen_at < cutoff]
+    # Nonces issued before the cutoff are rejected above, so they no longer
+    # need to be remembered.
+    stale = [key for key, seen_issued_at in _used_openid_nonces.items() if seen_issued_at < cutoff]
     for key in stale:
         _used_openid_nonces.pop(key, None)
 
@@ -98,8 +123,47 @@ def _consume_openid_nonce(params: dict) -> bool:
         logger.warning("OpenID nonce store at capacity (%d), rejecting", OPENID_NONCE_MAX_SIZE)
         return False
 
-    _used_openid_nonces[nonce] = now
+    _used_openid_nonces[nonce] = issued_at
     return True
+
+
+def _login_return_url(state: str) -> str:
+    """Return the callback URL Steam is asked to send a login back to."""
+    return f"{settings.base_url}/auth/callback?{urlencode({'state': state})}"
+
+
+def _asserted_steam_id(params: dict, state: str) -> Optional[str]:
+    """Return the SteamID in a positive assertion issued for this login.
+
+    Steam's check_authentication only proves that Steam signed a response, not
+    which site it was issued to. Without these checks, a response produced by
+    signing in to any other site that uses Steam login could be replayed here
+    to sign in as that user (OpenID 2.0 section 11).
+    """
+    if params.get("openid.ns") != OPENID_NS or params.get("openid.mode") != "id_res":
+        return None
+    if params.get("openid.op_endpoint") != STEAM_OPENID_URL:
+        return None
+
+    signed = set((params.get("openid.signed") or "").split(","))
+    if not OPENID_REQUIRED_SIGNED_FIELDS <= signed:
+        return None
+
+    return_to = urlsplit(params.get("openid.return_to") or "")
+    expected = urlsplit(_login_return_url(state))
+    if (
+        (return_to.scheme, return_to.netloc.lower(), return_to.path)
+        != (expected.scheme, expected.netloc.lower(), expected.path)
+        or parse_qs(return_to.query, keep_blank_values=True) != {"state": [state]}
+        or return_to.fragment
+    ):
+        return None
+
+    claimed_id = params.get("openid.claimed_id") or ""
+    if claimed_id != params.get("openid.identity"):
+        return None
+    match = STEAM_CLAIMED_ID_RE.fullmatch(claimed_id)
+    return match.group(1) if match else None
 
 
 def get_steam_login_url(return_url: str) -> str:
@@ -115,12 +179,17 @@ def get_steam_login_url(return_url: str) -> str:
     return f"{STEAM_OPENID_URL}?{urlencode(params)}"
 
 
-async def verify_steam_login(params: dict) -> Optional[str]:
+async def verify_steam_login(params: dict, state: str) -> Optional[str]:
     """Verify Steam OpenID response and extract Steam ID.
-    
+
     Returns:
         Steam ID (64-bit) as string, or None if verification fails
     """
+    steam_id = _asserted_steam_id(params, state)
+    if steam_id is None:
+        logger.warning("Steam OpenID assertion was not issued for this login")
+        return None
+
     # Change mode to check_authentication
     validation_params = {
         key: value
@@ -171,14 +240,8 @@ async def verify_steam_login(params: dict) -> Optional[str]:
     if "is_valid:true" not in response.text:
         logger.warning("Steam verify response: %s", response.text.strip())
         return None
-    
-    # Extract Steam ID from claimed_id
-    claimed_id = params.get("openid.claimed_id", "")
-    match = re.search(r"steamcommunity\.com/openid/id/(\d+)", claimed_id)
-    if not match:
-        return None
-    
-    return match.group(1)
+
+    return steam_id
 
 
 async def get_steam_player_info(steam_id: str) -> dict:
@@ -217,8 +280,7 @@ async def get_steam_player_info(steam_id: str) -> dict:
 async def login():
     """Redirect to Steam OpenID login."""
     state = _build_login_state()
-    return_url = f"{settings.base_url}/auth/callback?{urlencode({'state': state})}"
-    steam_url = get_steam_login_url(return_url)
+    steam_url = get_steam_login_url(_login_return_url(state))
     redirect = RedirectResponse(url=steam_url)
     redirect.set_cookie(
         key=LOGIN_STATE_COOKIE,
@@ -249,7 +311,7 @@ async def auth_callback(
         )
         raise HTTPException(status_code=400, detail=t("errors.auth_failed"))
 
-    steam_id = await verify_steam_login(params)
+    steam_id = await verify_steam_login(params, query_state)
     if not steam_id:
         logger.warning("Steam OpenID verification failed")
         raise HTTPException(status_code=400, detail=t("errors.auth_failed"))
