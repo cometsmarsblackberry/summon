@@ -41,12 +41,13 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.2.1"
 
 #define MAP_DOWNLOAD_CONNECT_TIMEOUT 5
 #define MAP_DOWNLOAD_ATTEMPT_TIMEOUT 180
 #define MAP_DOWNLOAD_OPERATION_TIMEOUT 240
 #define MAP_DOWNLOAD_MAX_ATTEMPTS 3
+#define MAX_DOWNLOAD_MAP_NAME 64
 
 ConVar g_cvMapDownloadURL;
 
@@ -149,14 +150,17 @@ public Action Listener_Changelevel(int client, const char[] command, int argc)
     // When standalone, intercept all clients.
     if (g_bSummonLoaded && client != 0)
         return Plugin_Continue;
+    if (client > 0 && !CheckCommandAccess(client, "sm_changemap", ADMFLAG_CHANGEMAP))
+        return Plugin_Continue;
 
     char mapName[PLATFORM_MAX_PATH];
     GetCmdArg(1, mapName, sizeof(mapName));
 
     char displayName[PLATFORM_MAX_PATH];
-    if (FindMap(mapName, displayName, sizeof(displayName)) != FindMap_NotFound)
+    if (FindMap(mapName, displayName, sizeof(displayName)) != FindMap_NotFound
+        || !IsDownloadableMapName(mapName))
     {
-        // Map exists locally — let the engine handle it
+        // Map exists locally, or cannot be downloaded — let the engine handle it
         return Plugin_Continue;
     }
 
@@ -189,7 +193,38 @@ void ChangeMapIfAvailable(const char[] mapName, int client)
     }
 
     // Map not found locally — download it
+    if (!IsDownloadableMapName(mapName))
+    {
+        if (client > 0 && IsClientInGame(client))
+            PrintToChat(client, "\x01[\x07FF6600Map\x01] \x07FF6666Map %s not found. Map names can only contain letters, numbers, underscores and hyphens.", mapName);
+        LogMessage("[mapdownloader] Refusing to download invalid map name \"%s\"", mapName);
+        return;
+    }
     DownloadMap(mapName);
+}
+
+// The name becomes part of the download URL and of the file path the map is
+// saved to (and deleted from on failure), and players choose it through
+// !changemap. A plain name keeps both inside FastDL's and the server's maps
+// directories.
+bool IsDownloadableMapName(const char[] mapName)
+{
+    int length = strlen(mapName);
+    if (length <= 0 || length > MAX_DOWNLOAD_MAP_NAME)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = mapName[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        if (!isLetter && !isDigit && character != '_' && character != '-')
+            return false;
+    }
+
+    return true;
 }
 
 void DownloadMap(const char[] mapName)
@@ -219,10 +254,19 @@ void StartMapDownloadAttempt(const char[] mapName, int attempt, int startedAt)
         baseURL[len - 1] = '\0';
 
     char url[512];
-    Format(url, sizeof(url), "%s/%s.bsp", baseURL, mapName);
+    int urlLength = Format(url, sizeof(url), "%s/%s.bsp", baseURL, mapName);
 
     char savePath[PLATFORM_MAX_PATH];
-    Format(savePath, sizeof(savePath), "maps/%s.bsp", mapName);
+    int savePathLength = Format(savePath, sizeof(savePath), "maps/%s.bsp", mapName);
+
+    // A truncated path would drop the .bsp extension and name another file.
+    if (urlLength >= sizeof(url) - 1 || savePathLength >= sizeof(savePath) - 1)
+    {
+        g_bMapDownloading = false;
+        PrintToChatAll("\x01[\x07FF6600Map\x01] \x07FF6666Failed to download %s: the download URL is too long.", mapName);
+        LogError("[mapdownloader] Download URL or path for %s is too long", mapName);
+        return;
+    }
 
     if (attempt == 1)
         PrintToChatAll("\x01[\x07FF6600Map\x01] Map \x0799FF99%s\x01 not found. Downloading from \x0799CCFF%s\x01...", mapName, url);
