@@ -202,15 +202,17 @@ plugins, the owner-command allowlist, and the supported competitive configs.
 See the `tf2-summon` repository for image configuration, architecture variants,
 manual container launches, builds, and contract tests.
 
-Plugin source changes in this repository do not update the server image by
-themselves. A release must also update the compiled artifacts in
-`tf2-summon/plugins/`, mirror any allowlist changes into
-`tf2-summon/sourcemod/configs/`, update the pinned checksums in its validation
-scripts, and rebuild the image. Its contract test verifies that both plugins
-load and that the allowlist can be reloaded.
+The `tf2-summon` image build compiles `summon.sp` and `mapdownloader.sp` from
+this directory at a pinned Summon commit. Plugin source changes in this
+repository therefore do not update the server image by themselves. A release
+must also update `SUMMON_PLUGIN_SOURCE` in `tf2-summon/docker-bake.hcl` to the
+new commit, mirror any allowlist changes into `tf2-summon/sourcemod/configs/`,
+and rebuild the image. Its contract test verifies that both plugins load and
+that the allowlist can be reloaded. Set `SUMMON_PLUGIN_SOURCE` to a local
+checkout of this directory to build an image with unpublished changes.
 
-For source development, `summon.sp` requires the `ripext`, `logstf`, and
-`demostf` includes. The integrated Map Downloader build also requires the
-consumer-supplied `summon.inc`; without it, `mapdownloader.sp` compiles in
-standalone mode and does not receive Summon's owner-approved map-change
-forward.
+`summon.sp` requires the `ripext`, `logstf`, and `demostf` includes, which the
+image build provides. `scripting/include/summon.inc` declares Summon's
+map-change forward for other plugins. Without it, `mapdownloader.sp` compiles
+in standalone mode and does not receive owner-approved map changes, so the
+image build fails if it is missing.
