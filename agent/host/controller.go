@@ -502,17 +502,25 @@ func (c *Controller) executeSlotCommand(slot *slotRuntime, command CommandEnvelo
 	}
 	rememberResponse(slot, command.CommandID, nil)
 
+	// A slot is owned only while it has an assignment; it is released when
+	// the container stops or its start fails. Generations count attempts per
+	// reservation, so they are only comparable within the same assignment.
 	snapshot := snapshotSlot(slot)
-	if command.Generation < snapshot.Generation {
-		c.rememberAndSend(slot, command.CommandID, c.failureEvent(
-			command, "invalid_command", "stale_generation", "Command generation is stale",
-		))
+	if snapshot.AssignmentID != 0 && snapshot.AssignmentID != command.AssignmentID {
+		if command.Type == "server.start" {
+			c.rememberAndSend(slot, command.CommandID, c.failureEvent(
+				command, "infrastructure", "slot_busy", "Slot still has a managed container",
+			))
+		} else {
+			c.rememberAndSend(slot, command.CommandID, c.failureEvent(
+				command, "invalid_command", "assignment_conflict", "Slot is owned by a different assignment",
+			))
+		}
 		return
 	}
-	if command.Generation == snapshot.Generation && snapshot.AssignmentID != 0 &&
-		snapshot.AssignmentID != command.AssignmentID {
+	if snapshot.AssignmentID != 0 && command.Generation < snapshot.Generation {
 		c.rememberAndSend(slot, command.CommandID, c.failureEvent(
-			command, "invalid_command", "assignment_conflict", "Slot is owned by a different assignment",
+			command, "invalid_command", "stale_generation", "Command generation is stale",
 		))
 		return
 	}
@@ -655,12 +663,21 @@ func (c *Controller) failStart(
 	slot.containerID = ""
 	slot.sequence = nil
 	slot.lastReady = nil
+	releaseSlotLocked(slot)
 	if slot.leaseCancel != nil {
 		slot.leaseCancel()
 		slot.leaseCancel = nil
 	}
 	slot.mu.Unlock()
 	c.rememberAndSend(slot, command.CommandID, event)
+}
+
+// releaseSlotLocked forgets the slot's last assignment once it no longer has
+// a container, so the next reservation can start there. slot.mu must be held.
+func releaseSlotLocked(slot *slotRuntime) {
+	slot.generation = 0
+	slot.reservationID = 0
+	slot.assignmentID = 0
 }
 
 func (c *Controller) stopSlot(slot *slotRuntime, command CommandEnvelope) {
@@ -727,6 +744,7 @@ func (c *Controller) stopSlot(slot *slotRuntime, command CommandEnvelope) {
 	slot.sequence = nil
 	slot.lastReady = nil
 	slot.leaseExpires = time.Time{}
+	releaseSlotLocked(slot)
 	slot.mu.Unlock()
 	c.rememberAndSend(slot, command.CommandID, event)
 	if sequence != nil && logDirectory != "" {
