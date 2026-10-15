@@ -139,5 +139,39 @@ class OpenIdNonceTests(unittest.TestCase):
         self.assertEqual([_nonce(now)], list(auth._used_openid_nonces))
 
 
+class SessionBindingTests(unittest.IsolatedAsyncioTestCase):
+    def _db_returning(self, user):
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = user
+        db = MagicMock()
+        db.execute = AsyncMock(return_value=result)
+        db.commit = AsyncMock()
+        return db
+
+    def _request(self, payload: dict):
+        token = auth._session_serializer().dumps(payload)
+        return SimpleNamespace(cookies={"session": token})
+
+    def _user(self, steam_id: str):
+        return SimpleNamespace(id=7, steam_id=steam_id, deleted_at=None, is_admin=False)
+
+    async def test_session_authenticates_the_account_it_was_issued_to(self):
+        user = self._user(STEAM_ID)
+        request = self._request({"user_id": 7, "steam_id": STEAM_ID})
+        with patch.object(auth.settings, "admin_steam_ids", ""):
+            self.assertIs(user, await auth.get_current_user(request, self._db_returning(user)))
+
+    async def test_session_of_deleted_account_does_not_reach_reused_id(self):
+        # The cookie's account was deleted and user ID 7 now belongs to a new signup.
+        new_signup = self._user(OTHER_STEAM_ID)
+        request = self._request({"user_id": 7, "steam_id": STEAM_ID})
+        self.assertIsNone(await auth.get_current_user(request, self._db_returning(new_signup)))
+
+    async def test_session_without_steam_id_is_rejected(self):
+        user = self._user(STEAM_ID)
+        request = self._request({"user_id": 7})
+        self.assertIsNone(await auth.get_current_user(request, self._db_returning(user)))
+
+
 if __name__ == "__main__":
     unittest.main()
