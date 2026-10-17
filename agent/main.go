@@ -36,7 +36,7 @@ type Config struct {
 }
 
 // agentVersion is injected by release builds with -X main.agentVersion=...
-var agentVersion = "0.2.6"
+var agentVersion = "0.2.7"
 
 // agentFeatures tells the backend which optional behaviours this cloud agent
 // supports. boot-handover: a container.reconfigure received while the image is
