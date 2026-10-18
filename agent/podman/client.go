@@ -623,9 +623,11 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 		args = append(args, "-e", fmt.Sprintf("SM_ADMINS=%s", strings.Join(cfg.AdminSteamIDs, ",")))
 	}
 
-	// Image and command
+	// Image and command. These replace the image's default command, so they
+	// must repeat +sv_pure, which only takes effect on a map load.
 	args = append(args,
 		cfg.Image,
+		"+sv_pure", "2",
 		// New images replace this after a successful prefetch. Keeping badlands
 		// here makes old images and failed prefetches safe during rolling deploys.
 		"+map", "cp_badlands",

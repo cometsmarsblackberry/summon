@@ -151,8 +151,8 @@ func TestBuildRunArgsProvidesValidatedStartupMapWithBadlandsCommandFallback(t *t
 			if env := "SUMMON_START_MAP=" + test.want; !slices.Contains(args, env) {
 				t.Fatalf("startup map environment %q missing from %q", env, args)
 			}
-			if len(args) < 2 || !slices.Equal(args[len(args)-2:], []string{"+map", "cp_badlands"}) {
-				t.Fatalf("badlands command fallback missing from %q", args)
+			if len(args) < 4 || !slices.Equal(args[len(args)-4:], []string{"+sv_pure", "2", "+map", "cp_badlands"}) {
+				t.Fatalf("sv_pure and badlands command fallback missing from %q", args)
 			}
 		})
 	}
