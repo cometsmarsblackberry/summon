@@ -18,7 +18,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.5.4"
+#define PLUGIN_VERSION "1.6.0"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1643,50 +1643,84 @@ static const char g_sRGLPlugins[][] = {
     "rglupdater.smx"
 };
 
+// SOAP DM plugins to move between disabled/ and plugins/ when competitive
+// configs are loaded. soap_tournament reloads soap_tf2dm on every map start
+// and unloads it only once both teams ready up in tournament mode. Without
+// tournament mode it would never unload, and the map would keep its
+// objectives locked and its resupply cabinets removed.
+static const char g_sSOAPPlugins[][] = {
+    "soap_tf2dm.smx",
+    "soap_tournament.smx"
+};
+
+enum PluginMove
+{
+    PluginMove_Failed,
+    PluginMove_InPlace,
+    PluginMove_Moved
+};
+
+// Moves a plugin file into plugins/ or into plugins/disabled/. SourceMod loads
+// every plugin in plugins/ again on map change, so a plugin that is only
+// unloaded comes back on the next map.
+PluginMove MovePlugin(const char[] plugin, bool enable)
+{
+    char enabledPath[PLATFORM_MAX_PATH];
+    char disabledPath[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, enabledPath, sizeof(enabledPath), "plugins/%s", plugin);
+    BuildPath(Path_SM, disabledPath, sizeof(disabledPath), "plugins/disabled/%s", plugin);
+
+    if (FileExists(enabledPath))
+    {
+        // Keep the copy in plugins/ (e.g., re-downloaded by RGL Updater).
+        // Remove any copy in disabled/, which is stale and would block the
+        // rename.
+        if (FileExists(disabledPath))
+            DeleteFile(disabledPath);
+
+        if (enable)
+            return PluginMove_InPlace;
+
+        if (!RenameFile(disabledPath, enabledPath))
+        {
+            LogError("[summon] Failed to move plugin to disabled/: %s", plugin);
+            return PluginMove_Failed;
+        }
+
+        LogMessage("[summon] Moved plugin to disabled/: %s", plugin);
+        return PluginMove_Moved;
+    }
+
+    if (!FileExists(disabledPath))
+    {
+        LogError("[summon] Plugin not found in either location: %s", plugin);
+        return PluginMove_Failed;
+    }
+
+    if (!enable)
+        return PluginMove_InPlace;
+
+    if (!RenameFile(enabledPath, disabledPath))
+    {
+        LogError("[summon] Failed to move plugin to plugins/: %s", plugin);
+        return PluginMove_Failed;
+    }
+
+    LogMessage("[summon] Moved plugin to plugins/: %s", plugin);
+    return PluginMove_Moved;
+}
+
 void EnableRGLPlugins()
 {
-    char src[PLATFORM_MAX_PATH];
-    char dst[PLATFORM_MAX_PATH];
-
     for (int i = 0; i < sizeof(g_sRGLPlugins); i++)
     {
-        BuildPath(Path_SM, src, sizeof(src), "plugins/disabled/%s", g_sRGLPlugins[i]);
-        BuildPath(Path_SM, dst, sizeof(dst), "plugins/%s", g_sRGLPlugins[i]);
-
-        if (FileExists(dst))
-        {
-            // Already in plugins/ (e.g., re-downloaded by RGL Updater).
-            // Remove stale disabled/ copy if present.
-            if (FileExists(src))
-                DeleteFile(src);
-        }
-        else if (FileExists(src))
-        {
-            if (RenameFile(dst, src))
-            {
-                LogMessage("[summon] Moved RGL plugin to plugins/: %s", g_sRGLPlugins[i]);
-            }
-            else
-            {
-                LogError("[summon] Failed to move RGL plugin: %s", g_sRGLPlugins[i]);
-                continue;
-            }
-        }
-        else
-        {
-            LogError("[summon] RGL plugin not found in either location: %s", g_sRGLPlugins[i]);
-            continue;
-        }
-
-        ServerCommand("sm plugins load %s", g_sRGLPlugins[i]);
+        if (MovePlugin(g_sRGLPlugins[i], true) != PluginMove_Failed)
+            ServerCommand("sm plugins load %s", g_sRGLPlugins[i]);
     }
 }
 
 void DisableRGLPlugins()
 {
-    char src[PLATFORM_MAX_PATH];
-    char dst[PLATFORM_MAX_PATH];
-
     // Unload all RGL plugins first to stop the Updater from re-downloading
     // files while we move them.
     for (int i = sizeof(g_sRGLPlugins) - 1; i >= 0; i--)
@@ -1697,39 +1731,72 @@ void DisableRGLPlugins()
 
     for (int i = 0; i < sizeof(g_sRGLPlugins); i++)
     {
-        BuildPath(Path_SM, src, sizeof(src), "plugins/%s", g_sRGLPlugins[i]);
-        BuildPath(Path_SM, dst, sizeof(dst), "plugins/disabled/%s", g_sRGLPlugins[i]);
+        MovePlugin(g_sRGLPlugins[i], false);
+    }
+}
 
-        if (!FileExists(src))
-            continue;
-
-        // Remove any existing copy in disabled/ so the rename succeeds.
-        if (FileExists(dst))
-            DeleteFile(dst);
-
-        if (RenameFile(dst, src))
+// Returns true if any SOAP plugin was moved to plugins/.
+bool EnableSOAPPlugins()
+{
+    // Once enabled, SOAP is run by soap_tournament, which unloads soap_tf2dm
+    // for a live match. Loading soap_tf2dm again for another config would
+    // start a deathmatch mid-match, so load only what was in disabled/.
+    bool moved = false;
+    for (int i = 0; i < sizeof(g_sSOAPPlugins); i++)
+    {
+        if (MovePlugin(g_sSOAPPlugins[i], true) == PluginMove_Moved)
         {
-            LogMessage("[summon] Moved RGL plugin to disabled/: %s", g_sRGLPlugins[i]);
-        }
-        else
-        {
-            LogError("[summon] Failed to move RGL plugin: %s", g_sRGLPlugins[i]);
+            ServerCommand("sm plugins load %s", g_sSOAPPlugins[i]);
+            moved = true;
         }
     }
+    return moved;
+}
+
+// Returns true if any SOAP plugin was moved to disabled/.
+bool DisableSOAPPlugins()
+{
+    for (int i = sizeof(g_sSOAPPlugins) - 1; i >= 0; i--)
+    {
+        ServerCommand("sm plugins unload %s", g_sSOAPPlugins[i]);
+    }
+    ServerExecute();
+
+    bool moved = false;
+    for (int i = 0; i < sizeof(g_sSOAPPlugins); i++)
+    {
+        if (MovePlugin(g_sSOAPPlugins[i], false) == PluginMove_Moved)
+            moved = true;
+    }
+    return moved;
 }
 
 void ExecuteConfig(const char[] cfgFile)
 {
-    if (strncmp(cfgFile, "rgl_", 4, false) == 0)
-    {
-        EnableRGLPlugins();
-    }
-    else if (StrEqual(cfgFile, "summon_reset", false))
+    // Whether SOAP was turned on or off. SOAP loaded mid-round removes the
+    // resupply cabinets and spawn rooms only at the next round start, and
+    // unloading it leaves them removed and the objectives locked. Restarting
+    // the game makes the map match SOAP's state.
+    bool soapChanged;
+
+    if (StrEqual(cfgFile, "summon_reset", false))
     {
         DisableRGLPlugins();
+        soapChanged = DisableSOAPPlugins();
+    }
+    else
+    {
+        if (strncmp(cfgFile, "rgl_", 4, false) == 0)
+        {
+            EnableRGLPlugins();
+        }
+        soapChanged = EnableSOAPPlugins();
     }
 
     ServerCommand("exec %s", cfgFile);
+
+    if (soapChanged)
+        ServerCommand("mp_restartgame_immediate 1");
 
     if (StrEqual(cfgFile, "summon_reset", false))
         strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), "none");

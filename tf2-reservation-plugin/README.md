@@ -82,6 +82,17 @@ The special `summon_reset` config resets the server to its defaults. Loading an
 RGL config also enables Summon's built-in RGL plugin set; loading
 `summon_reset` disables it again.
 
+SOAP DM, the deathmatch that runs until both teams ready up, is enabled only
+by a competitive config. Without tournament mode no one readies up, so SOAP
+would never unload, and the map would keep its objectives locked and its
+resupply cabinets removed. Loading any competitive config moves `soap_tf2dm`
+and `soap_tournament` from `plugins/disabled/` to `plugins/` and loads them,
+so they stay loaded after a map change. Loading another config leaves them
+as they are, so a live match does not restart its deathmatch. Loading
+`summon_reset` unloads them and moves them back. The game restarts whenever
+SOAP is turned on or off, so the map's objectives, resupply cabinets, and
+spawn rooms match SOAP's state.
+
 The current config is the last one loaded through Summon, whether by the agent
 at boot, the web panel, `!config`, the menus, or `exec` through `!command`. It
 shows as `none` before any config is loaded and after `summon_reset`. A config
