@@ -85,13 +85,17 @@
         </div>
 
         {% if connection.sdr_ip or (connection.ip_address is defined and connection.ip_address) %}
+        {#- TF2 connects to 27015 when the address has no port. -#}
+        {% macro connect_command(ip, port, password) -%}
+        connect {{ ip }}{% if port != 27015 %}:{{ port }}{% endif %}; password {{ password }}
+        {%- endmacro %}
         {% if connection.sdr_ip %}
-        {% set sdr_command = 'connect ' ~ connection.sdr_ip ~ ':' ~ connection.sdr_port ~ '; password ' ~ connection.password %}
-        {% set sdr_stv_command = 'connect ' ~ connection.sdr_ip ~ ':' ~ connection.sdr_tv_port ~ '; password ' ~ connection.tv_password %}
+        {% set sdr_command = connect_command(connection.sdr_ip, connection.sdr_port, connection.password) %}
+        {% set sdr_stv_command = connect_command(connection.sdr_ip, connection.sdr_tv_port, connection.tv_password) %}
         {% endif %}
         {% if connection.ip_address is defined and connection.ip_address %}
-        {% set direct_command = 'connect ' ~ connection.direct_ip ~ ':' ~ connection.direct_port ~ '; password ' ~ connection.password %}
-        {% set direct_stv_command = 'connect ' ~ connection.direct_ip ~ ':' ~ connection.direct_tv_port ~ '; password ' ~ connection.tv_password %}
+        {% set direct_command = connect_command(connection.direct_ip, connection.direct_port, connection.password) %}
+        {% set direct_stv_command = connect_command(connection.direct_ip, connection.direct_tv_port, connection.tv_password) %}
         {% endif %}
         {% set default_connection_type = 'connect' %}
         {% set default_connection_command = sdr_command if connection.sdr_ip else '' %}

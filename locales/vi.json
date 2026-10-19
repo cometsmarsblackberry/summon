@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Kết nối trực tiếp",
         "direct_source_tv": "SourceTV trực tiếp",
+        "direct_connect_starting": "Người chơi có thể vào khi máy chủ sẵn sàng. Nếu phải khởi động lại, địa chỉ này có thể thay đổi.",
         "copy": "Sao chép",
         "copied": "Đã sao chép!",
         "restart_server": "Khởi động lại",

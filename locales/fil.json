@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Direktang Koneksyon",
         "direct_source_tv": "Direktang SourceTV",
+        "direct_connect_starting": "Makakasali ang mga manlalaro kapag handa na ang server. Kung kailangang ulitin ang pag-start, maaaring magbago ang address na ito.",
         "copy": "Kopyahin",
         "copied": "Nakopya na!",
         "restart_server": "I-restart",

@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Conexão direta",
         "direct_source_tv": "SourceTV direto",
+        "direct_connect_starting": "Os jogadores poderão entrar quando o servidor estiver pronto. Se a inicialização precisar ser repetida, este endereço pode mudar.",
         "copy": "Copiar",
         "copied": "Copiado!",
         "restart_server": "Reiniciar",

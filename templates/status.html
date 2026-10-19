@@ -84,6 +84,12 @@
             return summonIntl.dateTime(this.normalizeIso(value), this.locale, 'UTC') + ' UTC';
         },
 
+        connectCommand(ip, port, password) {
+            // TF2 connects to 27015 when the address has no port.
+            const address = Number(port) === 27015 ? ip : ip + ':' + port;
+            return 'connect ' + address + '; password ' + password;
+        },
+
         init() {
             // Always fetch latest status on load
             this.fetchStatus();
@@ -132,7 +138,8 @@
                     if (this.status !== prevStatus && (this.status === 'pending' || this.status === 'provisioning')) {
                         this.resetBootProgress();
                     }
-                    // Always update connection info if available
+                    // Always update connection info, and clear it when a startup
+                    // retry dropped the address so a stale one isn't left shown.
                     if (data.sdr_ip || data.direct_ip || data.enable_direct_connect) {
                         this.connection = {
                             sdr_ip: data.sdr_ip,
@@ -150,6 +157,8 @@
                             direct_tv_port: data.direct_tv_port || (data.ip_address ? 27020 : null),
                             runtime_kind: data.runtime_kind,
                         };
+                    } else {
+                        this.connection = null;
                     }
                     // Show failure reason from polling (fallback if SSE missed it)
                     if (data.status === 'failed' && data.failure_reason && !this.error) {
@@ -1218,20 +1227,26 @@
 
         <div class="{{ '' if uses_legacy_layout else 'mt-4 space-y-4' }}">
 
-        <!-- Connection details (owner only, when active) -->
+        <!-- Connection details (owner only). Direct details are known before
+             the server is ready, so they show while it starts for early sharing. -->
         {% if is_owner %}
-        <div x-show="status === 'active'" x-cloak class="border-t border-slate-200 pt-5"
+        <div x-show="status === 'active' || (status === 'provisioning' && connection && connection.direct_ip)" x-cloak
+            class="{{ 'mt-6 pt-6 border-t border-slate-200' if uses_legacy_layout else 'border-t border-slate-200 pt-5' }}"
             x-data="{ connType: 'connect', connTypeInit: false }"
             x-effect="if (!connTypeInit && connection && connection.direct_ip) { connTypeInit = true; $nextTick(() => { connType = 'direct'; }); }">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-sm font-medium text-slate-500">{{ _('status.connection_details') }}</h2>
                 <select x-model="connType"
                     class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">
-                    <option value="connect">{{ _('status.connect') }}</option>
+                    <template x-if="status === 'active'">
+                        <option value="connect">{{ _('status.connect') }}</option>
+                    </template>
                     <template x-if="connection && connection.direct_ip">
                         <option value="direct">{{ _('status.direct_connect') }}</option>
                     </template>
-                    <option value="stv">{{ _('status.source_tv') }}</option>
+                    <template x-if="status === 'active'">
+                        <option value="stv">{{ _('status.source_tv') }}</option>
+                    </template>
                     <template x-if="connection && connection.direct_ip">
                         <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
                     </template>
@@ -1242,9 +1257,9 @@
             <div x-show="connType === 'connect' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password : ''"></code>
+                        x-text="connection ? connectCommand(connection.sdr_ip, connection.sdr_port, connection.password) : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText(connectCommand(connection.sdr_ip, connection.sdr_port, connection.password)); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1257,9 +1272,9 @@
             <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.sdr_ip + ':' + connection.sdr_tv_port + '; password ' + connection.tv_password : ''"></code>
+                        x-text="connection ? connectCommand(connection.sdr_ip, connection.sdr_tv_port, connection.tv_password) : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.sdr_ip + ':' + connection.sdr_tv_port + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText(connectCommand(connection.sdr_ip, connection.sdr_tv_port, connection.tv_password)); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1272,9 +1287,9 @@
             <div x-show="connType === 'direct' && connection && connection.direct_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.direct_ip + ':' + connection.direct_port + '; password ' + connection.password : ''"></code>
+                        x-text="connection ? connectCommand(connection.direct_ip, connection.direct_port, connection.password) : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.direct_ip + ':' + connection.direct_port + '; password ' + connection.password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText(connectCommand(connection.direct_ip, connection.direct_port, connection.password)); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1287,9 +1302,9 @@
             <div x-show="connType === 'direct_stv' && connection && connection.direct_ip" x-data="{ copied: false }">
                 <div class="flex items-center gap-2">
                     <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? 'connect ' + connection.direct_ip + ':' + connection.direct_tv_port + '; password ' + connection.tv_password : ''"></code>
+                        x-text="connection ? connectCommand(connection.direct_ip, connection.direct_tv_port, connection.tv_password) : ''"></code>
                     <button
-                        @click="navigator.clipboard.writeText('connect ' + connection.direct_ip + ':' + connection.direct_tv_port + '; password ' + connection.tv_password); copied = true; setTimeout(() => copied = false, 2000)"
+                        @click="navigator.clipboard.writeText(connectCommand(connection.direct_ip, connection.direct_tv_port, connection.tv_password)); copied = true; setTimeout(() => copied = false, 2000)"
                         class="px-2 py-2 rounded text-xs transition-colors"
                         :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
                         <span x-show="!copied">{{ _('status.copy') }}</span>
@@ -1297,6 +1312,8 @@
                     </button>
                 </div>
             </div>
+
+            <p x-show="status === 'provisioning'" class="mt-2 text-xs text-slate-400">{{ _('status.direct_connect_starting') }}</p>
         </div>
         {% endif %}
 
