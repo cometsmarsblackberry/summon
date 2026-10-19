@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "ダイレクト接続",
         "direct_source_tv": "ダイレクトSourceTV",
+        "direct_connect_starting": "サーバーの準備ができるとプレイヤーが参加できます。起動を再試行した場合、このアドレスは変わることがあります。",
         "copy": "コピー",
         "copied": "コピーしました！",
         "restart_server": "再起動",

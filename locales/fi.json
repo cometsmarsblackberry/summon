@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Suora yhteys",
         "direct_source_tv": "Suora SourceTV",
+        "direct_connect_starting": "Pelaajat voivat liittyä, kun palvelin on valmis. Jos käynnistystä joudutaan yrittämään uudelleen, osoite voi muuttua.",
         "copy": "Kopioi",
         "copied": "Kopioitu!",
         "restart_server": "Käynnistä uudelleen",

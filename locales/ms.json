@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Sambungan Terus",
         "direct_source_tv": "SourceTV Terus",
+        "direct_connect_starting": "Pemain boleh menyertai sebaik sahaja pelayan sedia. Jika permulaan perlu dicuba semula, alamat ini mungkin berubah.",
         "copy": "Salin",
         "copied": "Disalin!",
         "restart_server": "Mulakan Semula",

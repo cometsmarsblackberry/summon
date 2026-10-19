@@ -104,6 +104,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Direct Connect",
         "direct_source_tv": "Direct SourceTV",
+        "direct_connect_starting": "Players can join once the server is ready. If startup has to be retried, this address may change.",
         "copy": "Copy",
         "copied": "Copied!",
         "restart_server": "Restart",

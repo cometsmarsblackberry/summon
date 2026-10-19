@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "직접 연결",
         "direct_source_tv": "직접 SourceTV",
+        "direct_connect_starting": "서버가 준비되면 플레이어가 접속할 수 있습니다. 시작을 다시 시도해야 하는 경우 이 주소가 바뀔 수 있습니다.",
         "copy": "복사",
         "copied": "복사됨!",
         "restart_server": "재시작",

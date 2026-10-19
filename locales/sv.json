@@ -101,6 +101,7 @@
         "source_tv": "SourceTV",
         "direct_connect": "Direktanslutning",
         "direct_source_tv": "Direkt SourceTV",
+        "direct_connect_starting": "Spelare kan ansluta när servern är redo. Om starten måste göras om kan adressen ändras.",
         "copy": "Kopiera",
         "copied": "Kopierat!",
         "restart_server": "Starta om",

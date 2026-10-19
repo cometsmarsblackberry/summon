@@ -57,6 +57,9 @@ agent_stats: dict[str, dict] = {}
 # Track competitive config lists reported by agents (instance_id -> data)
 competitive_configs: dict[str, dict] = {}
 
+# Public IP lookups started when a booting agent connects.
+public_ip_tasks: set[asyncio.Task] = set()
+
 # Persistent-host connections and per-assignment observations. Host-wide and
 # container stats stay separate so shared load is never presented as a single
 # reservation's resource usage.
@@ -302,6 +305,13 @@ async def agent_websocket(
         await _send_initial_config(instance_id, instance, websocket)
     except Exception as e:
         logger.error(f"Failed to send initial config to agent {instance_id}: {e}")
+
+    # Direct connect details can be shown while the server boots, but some
+    # providers only report the public IP once the VM is running.
+    if not instance.ip_address and instance.current_reservation_id:
+        task = asyncio.create_task(_record_booting_public_ip(instance_id))
+        public_ip_tasks.add(task)
+        task.add_done_callback(public_ip_tasks.discard)
 
     try:
         while True:
@@ -1185,6 +1195,60 @@ async def handle_agent_message(instance_id: str, data: dict):
         logger.warning(f"Unknown message type from agent: {message_type}")
 
 
+async def _fetch_provider_public_ip(
+    cloud_instance: CloudInstance, location: str, db,
+) -> Optional[str]:
+    """Look up a cloud instance's public IP from its provider."""
+    try:
+        from app.models.instance import EnabledLocation
+        from app.services.cloud_provider import get_cloud_client
+        loc_result = await db.execute(
+            select(EnabledLocation).where(EnabledLocation.code == location)
+        )
+        loc = loc_result.scalar_one_or_none()
+        if loc:
+            client = get_cloud_client(loc.provider)
+            if client:
+                # Gcore benefits from a region hint; Vultr does not accept region_id.
+                if loc.provider == "gcore":
+                    instance_data = await client.get_instance(
+                        cloud_instance.id, region_id=int(loc.provider_region)
+                    )
+                else:
+                    instance_data = await client.get_instance(cloud_instance.id)
+                if instance_data.main_ip and instance_data.main_ip != "0.0.0.0":
+                    logger.info(f"Fetched public IP from provider: {instance_data.main_ip}")
+                    return instance_data.main_ip
+    except Exception as e:
+        logger.warning(f"Failed to fetch public IP from provider: {e}")
+    return None
+
+
+async def _record_booting_public_ip(instance_id: str) -> None:
+    """Store a booting instance's public IP so direct connect can show early."""
+    async with async_session_maker() as db:
+        result = await db.execute(
+            select(CloudInstance, Reservation)
+            .join(Reservation, CloudInstance.current_reservation_id == Reservation.id)
+            .where(CloudInstance.instance_id == instance_id)
+        )
+        row = result.first()
+        if not row:
+            return
+        cloud_instance, reservation = row
+        if (
+            cloud_instance.ip_address
+            or not reservation.enable_direct_connect
+            or reservation.status != ReservationStatus.PROVISIONING
+        ):
+            return
+
+        ip = await _fetch_provider_public_ip(cloud_instance, reservation.location, db)
+        if ip:
+            cloud_instance.ip_address = ip
+            await db.commit()
+
+
 async def handle_server_ready(instance_id: str, data: dict):
     """Handle server ready notification from agent.
     
@@ -1275,28 +1339,7 @@ async def handle_server_ready(instance_id: str, data: dict):
 
             # Fetch public IP from cloud provider if agent didn't provide a usable one
             if not real_ip:
-                try:
-                    from app.models.instance import EnabledLocation
-                    from app.services.cloud_provider import get_cloud_client
-                    loc_result = await db.execute(
-                        select(EnabledLocation).where(EnabledLocation.code == reservation.location)
-                    )
-                    loc = loc_result.scalar_one_or_none()
-                    if loc:
-                        client = get_cloud_client(loc.provider)
-                        if client:
-                            # Gcore benefits from a region hint; Vultr does not accept region_id.
-                            if loc.provider == "gcore":
-                                instance_data = await client.get_instance(
-                                    cloud_instance.id, region_id=int(loc.provider_region)
-                                )
-                            else:
-                                instance_data = await client.get_instance(cloud_instance.id)
-                            if instance_data.main_ip and instance_data.main_ip != "0.0.0.0":
-                                real_ip = instance_data.main_ip
-                                logger.info(f"Fetched public IP from provider: {real_ip}")
-                except Exception as e:
-                    logger.warning(f"Failed to fetch public IP from provider: {e}")
+                real_ip = await _fetch_provider_public_ip(cloud_instance, reservation.location, db)
 
             if real_ip:
                 cloud_instance.ip_address = real_ip
