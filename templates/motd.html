@@ -172,9 +172,20 @@
         {% endif %}
 
         <div class="info-card">
+            {#- Deleting the account removes the owner from its reservations. -#}
+            {% if reservation.user %}
+            <div class="info-row">
+                <span class="info-label">{{ _('motd.reserved_by') }}</span>
+                <span class="info-value">{{ reservation.user.display_name }}</span>
+            </div>
+            {% endif %}
             <div class="info-row">
                 <span class="info-label">{{ _('motd.map') }}</span>
                 <span class="info-value">{{ reservation.current_map or reservation.first_map }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">{{ _('motd.config') }}</span>
+                <span class="info-value">{{ reservation.config_file or '—' }}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">{{ _('motd.ends_at') }}</span>

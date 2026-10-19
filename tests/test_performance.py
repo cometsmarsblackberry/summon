@@ -10,7 +10,10 @@ from app.database import engine
 from app.main import _templates
 from app.models.reservation import Reservation
 from app.routers import admin, motd, pages, status
-from app.routers.internal import _update_persisted_player_state
+from app.routers.internal import (
+    _update_persisted_player_state,
+    _update_persisted_server_state,
+)
 
 
 class TemplateCacheTests(unittest.TestCase):
@@ -160,6 +163,20 @@ class PlayerUpdateTests(unittest.TestCase):
         self.assertTrue(reservation.player_joined)
         self.assertEqual(6, reservation.peak_player_count)
         self.assertIsNone(reservation.empty_since)
+
+    def test_unchanged_server_state_does_not_require_commit(self):
+        reservation = SimpleNamespace(
+            current_map="cp_process_f12",
+            config_file=None,
+        )
+
+        changed = _update_persisted_server_state(
+            reservation,
+            current_map="cp_process_f12",
+            config_file="",
+        )
+
+        self.assertFalse(changed)
 
 
 if __name__ == "__main__":

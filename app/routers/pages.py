@@ -266,21 +266,23 @@ async def reservation_status_page(
     loc_record = loc_result.scalar_one_or_none()
     location_display = loc_record.city if loc_record and loc_record.city else reservation.location
 
-    # Build download URL for custom maps
+    # Build download URL for custom maps. Maps changed to in game can be stock
+    # maps missing from the map list, which FastDL does not have.
     map_download_url = None
+    map_name = reservation.current_map or reservation.first_map
     from app.models.instance import GameMap
     map_result = await db.execute(
-        select(GameMap).where(GameMap.name == reservation.first_map)
+        select(GameMap).where(GameMap.name == map_name)
     )
     game_map = map_result.scalar_one_or_none()
-    if not game_map or not game_map.is_default:
+    if game_map and not game_map.is_default:
         from app.services.settings import get_fastdl_url
         fastdl = await get_fastdl_url(db)
         if not fastdl.endswith("/"):
             fastdl += "/"
         if fastdl.endswith("maps/"):
             fastdl = fastdl[:-5]  # strip trailing maps/ to avoid duplication
-        map_download_url = f"{fastdl}maps/{reservation.first_map}.bsp"
+        map_download_url = f"{fastdl}maps/{map_name}.bsp"
 
     from app.services.settings import get_reservation_settings
     reservation_settings = await get_reservation_settings(db)

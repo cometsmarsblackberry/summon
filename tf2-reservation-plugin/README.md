@@ -20,8 +20,9 @@ image. Operators do not install the plugins or their dependencies separately.
   restart the match, and end the reservation.
 - Gives the owner restricted access to an operator-maintained allowlist of
   server commands without granting unrestricted RCON access.
-- Reports player count, SteamID64, connection time, and ping to the Summon
-  backend every 10 seconds and when players join or leave.
+- Reports player count, SteamID64, connection time, and ping, along with the
+  current map and config, to the Summon backend every 10 seconds, when players
+  join or leave, when a map starts, and when a config loads.
 - Reports logs.tf and demos.tf upload links when the corresponding plugins are
   installed.
 - Downloads a missing map before changing to it when the companion map
@@ -215,7 +216,7 @@ sends authenticated JSON requests to:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /internal/reservations/<number>/players` | Current human-player snapshot. |
+| `POST /internal/reservations/<number>/players` | Current human-player snapshot, map, and config. |
 | `POST /internal/reservations/<number>/end` | Owner-confirmed early end. |
 | `POST /internal/reservations/<number>/uploads` | logs.tf or demos.tf upload metadata. |
 

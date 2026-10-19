@@ -475,7 +475,9 @@
         "copied": "Copied!",
         "show_command": "Show command",
         "hide_command": "Hide command",
+        "reserved_by": "Reserved by",
         "map": "Map",
+        "config": "Config",
         "ends_at": "Ends at",
         "did_you_know": "Did you know\u2026",
         "not_available": "This reservation is not currently active."
