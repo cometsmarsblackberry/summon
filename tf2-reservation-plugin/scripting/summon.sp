@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.3"
+#define PLUGIN_VERSION "1.6.4"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1644,6 +1644,15 @@ static const char g_sRGLPlugins[][] = {
     "rglupdater.smx"
 };
 
+// RGL plugins that RGL configs load from disabled/ themselves. They stay
+// loaded across map changes, so unload them with the RGL plugins.
+// roundtimer_override would keep shortening the round timer under another
+// league's config.
+static const char g_sRGLConfigPlugins[][] = {
+    "disabled/p4sstime.smx",
+    "disabled/roundtimer_override.smx"
+};
+
 // SOAP DM plugins to move between disabled/ and plugins/ when competitive
 // configs are loaded. soap_tournament reloads soap_tf2dm on every map start
 // and unloads it only once both teams ready up in tournament mode. Without
@@ -1741,6 +1750,11 @@ void DisableRGLPlugins()
     {
         if (FindPluginByFile(g_sRGLPlugins[i]) != null)
             ServerCommand("sm plugins unload %s", g_sRGLPlugins[i]);
+    }
+    for (int i = 0; i < sizeof(g_sRGLConfigPlugins); i++)
+    {
+        if (FindPluginByFile(g_sRGLConfigPlugins[i]) != null)
+            ServerCommand("sm plugins unload %s", g_sRGLConfigPlugins[i]);
     }
     ServerExecute();
 
