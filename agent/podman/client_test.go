@@ -122,6 +122,23 @@ func TestBuildRunArgsPreservesCloudDefaults(t *testing.T) {
 	if healthcheckIndex == -1 || healthcheckIndex > imageIndex {
 		t.Fatalf("cloud containers must disable the image healthcheck before the image argument: %v", args)
 	}
+	if slices.Contains(args, "--sysctl") {
+		t.Fatalf("cloud containers must keep the default network sysctls: %v", args)
+	}
+}
+
+func TestBuildRunArgsLeavesUDPFragmentationToHostOnInstantHosts(t *testing.T) {
+	args := BuildRunArgs(ContainerConfig{
+		Name: "summon-h4-s2", Image: "tf2:test", GamePort: 27035, TVPort: 27040,
+	})
+	sysctlIndex := slices.Index(args, "--sysctl")
+	if sysctlIndex == -1 || sysctlIndex+1 >= len(args) ||
+		args[sysctlIndex+1] != "net.ipv4.ip_no_pmtu_disc=3" {
+		t.Fatalf("instant containers must ignore UDP path MTU updates: %v", args)
+	}
+	if sysctlIndex > slices.Index(args, "tf2:test") {
+		t.Fatalf("--sysctl must precede the image argument: %v", args)
+	}
 }
 
 func TestBuildRunArgsProvidesValidatedStartupMapWithBadlandsCommandFallback(t *testing.T) {

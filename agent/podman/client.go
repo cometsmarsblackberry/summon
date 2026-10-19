@@ -591,6 +591,14 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 		// starts podman, an exec session, and an RCON client. On a small
 		// cloud VM that work competes with SRCDS for CPU.
 		args = append(args, "--no-healthcheck")
+	} else {
+		// pasta relays ICMP frag-needed from the host into the container but
+		// drops the IPv4 fragments the container kernel then creates, so behind
+		// a path MTU below 1500 every large UDP packet (big snapshots, SDR)
+		// vanishes. Mode 3 ignores path MTU updates for UDP and leaves
+		// fragmentation to the host kernel. TCP is unaffected because pasta
+		// terminates it on host sockets, which do their own path MTU discovery.
+		args = append(args, "--sysctl", "net.ipv4.ip_no_pmtu_disc=3")
 	}
 	args = append(args,
 		"-p", fmt.Sprintf("%d:27015/udp", gamePort),
