@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "ยินดีต้อนรับสู่ {site_name}",
         "reservation_label": "การจอง #{number}",
-        "copy_connect": "เชื่อมต่อ SDR",
-        "copy_direct_connect": "เชื่อมต่อโดยตรง",
-        "copied": "คัดลอกแล้ว!",
         "reserved_by": "จองโดย",
         "map": "แผนที่",
         "config": "การตั้งค่า",
         "ends_at": "สิ้นสุดเวลา",
         "did_you_know": "คุณรู้หรือไม่…",
-        "not_available": "การจองนี้ยังไม่เปิดใช้งานในขณะนี้",
-        "show_command": "แสดงคำสั่ง",
-        "hide_command": "ซ่อนคำสั่ง"
+        "not_available": "การจองนี้ยังไม่เปิดใช้งานในขณะนี้"
     }
 }

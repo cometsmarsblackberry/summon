@@ -35,7 +35,9 @@ class MotdPageTests(unittest.IsolatedAsyncioTestCase):
             db.add(Reservation(
                 reservation_number=212, user_id=owner.id, location="hel",
                 starts_at=now, ends_at=now + timedelta(hours=2),
-                password="pw", rcon_password="rcon", tv_password="tv",
+                password="join-secret", rcon_password="rcon", tv_password="stv-secret",
+                sdr_ip="169.254.1.2", sdr_port=41234, sdr_tv_port=41235,
+                direct_ip="203.0.113.9", direct_port=27015, direct_tv_port=27020,
                 first_map="cp_badlands", current_map="cp_badlands",
                 config_file="etf2l_6v6_5cp", motd_token="motd-212",
                 logsecret="log", plugin_api_key="plugin-212",
@@ -71,6 +73,13 @@ class MotdPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Scrim Owner", html)
         self.assertIn("cp_badlands", html)
         self.assertIn("etf2l_6v6_5cp", html)
+
+    async def test_connection_details_are_left_out(self):
+        # SourceTV demos record the MOTD URL and are public mid-reservation.
+        html = await self.render()
+
+        for detail in ("join-secret", "stv-secret", "169.254.1.2", "203.0.113.9", "connect "):
+            self.assertNotIn(detail, html)
 
     async def test_owner_is_left_out_after_account_deletion(self):
         async with self.session_maker() as db:

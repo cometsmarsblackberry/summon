@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "Bem-vindo ao {site_name}",
         "reservation_label": "Reserva #{number}",
-        "copy_connect": "Conexão SDR",
-        "copy_direct_connect": "Conexão direta",
-        "copied": "Copiado!",
         "reserved_by": "Reservado por",
         "map": "Mapa",
         "config": "Configuração",
         "ends_at": "Termina às",
         "did_you_know": "Você sabia…",
-        "not_available": "Esta reserva não está ativa no momento.",
-        "show_command": "Mostrar comando",
-        "hide_command": "Ocultar comando"
+        "not_available": "Esta reserva não está ativa no momento."
     }
 }

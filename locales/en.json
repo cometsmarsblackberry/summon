@@ -470,11 +470,6 @@
     "motd": {
         "welcome": "Welcome to {site_name}",
         "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direct Connect",
-        "copied": "Copied!",
-        "show_command": "Show command",
-        "hide_command": "Hide command",
         "reserved_by": "Reserved by",
         "map": "Map",
         "config": "Config",

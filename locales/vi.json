@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "Chào mừng đến với {site_name}",
         "reservation_label": "Đặt chỗ #{number}",
-        "copy_connect": "Kết nối SDR",
-        "copy_direct_connect": "Kết nối trực tiếp",
-        "copied": "Đã sao chép!",
         "reserved_by": "Người đặt",
         "map": "Bản đồ",
         "config": "Cấu hình",
         "ends_at": "Kết thúc lúc",
         "did_you_know": "Bạn có biết…",
-        "not_available": "Đặt chỗ này hiện không hoạt động.",
-        "show_command": "Hiển thị lệnh",
-        "hide_command": "Ẩn lệnh"
+        "not_available": "Đặt chỗ này hiện không hoạt động."
     }
 }

@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "Maligayang pagdating sa {site_name}",
         "reservation_label": "Reservation #{number}",
-        "copy_connect": "SDR Connect",
-        "copy_direct_connect": "Direktang koneksyon",
-        "copied": "Nakopya!",
         "reserved_by": "Nagpareserba",
         "map": "Mapa",
         "config": "Config",
         "ends_at": "Magtatapos sa",
         "did_you_know": "Alam mo ba…",
-        "not_available": "Hindi kasalukuyang aktibo ang reservation na ito.",
-        "show_command": "Ipakita ang command",
-        "hide_command": "Itago ang command"
+        "not_available": "Hindi kasalukuyang aktibo ang reservation na ito."
     }
 }

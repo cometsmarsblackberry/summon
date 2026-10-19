@@ -26,15 +26,17 @@ async def motd_page(
     motd_token: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """MOTD page shown to players inside TF2."""
+    """MOTD page shown to players inside TF2.
+
+    SourceTV records the MOTD URL in every demo, and demos.tf publishes demos
+    while the reservation is still running, so this page must not show
+    connection details or passwords.
+    """
     # Look up by unguessable token instead of reservation number
     result = await db.execute(
         select(Reservation)
         .where(Reservation.motd_token == motd_token)
-        .options(
-            selectinload(Reservation.cloud_instance),
-            selectinload(Reservation.user),
-        )
+        .options(selectinload(Reservation.user))
     )
     reservation = result.scalar_one_or_none()
 
@@ -42,7 +44,7 @@ async def motd_page(
         return templates.TemplateResponse(
             request,
             "motd.html",
-            {"reservation": None, "trivia": None, "connection": None, "location_display": None},
+            {"reservation": None, "trivia": None, "location_display": None},
             status_code=404,
         )
 
@@ -63,27 +65,6 @@ async def motd_page(
         location.city if location and location.city else reservation.location
     )
 
-    # Build connection data for copy buttons
-    connection = {
-        "sdr_ip": reservation.sdr_ip,
-        "sdr_port": reservation.sdr_port,
-        "sdr_tv_port": reservation.sdr_tv_port,
-        "password": reservation.password,
-        "tv_password": reservation.tv_password,
-        "direct_ip": reservation.direct_ip,
-        "direct_port": reservation.direct_port,
-        "direct_tv_port": reservation.direct_tv_port,
-    }
-    if reservation.direct_ip:
-        connection["ip_address"] = reservation.direct_ip
-    elif reservation.enable_direct_connect and reservation.cloud_instance:
-        ip = reservation.cloud_instance.ip_address
-        if ip and ip != "0.0.0.0":
-            connection["ip_address"] = ip
-            connection["direct_ip"] = ip
-            connection["direct_port"] = 27015
-            connection["direct_tv_port"] = 27020
-
     response = templates.TemplateResponse(
         request,
         "motd.html",
@@ -91,7 +72,6 @@ async def motd_page(
             "reservation": reservation,
             "location_display": location_display,
             "trivia": trivia,
-            "connection": connection,
         },
     )
 

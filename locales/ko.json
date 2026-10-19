@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "{site_name}에 오신 것을 환영합니다",
         "reservation_label": "예약 #{number}",
-        "copy_connect": "SDR 연결",
-        "copy_direct_connect": "직접 연결",
-        "copied": "복사됨!",
         "reserved_by": "예약자",
         "map": "맵",
         "config": "설정",
         "ends_at": "종료 시각",
         "did_you_know": "알고 계셨나요…",
-        "not_available": "이 예약은 현재 활성 상태가 아닙니다.",
-        "show_command": "명령어 표시",
-        "hide_command": "명령어 숨기기"
+        "not_available": "이 예약은 현재 활성 상태가 아닙니다."
     }
 }

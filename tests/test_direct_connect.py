@@ -7,53 +7,15 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import app.main  # noqa: F401 - registers template globals
 from app.database import Base
 from app.models import CloudInstance, EnabledLocation, Provider, Reservation, ReservationStatus
-from app.routers import internal, motd
+from app.routers import internal
 from app.routers.reservations import reservation_to_response
 from app.services.cloud_provider import CloudInstanceData
 
 CLOUD_ID = "6f0c2b1e-0d6a-4a57-9a3e-1f5f4a2c9b10"
 AGENT_ID = "tf2-212-0a1b2c3d"
 PUBLIC_IP = "203.0.113.9"
-
-
-class MotdConnectCommandTests(unittest.TestCase):
-    def render(self, connection):
-        return motd.templates.get_template("motd.html").render(
-            request=SimpleNamespace(state=SimpleNamespace(locale="en")),
-            reservation=SimpleNamespace(
-                reservation_number=212,
-                status=SimpleNamespace(value="active"),
-                ends_at=datetime(2026, 10, 19, 20, 0),
-            ),
-            connection=connection,
-            trivia=None,
-            location_display="Frankfurt",
-        )
-
-    def test_default_game_port_is_left_out(self):
-        html = self.render({
-            "sdr_ip": "169.254.1.2", "sdr_port": 41234, "sdr_tv_port": 41235,
-            "password": "pw", "tv_password": "tv",
-            "direct_ip": PUBLIC_IP, "direct_port": 27015, "direct_tv_port": 27020,
-            "ip_address": PUBLIC_IP,
-        })
-
-        self.assertIn(f'data-command="connect {PUBLIC_IP}; password pw"', html)
-        self.assertIn(f'data-command="connect {PUBLIC_IP}:27020; password tv"', html)
-        self.assertIn('data-command="connect 169.254.1.2:41234; password pw"', html)
-        self.assertNotIn(":27015", html)
-
-    def test_other_game_ports_are_kept(self):
-        html = self.render({
-            "sdr_ip": None, "password": "pw", "tv_password": "tv",
-            "direct_ip": PUBLIC_IP, "direct_port": 27115, "direct_tv_port": 27120,
-            "ip_address": PUBLIC_IP,
-        })
-
-        self.assertIn(f'data-command="connect {PUBLIC_IP}:27115; password pw"', html)
 
 
 class StatusPageConnectCommandTests(unittest.TestCase):
