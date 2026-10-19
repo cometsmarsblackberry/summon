@@ -8,6 +8,7 @@
  */
 
 #include <sourcemod>
+#include <sdktools>
 #include <ripext>
 
 #pragma semicolon 1
@@ -18,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.0"
+#define PLUGIN_VERSION "1.6.1"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1735,22 +1736,16 @@ void DisableRGLPlugins()
     }
 }
 
-// Returns true if any SOAP plugin was moved to plugins/.
-bool EnableSOAPPlugins()
+void EnableSOAPPlugins()
 {
     // Once enabled, SOAP is run by soap_tournament, which unloads soap_tf2dm
     // for a live match. Loading soap_tf2dm again for another config would
     // start a deathmatch mid-match, so load only what was in disabled/.
-    bool moved = false;
     for (int i = 0; i < sizeof(g_sSOAPPlugins); i++)
     {
         if (MovePlugin(g_sSOAPPlugins[i], true) == PluginMove_Moved)
-        {
             ServerCommand("sm plugins load %s", g_sSOAPPlugins[i]);
-            moved = true;
-        }
     }
-    return moved;
 }
 
 // Returns true if any SOAP plugin was moved to disabled/.
@@ -1773,16 +1768,19 @@ bool DisableSOAPPlugins()
 
 void ExecuteConfig(const char[] cfgFile)
 {
-    // Whether SOAP was turned on or off. SOAP loaded mid-round removes the
-    // resupply cabinets and spawn rooms only at the next round start, and
-    // unloading it leaves them removed and the objectives locked. Restarting
-    // the game makes the map match SOAP's state.
-    bool soapChanged;
+    bool restartGame = false;
 
     if (StrEqual(cfgFile, "summon_reset", false))
     {
         DisableRGLPlugins();
-        soapChanged = DisableSOAPPlugins();
+        // SOAP does not undo its changes when unloaded: the objectives stay
+        // locked and the resupply cabinets and spawn rooms stay removed.
+        // Restarting the game recreates the map's entities. An empty server
+        // waiting in pregame recreates them anyway once players join, and a
+        // restart there would wait for the players and then end the ready-up
+        // period of a competitive config loaded in the meantime.
+        bool soapDisabled = DisableSOAPPlugins();
+        restartGame = soapDisabled && GameRules_GetRoundState() != RoundState_Pregame;
     }
     else
     {
@@ -1790,12 +1788,16 @@ void ExecuteConfig(const char[] cfgFile)
         {
             EnableRGLPlugins();
         }
-        soapChanged = EnableSOAPPlugins();
+        // No restart here: in tournament mode it would end the ready-up
+        // period. Loaded mid-round, SOAP locks the objectives at once but
+        // removes the resupply cabinets and spawn rooms only at the next
+        // round start.
+        EnableSOAPPlugins();
     }
 
     ServerCommand("exec %s", cfgFile);
 
-    if (soapChanged)
+    if (restartGame)
         ServerCommand("mp_restartgame_immediate 1");
 
     if (StrEqual(cfgFile, "summon_reset", false))
