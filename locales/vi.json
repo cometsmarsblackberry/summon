@@ -209,6 +209,7 @@
         "what_is_body": "{site_name} cho phép bạn đặt chỗ máy chủ Team Fortress 2 riêng tư ngay lập tức. Chọn địa điểm, chọn bản đồ, và máy chủ sẽ được khởi động cho bạn. Đặt chỗ kéo dài {max_hours} giờ và tự kết thúc khi máy chủ trống {auto_end_minutes} phút.",
         "commands_title": "Lệnh đặt chỗ",
         "commands_intro": "Sử dụng các lệnh này trong chat khi đặt chỗ. Lệnh chỉ dành cho chủ sở hữu yêu cầu người đặt chỗ thực hiện.",
+        "cmd_admin": "Mở menu đặt chỗ để xem thông tin đặt chỗ, đổi bản đồ, tải cấu hình, khởi động lại trận đấu hoặc kết thúc đặt chỗ.",
         "cmd_reservation": "Hiển thị số đặt chỗ, chủ sở hữu và thời gian còn lại.",
         "cmd_end": "Bắt đầu đếm ngược 10 giây để kết thúc đặt chỗ.",
         "cmd_cancel": "Hủy đếm ngược kết thúc đang chạy nếu bị kích hoạt nhầm.",

@@ -209,6 +209,7 @@
         "what_is_body": "{site_name} låter dig omedelbart reservera en privat Team Fortress 2-server. Välj en plats, välj en karta och en server startas upp åt dig. Reservationer varar i {max_hours} timmar och avslutas automatiskt när servern är tom i {auto_end_minutes} minuter.",
         "commands_title": "Reservationskommandon",
         "commands_intro": "Använd dessa i chatten under din reservation. Ägarspecifika kommandon kräver att reservationsägaren kör dem.",
+        "cmd_admin": "Öppnar reservationsmenyn för att visa reservationsinformation, byta karta, ladda konfigurationer, starta om matchen eller avsluta reservationen.",
         "cmd_reservation": "Visar reservationsnumret, ägaren och återstående tid.",
         "cmd_end": "Startar en 10-sekunders nedräkning för att avsluta reservationen.",
         "cmd_cancel": "Avbryter en aktiv avslutningsnedräkning om den startades av misstag.",

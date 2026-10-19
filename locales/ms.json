@@ -209,6 +209,7 @@
         "what_is_body": "{site_name} membolehkan anda menempah pelayan Team Fortress 2 peribadi dengan serta-merta. Pilih lokasi, pilih peta, dan pelayan akan dihidupkan untuk anda. Tempahan berlangsung {max_hours} jam dan tamat automatik apabila pelayan kosong selama {auto_end_minutes} minit.",
         "commands_title": "Arahan tempahan",
         "commands_intro": "Gunakan ini dalam sembang semasa tempahan anda. Arahan pemilik sahaja memerlukan pemilik tempahan untuk menjalankannya.",
+        "cmd_admin": "Membuka menu tempahan untuk melihat maklumat tempahan, menukar peta, memuatkan konfigurasi, memulakan semula perlawanan, atau menamatkan tempahan.",
         "cmd_reservation": "Menunjukkan nombor tempahan, pemilik, dan masa yang tinggal.",
         "cmd_end": "Memulakan kiraan detik 10 saat untuk menamatkan tempahan.",
         "cmd_cancel": "Membatalkan kiraan detik tamat yang sedang berjalan jika dimulakan secara tidak sengaja.",

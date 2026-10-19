@@ -209,6 +209,7 @@
         "what_is_body": "{site_name} permite que você reserve instantaneamente um servidor privado de Team Fortress 2. Escolha um local, selecione um mapa e um servidor será iniciado para você. As reservas duram {max_hours} horas e encerram automaticamente quando o servidor fica vazio por {auto_end_minutes} minutos.",
         "commands_title": "Comandos de reserva",
         "commands_intro": "Use estes no chat durante sua reserva. Comandos apenas para o proprietário exigem que o dono da reserva os execute.",
+        "cmd_admin": "Abre o menu da reserva para ver suas informações, trocar mapas, carregar configurações, reiniciar a partida ou encerrar a reserva.",
         "cmd_reservation": "Mostra o número da reserva, o proprietário e o tempo restante.",
         "cmd_end": "Inicia uma contagem regressiva de 10 segundos para encerrar a reserva.",
         "cmd_cancel": "Cancela uma contagem regressiva de encerramento ativa se foi iniciada por engano.",

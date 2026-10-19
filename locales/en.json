@@ -209,6 +209,7 @@
         "what_is_body": "{site_name} lets you instantly reserve a private Team Fortress 2 server. Pick a location, choose a map, and a server is spun up for you. Reservations last {max_hours} hours and auto-end when the server is empty for {auto_end_minutes} minutes.",
         "commands_title": "Reservation commands",
         "commands_intro": "Use these in chat during your reservation. Owner-only commands require the reservation owner to run them.",
+        "cmd_admin": "Opens the reservation menu to view reservation information, change maps, load configs, restart the match, or end the reservation.",
         "cmd_reservation": "Shows the reservation number, owner, and time remaining.",
         "cmd_end": "Starts a 10-second countdown to end the reservation.",
         "cmd_cancel": "Cancels an active end countdown if it was started by mistake.",

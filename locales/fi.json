@@ -209,6 +209,7 @@
         "what_is_body": "{site_name}:n avulla voit välittömästi varata yksityisen Team Fortress 2 -palvelimen. Valitse sijainti, valitse kartta ja palvelin käynnistetään sinulle. Varaukset kestävät {max_hours} tuntia ja päättyvät automaattisesti, kun palvelin on ollut tyhjä {auto_end_minutes} minuuttia.",
         "commands_title": "Varauskomennot",
         "commands_intro": "Käytä näitä chatissa varauksen aikana. Vain omistajille tarkoitetut komennot vaativat, että varauksen omistaja ajaa ne.",
+        "cmd_admin": "Avaa varausvalikon, jossa voit tarkastella varauksen tietoja, vaihtaa karttaa, ladata asetuksia, käynnistää ottelun uudelleen tai päättää varauksen.",
         "cmd_reservation": "Näyttää varaustunnuksen, omistajan ja jäljellä olevan ajan.",
         "cmd_end": "Aloittaa 10 sekunnin lähtölaskennan varauksen päättämiseksi.",
         "cmd_cancel": "Peruuttaa aktiivisen lopetuslähtölaskennan, jos se aloitettiin vahingossa.",
