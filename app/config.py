@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     instant_host_quarantine_seconds: int = 600
     instant_protocol_min: int = 1
     instant_protocol_max: int = 1
-    agent_version: str = "0.2.7"
+    agent_version: str = "0.2.8"
     
     # Reservation defaults
     max_duration_hours: int = 4  # Max reservation duration in hours
