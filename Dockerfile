@@ -1,5 +1,5 @@
 # Stage 1: Build the game-server agent served by the web application
-FROM golang:1.25-bookworm AS agent-builder
+FROM golang:1.27-bookworm AS agent-builder
 
 WORKDIR /build/agent
 COPY agent/go.mod agent/go.sum ./
