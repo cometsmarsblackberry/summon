@@ -79,8 +79,10 @@ rgl_  etf2l_  fbtf_  tfarena_  ultitrio_  ozfortress_  cltf2_  afc_  af_
 ```
 
 The special `summon_reset` config resets the server to its defaults. Loading an
-RGL config also enables Summon's built-in RGL plugin set; loading
-`summon_reset` disables it again.
+RGL config also enables Summon's built-in RGL plugin set; loading any other
+config, including `summon_reset`, disables it again. RGL's QoL plugin unloads
+Wait For STV on every map start, so disabling the set loads Wait For STV
+again.
 
 SOAP DM, the deathmatch that runs until both teams ready up, is enabled only
 by a competitive config. Without tournament mode no one readies up, so SOAP

@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.2"
+#define PLUGIN_VERSION "1.6.3"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1731,17 +1731,30 @@ void EnableRGLPlugins()
 
 void DisableRGLPlugins()
 {
+    // rglqol unloads Wait For STV on every map start. SourceMod loads it
+    // again only on the next map change.
+    bool restoreWaitForSTV = FindPluginByFile("rglqol.smx") != null;
+
     // Unload all RGL plugins first to stop the Updater from re-downloading
     // files while we move them.
     for (int i = sizeof(g_sRGLPlugins) - 1; i >= 0; i--)
     {
-        ServerCommand("sm plugins unload %s", g_sRGLPlugins[i]);
+        if (FindPluginByFile(g_sRGLPlugins[i]) != null)
+            ServerCommand("sm plugins unload %s", g_sRGLPlugins[i]);
     }
     ServerExecute();
 
     for (int i = 0; i < sizeof(g_sRGLPlugins); i++)
     {
         MovePlugin(g_sRGLPlugins[i], false);
+    }
+
+    if (restoreWaitForSTV && FindPluginByFile("waitforstv.smx") == null)
+    {
+        char path[PLATFORM_MAX_PATH];
+        BuildPath(Path_SM, path, sizeof(path), "plugins/waitforstv.smx");
+        if (FileExists(path))
+            ServerCommand("sm plugins load waitforstv.smx");
     }
 }
 
@@ -1825,9 +1838,16 @@ void ExecuteConfig(const char[] cfgFile)
     }
     else
     {
+        // The RGL plugins keep acting on later configs: rglqol blocks
+        // changelevel after a match and forces a map change when tv_enable
+        // or sv_pure changes. Remove them for other leagues' configs.
         if (strncmp(cfgFile, "rgl_", 4, false) == 0)
         {
             EnableRGLPlugins();
+        }
+        else
+        {
+            DisableRGLPlugins();
         }
         // No restart here: in tournament mode it would end the ready-up
         // period. EnableSOAPPlugins applies SOAP's map changes instead.
