@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "Välkommen till {site_name}",
         "reservation_label": "Bokning #{number}",
-        "copy_connect": "SDR-anslutning",
-        "copy_direct_connect": "Direktanslutning",
-        "copied": "Kopierat!",
         "reserved_by": "Bokad av",
         "map": "Karta",
         "config": "Konfiguration",
         "ends_at": "Slutar",
         "did_you_know": "Visste du…",
-        "not_available": "Den här bokningen är inte aktiv just nu.",
-        "show_command": "Visa kommando",
-        "hide_command": "Dölj kommando"
+        "not_available": "Den här bokningen är inte aktiv just nu."
     }
 }

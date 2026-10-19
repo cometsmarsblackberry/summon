@@ -470,16 +470,11 @@
     "motd": {
         "welcome": "Tervetuloa palveluun {site_name}",
         "reservation_label": "Varaus #{number}",
-        "copy_connect": "SDR-yhteys",
-        "copy_direct_connect": "Suora yhteys",
-        "copied": "Kopioitu!",
         "reserved_by": "Varaaja",
         "map": "Kartta",
         "config": "Asetus",
         "ends_at": "Päättyy",
         "did_you_know": " tiesitkö…",
-        "not_available": "Tämä varaus ei ole tällä hetkellä aktiivinen.",
-        "show_command": "Näytä komento",
-        "hide_command": "Piilota komento"
+        "not_available": "Tämä varaus ei ole tällä hetkellä aktiivinen."
     }
 }
