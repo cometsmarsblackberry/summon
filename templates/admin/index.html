@@ -1783,11 +1783,20 @@
                     <div class="space-y-3">
                         <h3 class="text-sm font-semibold text-slate-900">Add Instant host</h3>
                         <div class="grid grid-cols-2 gap-2">
-                            <select x-model="instantHostForm.location" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                                <template x-for="loc in alphabetizedLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
-                            </select>
-                            <input x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                            <input x-model.number="instantHostForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <div>
+                                <label for="instant-host-location" class="text-xs text-slate-500">Location</label>
+                                <select id="instant-host-location" x-model="instantHostForm.location" class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                                    <template x-for="loc in alphabetizedLocations" :key="loc.code"><option :value="loc.code" x-text="loc.name"></option></template>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="instant-host-slot-count" class="text-xs text-slate-500">Slots</label>
+                                <input id="instant-host-slot-count" x-model.number="instantHostForm.slot_count" type="number" min="1" max="64" placeholder="Slots" class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            </div>
+                            <div>
+                                <label for="instant-host-base-port" class="text-xs text-slate-500">Base port</label>
+                                <input id="instant-host-base-port" x-model.number="instantHostForm.base_port" type="number" min="1024" max="65535" placeholder="Base port" class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            </div>
                         </div>
                         <p class="text-xs text-slate-400">Ports use base + slot × 10; SourceTV uses game port + 5. The host starts disabled.</p>
                         <div class="flex gap-2 justify-end">
@@ -1849,36 +1858,57 @@
             <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-5 space-y-3">
                 <h3 class="text-sm font-semibold text-slate-900" x-text="locEditMode ? 'Edit Location' : 'Add Location'"></h3>
                 <div class="grid grid-cols-2 gap-2">
-                    <select x-model="locFormData.provider"
-                        @change="if (!locEditMode && locFormData.provider_region) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                        <option value="">Instant only (no cloud)</option>
-                        <template x-for="p in providers" :key="p.code">
-                            <option :value="p.code" x-text="p.name"></option>
-                        </template>
-                    </select>
-                    <input x-model="locFormData.provider_region" placeholder="Region ID (e.g., sgp)"
-                        @input="if (!locEditMode) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <div>
+                        <label for="loc-provider" class="text-xs text-slate-500">Provider</label>
+                        <select id="loc-provider" x-model="locFormData.provider"
+                            @change="if (!locEditMode && locFormData.provider_region) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <option value="">Instant only (no cloud)</option>
+                            <template x-for="p in providers" :key="p.code">
+                                <option :value="p.code" x-text="p.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="loc-provider-region" class="text-xs text-slate-500">Region ID</label>
+                        <input id="loc-provider-region" x-model="locFormData.provider_region" placeholder="Region ID (e.g., sgp)"
+                            @input="if (!locEditMode) locFormData.code = locFormData.provider + '-' + locFormData.provider_region"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
                 </div>
-                <input x-model="locFormData.ping_url" placeholder="Ping URL (optional for any infrastructure)"
-                    class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                <div class="grid grid-cols-2 gap-2">
-                    <input x-model="locFormData.city" placeholder="City (e.g., Singapore)"
-                        @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                    <input x-model="locFormData.country" placeholder="Country"
-                        @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                <div>
+                    <label for="loc-ping-url" class="text-xs text-slate-500">Ping URL (optional)</label>
+                    <input id="loc-ping-url" x-model="locFormData.ping_url" placeholder="Ping URL (optional for any infrastructure)"
+                        class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
                 </div>
                 <div class="grid grid-cols-2 gap-2">
-                    <select x-model="locFormData.continent" class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
-                        <option value="">Continent...</option>
-                        <option>Africa</option><option>Asia</option><option>Australia</option><option>Europe</option>
-                        <option>Middle East</option><option>North America</option><option>Oceania</option><option>South America</option>
-                    </select>
-                    <input x-model="locFormData.subdivision" placeholder="Subdivision (e.g., California, US-CA)"
-                        class="px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    <div>
+                        <label for="loc-city" class="text-xs text-slate-500">City</label>
+                        <input id="loc-city" x-model="locFormData.city" placeholder="City (e.g., Singapore)"
+                            @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                    <div>
+                        <label for="loc-country" class="text-xs text-slate-500">Country</label>
+                        <input id="loc-country" x-model="locFormData.country" placeholder="Country"
+                            @input="if (locFormData.city && locFormData.country) locFormData.name = locFormData.city + ', ' + locFormData.country"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label for="loc-continent" class="text-xs text-slate-500">Continent</label>
+                        <select id="loc-continent" x-model="locFormData.continent" class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                            <option value="">Continent...</option>
+                            <option>Africa</option><option>Asia</option><option>Australia</option><option>Europe</option>
+                            <option>Middle East</option><option>North America</option><option>Oceania</option><option>South America</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="loc-subdivision" class="text-xs text-slate-500">Subdivision</label>
+                        <input id="loc-subdivision" x-model="locFormData.subdivision" placeholder="Subdivision (e.g., California, US-CA)"
+                            class="w-full px-2 py-1.5 text-sm bg-white border border-slate-300 rounded text-slate-800">
+                    </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                     <div class="flex items-center gap-2 px-2">
