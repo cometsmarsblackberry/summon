@@ -89,9 +89,14 @@ resupply cabinets removed. Loading any competitive config moves `soap_tf2dm`
 and `soap_tournament` from `plugins/disabled/` to `plugins/` and loads them,
 so they stay loaded after a map change. Loading another config leaves them
 as they are, so a live match does not restart its deathmatch. Loading
-`summon_reset` unloads them and moves them back. The game restarts whenever
-SOAP is turned on or off, so the map's objectives, resupply cabinets, and
-spawn rooms match SOAP's state.
+`summon_reset` unloads them, moves them back, and restarts the game to bring
+back the map's objectives, resupply cabinets, and spawn rooms. An empty
+server skips the restart, because the map is rebuilt when players join.
+
+Enabling SOAP does not restart the game, because a restart in tournament mode
+ends the ready-up period. A config loaded mid-round therefore locks the
+objectives at once, while the resupply cabinets and spawn rooms stay until the
+next round start.
 
 The current config is the last one loaded through Summon, whether by the agent
 at boot, the web panel, `!config`, the menus, or `exec` through `!command`. It
