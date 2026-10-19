@@ -1835,6 +1835,9 @@ class PlayerUpdateRequest(BaseModel):
     """Request body for player update from plugin."""
     player_count: int
     players: list[PlayerInfo] = []
+    # Older plugins leave these out. An empty config_file means none is loaded.
+    map: str | None = None
+    config_file: str | None = None
 
 
 class PlayerUpdateResponse(BaseModel):
@@ -1868,6 +1871,33 @@ def _update_persisted_player_state(
     return changed
 
 
+def _update_persisted_server_state(
+    reservation: Reservation,
+    current_map: str | None,
+    config_file: str | None,
+) -> bool:
+    """Apply the plugin's map and config and report whether a database write is needed.
+
+    The server ready report only has the starting map, and configs loaded in
+    game never reach the website, so the plugin reports both with players.
+    """
+    changed = False
+
+    if current_map:
+        current_map = current_map[:64]
+        if reservation.current_map != current_map:
+            reservation.current_map = current_map
+            changed = True
+
+    if config_file is not None:
+        config_file = config_file[:64] or None
+        if reservation.config_file != config_file:
+            reservation.config_file = config_file
+            changed = True
+
+    return changed
+
+
 @router.post("/reservations/{reservation_number}/players", response_model=PlayerUpdateResponse)
 async def update_players(
     reservation_number: int,
@@ -1875,8 +1905,8 @@ async def update_players(
     x_api_key: str = Header(..., alias="X-API-Key"),
 ):
     """
-    Update player list for a reservation.
-    Called by SourceMod plugin on player join/leave.
+    Update player list, map, and config for a reservation.
+    Called by SourceMod plugin on player join/leave, map start, and config load.
     """
     if not await validate_reservation_api_key(reservation_number, x_api_key):
         raise HTTPException(status_code=403, detail="Invalid API key")
@@ -1906,10 +1936,15 @@ async def update_players(
             body.player_count,
             datetime.now(timezone.utc),
         )
+        server_state_changed = _update_persisted_server_state(
+            reservation,
+            body.map,
+            body.config_file,
+        )
 
         # Periodic updates arrive every ten seconds. Avoid an unnecessary
         # transaction commit when none of the persisted state changed.
-        if changed:
+        if changed or server_state_changed:
             await db.commit()
 
     return PlayerUpdateResponse(success=True)

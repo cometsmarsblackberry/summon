@@ -45,6 +45,7 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
             user_id=user.id,
             location="hel",
             first_map="cp_badlands",
+            current_map=None,
         )
         location_result = SimpleNamespace(
             scalar_one_or_none=lambda: SimpleNamespace(city="Helsinki"),

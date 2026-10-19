@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.4"
+#define PLUGIN_VERSION "1.6.5"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -212,6 +212,10 @@ public void OnMapStart()
     }
     g_bExpiryKickDone = false;
     g_hExpiryTimer = CreateTimer(1.0, Timer_ExpiryCheck, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+
+    // Report the new map before players finish loading it, so the MOTD they
+    // are shown already has it.
+    SendPlayerUpdate();
 }
 
 public void OnClientPostAdminCheck(int client)
@@ -309,11 +313,20 @@ void SendPlayerUpdate()
         playerCount++;
     }
 
+    char mapName[PLATFORM_MAX_PATH];
+    GetCurrentMap(mapName, sizeof(mapName));
+
     // Build payload
     JSONObject body = new JSONObject();
     body.SetInt("player_count", playerCount);
     body.Set("players", playersArr);
     delete playersArr;
+    body.SetString("map", mapName);
+    // The backend stores no config as an empty string.
+    if (StrEqual(g_sCurrentConfig, "none"))
+        body.SetString("config_file", "");
+    else
+        body.SetString("config_file", g_sCurrentConfig);
 
     // Send HTTP POST
     char url[512];
@@ -1877,6 +1890,8 @@ void ExecuteConfig(const char[] cfgFile)
         strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), "none");
     else
         strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), cfgFile);
+
+    SendPlayerUpdate();
 }
 
 void PrintCurrentConfig(int client)

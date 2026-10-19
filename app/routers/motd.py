@@ -31,7 +31,10 @@ async def motd_page(
     result = await db.execute(
         select(Reservation)
         .where(Reservation.motd_token == motd_token)
-        .options(selectinload(Reservation.cloud_instance))
+        .options(
+            selectinload(Reservation.cloud_instance),
+            selectinload(Reservation.user),
+        )
     )
     reservation = result.scalar_one_or_none()
 
