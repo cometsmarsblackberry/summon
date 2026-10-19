@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.1"
+#define PLUGIN_VERSION "1.6.2"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1654,6 +1654,15 @@ static const char g_sSOAPPlugins[][] = {
     "soap_tournament.smx"
 };
 
+// soap_tf2dm settings whose change handlers open the doors and remove the
+// resupply cabinets and spawn rooms. Loaded mid-round, soap_tf2dm does both
+// before it reads these settings, so it skips them until the next round
+// start.
+static const char g_sSOAPMapConVars[][] = {
+    "soap_opendoors",
+    "soap_disablecabinet"
+};
+
 enum PluginMove
 {
     PluginMove_Failed,
@@ -1741,11 +1750,43 @@ void EnableSOAPPlugins()
     // Once enabled, SOAP is run by soap_tournament, which unloads soap_tf2dm
     // for a live match. Loading soap_tf2dm again for another config would
     // start a deathmatch mid-match, so load only what was in disabled/.
+    bool loaded = false;
     for (int i = 0; i < sizeof(g_sSOAPPlugins); i++)
     {
         if (MovePlugin(g_sSOAPPlugins[i], true) == PluginMove_Moved)
+        {
             ServerCommand("sm plugins load %s", g_sSOAPPlugins[i]);
+            loaded = true;
+        }
     }
+
+    // Wait for the queued loads and the config to run first.
+    if (loaded)
+        CreateTimer(1.0, Timer_ApplySOAPMapSettings, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+// Changes each enabled SOAP map setting and changes it back, so soap_tf2dm
+// opens the doors and removes the resupply cabinets and spawn rooms now
+// instead of at the next round start.
+public Action Timer_ApplySOAPMapSettings(Handle timer)
+{
+    for (int i = 0; i < sizeof(g_sSOAPMapConVars); i++)
+    {
+        // Leave a disabled setting alone: turning one off makes soap_tf2dm
+        // restart the game, which in tournament mode ends the ready-up period.
+        ConVar cvar = FindConVar(g_sSOAPMapConVars[i]);
+        if (cvar == null || cvar.IntValue < 1)
+            continue;
+
+        // Skip the chat notice for these temporary values.
+        int flags = cvar.Flags;
+        int value = cvar.IntValue;
+        cvar.Flags = flags & ~FCVAR_NOTIFY;
+        cvar.IntValue = value + 1;
+        cvar.IntValue = value;
+        cvar.Flags = flags;
+    }
+    return Plugin_Stop;
 }
 
 // Returns true if any SOAP plugin was moved to disabled/.
@@ -1789,9 +1830,7 @@ void ExecuteConfig(const char[] cfgFile)
             EnableRGLPlugins();
         }
         // No restart here: in tournament mode it would end the ready-up
-        // period. Loaded mid-round, SOAP locks the objectives at once but
-        // removes the resupply cabinets and spawn rooms only at the next
-        // round start.
+        // period. EnableSOAPPlugins applies SOAP's map changes instead.
         EnableSOAPPlugins();
     }
 

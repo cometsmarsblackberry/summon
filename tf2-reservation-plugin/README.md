@@ -94,9 +94,11 @@ back the map's objectives, resupply cabinets, and spawn rooms. An empty
 server skips the restart, because the map is rebuilt when players join.
 
 Enabling SOAP does not restart the game, because a restart in tournament mode
-ends the ready-up period. A config loaded mid-round therefore locks the
-objectives at once, while the resupply cabinets and spawn rooms stay until the
-next round start.
+ends the ready-up period. Loaded mid-round, `soap_tf2dm` would open the doors
+and remove the resupply cabinets and spawn rooms only at the next round start.
+A second after loading it, Summon changes `soap_opendoors` and
+`soap_disablecabinet` and changes them back, which makes SOAP apply both at
+once.
 
 The current config is the last one loaded through Summon, whether by the agent
 at boot, the web panel, `!config`, the menus, or `exec` through `!command`. It
