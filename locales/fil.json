@@ -209,6 +209,7 @@
         "what_is_body": "Pinapahintulutan ka ng {site_name} na mag-reserve kaagad ng pribadong Team Fortress 2 server. Pumili ng lokasyon, pumili ng mapa, at mag-iikot ang isang server para sa iyo. Tumatagal ang mga reserbasyon ng {max_hours} oras at awtomatikong nagtatapos kapag walang laman ang server nang {auto_end_minutes} minuto.",
         "commands_title": "Mga command ng reserbasyon",
         "commands_intro": "Gamitin ang mga ito sa chat sa panahon ng iyong reserbasyon. Ang mga command na para sa may-ari lamang ay nangangailangan ng may-ari ng reserbasyon na patakbuhin ang mga ito.",
+        "cmd_admin": "Binubuksan ang menu ng reserbasyon para tingnan ang impormasyon nito, magpalit ng mapa, mag-load ng mga config, i-restart ang laban, o tapusin ang reserbasyon.",
         "cmd_reservation": "Nagpapakita ng numero ng reserbasyon, may-ari, at natitirang oras.",
         "cmd_end": "Nagsisimula ng 10-segundong countdown para tapusin ang reserbasyon.",
         "cmd_cancel": "Kinakansela ang aktibong countdown ng pagtatapos kung nasimulan ito nang hindi sinasadya.",
