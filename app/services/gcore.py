@@ -29,6 +29,12 @@ GCORE_FCOS_IMAGE = "fedora-coreos-42-x64"
 # Boot volume size in GB
 GCORE_BOOT_VOLUME_SIZE = 20
 
+# Boot volume types, preferred first. A 20 GB Standard volume tops out around
+# 100 MB/s, so unpacking the game image takes ~40 s longer than on Low-latency
+# or High IOPS; Low-latency is also the cheaper of the two. Regions offer
+# different subsets.
+GCORE_BOOT_VOLUME_TYPES = ("ssd_lowlatency", "ssd_hiiops", "standard")
+
 # Security group for direct connect (UDP game ports)
 DIRECT_CONNECT_SG_NAME = "tf2-direct-connect"
 
@@ -97,6 +103,26 @@ class GcoreClient(CloudProvider):
         raise CloudProviderError(
             f"Fedora CoreOS image not found in region {region_id}"
         )
+
+    async def _get_boot_volume_type(self, region_id: int) -> str:
+        """Pick the preferred boot volume type the region offers.
+
+        Falls back to standard if the region can't be read, so a failed
+        lookup only costs boot speed.
+        """
+        try:
+            data = await self._request("GET", f"/regions/{region_id}")
+        except CloudProviderError as e:
+            logger.warning(
+                f"Could not read volume types for Gcore region {region_id}, using standard: {e}"
+            )
+            return "standard"
+
+        available = data.get("available_volume_types") or []
+        for volume_type in GCORE_BOOT_VOLUME_TYPES:
+            if volume_type in available:
+                return volume_type
+        return "standard"
 
     async def _wait_for_task(self, task_id: str) -> dict:
         """Poll a Gcore task until it completes.
@@ -241,8 +267,14 @@ class GcoreClient(CloudProvider):
         """
         region_id = int(region)
 
-        # Find FCOS image for this region
-        image_id = await self._get_fcos_image_id(region_id)
+        # Find FCOS image and boot volume type for this region
+        image_id, volume_type = await asyncio.gather(
+            self._get_fcos_image_id(region_id),
+            self._get_boot_volume_type(region_id),
+        )
+        logger.info(
+            f"Creating Gcore instance in region {region_id} with a {volume_type} boot volume"
+        )
 
         payload = {
             "flavor": plan or GCORE_FLAVOR,
@@ -253,7 +285,7 @@ class GcoreClient(CloudProvider):
                     "image_id": image_id,
                     "size": GCORE_BOOT_VOLUME_SIZE,
                     "boot_index": 0,
-                    "type_name": "standard",
+                    "type_name": volume_type,
                 }
             ],
             "interfaces": [
