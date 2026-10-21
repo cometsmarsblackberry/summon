@@ -297,6 +297,12 @@
     captchaSiteKey: '',
     captchaToken: null,
     captchaWidgetId: null,
+    // Read from the live status so the toggle follows capacity while the
+    // dialog is open.
+    get directConnectAvailable() {
+        const live = (this.loc && this.status[this.loc.code]) || this.loc;
+        return !live || live.direct_connect_available !== false;
+    },
     get bestPingCode() {
         let best = Infinity, code = null;
         for (const [c, ms] of Object.entries(this.pings)) {
@@ -452,7 +458,7 @@
                 location: this.loc.code,
                 first_map: this.firstMap,
                 config_file: this.selectedConfig || null,
-                enable_direct_connect: this.enableDirectConnect,
+                enable_direct_connect: this.enableDirectConnect && this.directConnectAvailable,
                 enable_logs_tf_upload: this.enableLogsTFUpload,
                 enable_demos_tf_upload: this.enableDemosTFUpload,
             };
@@ -815,12 +821,14 @@
                 <div x-show="loc" class="flex items-center justify-between">
                     <div>
                         <label class="text-sm text-slate-700">{{ _('home.enable_direct_connect') }}</label>
-                        <p class="text-xs text-slate-400">{{ _('home.direct_connect_hint') }}</p>
+                        <p x-show="directConnectAvailable" class="text-xs text-slate-400">{{ _('home.direct_connect_hint') }}</p>
+                        <p x-show="!directConnectAvailable" x-cloak class="text-xs text-slate-400">{{ _('home.direct_connect_unavailable') }}</p>
                     </div>
                     <button type="button" @click="enableDirectConnect = !enableDirectConnect"
-                        :class="enableDirectConnect ? 'bg-brand-600' : 'bg-slate-200'"
-                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors">
-                        <span :class="enableDirectConnect ? 'translate-x-4' : 'translate-x-0'"
+                        :disabled="!directConnectAvailable"
+                        :class="enableDirectConnect && directConnectAvailable ? 'bg-brand-600' : 'bg-slate-200'"
+                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50">
+                        <span :class="enableDirectConnect && directConnectAvailable ? 'translate-x-4' : 'translate-x-0'"
                             class="theme-toggle-knob pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform"></span>
                     </button>
                 </div>
