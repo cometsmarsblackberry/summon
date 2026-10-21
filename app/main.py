@@ -372,7 +372,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "object-src 'none'; "
         "frame-ancestors 'none'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
-        "https://d1f8nxls7qx69o.cloudfront.net https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; "
+        "https://js.hcaptcha.com https://hcaptcha.com https://*.hcaptcha.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://hcaptcha.com https://*.hcaptcha.com; "
         "img-src 'self' data: https:; "
         "font-src 'self' data: https://fonts.bunny.net; "
