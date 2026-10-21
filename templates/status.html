@@ -18,6 +18,10 @@
         controlDegraded: false,
         locale: '{{ request.state.locale|default('en') }}',
         currentMap: {{ (reservation.current_map or reservation.first_map) | tojson | forceescape }},
+        mapDownloadUrl: {{ map_download_url | tojson | forceescape }},
+        // Bumped by map and config changes made here, so a poll that started
+        // earlier cannot put back the old values.
+        serverStateVersion: 0,
         endsAt: '{{ reservation.ends_at.strftime('%Y-%m-%dT%H:%M:00Z') }}',
         endedAt: '{{ reservation.ended_at.strftime('%Y-%m-%dT%H:%M:%SZ') if reservation.ended_at else '' }}',
         connection: null,
@@ -119,6 +123,7 @@
         },
         
         async fetchStatus() {
+            const serverStateVersion = this.serverStateVersion;
             try {
                 const resp = await fetch('/api/reservations/{{ reservation.id }}');
                 if (resp.ok) {
@@ -159,6 +164,12 @@
                         };
                     } else {
                         this.connection = null;
+                    }
+                    // Follow map and config changes made in game.
+                    if (this.status === 'active' && serverStateVersion === this.serverStateVersion) {
+                        this.currentMap = data.current_map || data.first_map;
+                        this.mapDownloadUrl = data.map_download_url || null;
+                        this.initialConfig = data.config_file || '';
                     }
                     // Show failure reason from polling (fallback if SSE missed it)
                     if (data.status === 'failed' && data.failure_reason && !this.error) {
@@ -497,6 +508,7 @@
                 if (resp.ok) {
                     this.configMessage = data.message;
                     this.initialConfig = cfgFile === 'summon_reset' ? '' : cfgFile;
+                    this.serverStateVersion++;
                     this.configChangeOpen = false;
                     this.configMenuOpen = false;
                     this.configSearch = '';
@@ -619,6 +631,9 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     this.currentMap = mapName;
+                    this.serverStateVersion++;
+                    // Picks up the download link for the new map.
+                    this.fetchStatus();
                     this.mapMessage = data.message;
                     this.mapChangeOpen = false;
                     this.mapMenuOpen = false;
@@ -1033,13 +1048,11 @@
                 <span class="text-sm font-medium text-slate-400 shrink-0">{{ _('status.map') }}</span>
                 <span class="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-800">
                     <span class="truncate" x-text="currentMap"></span>
-                {% if map_download_url %}
-                <a href="{{ map_download_url }}" title="{{ _('status.download_map') }}" class="text-slate-400 hover:text-brand-400 transition-colors shrink-0">
+                <a x-show="mapDownloadUrl" x-cloak :href="mapDownloadUrl" title="{{ _('status.download_map') }}" class="text-slate-400 hover:text-brand-400 transition-colors shrink-0">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
                         <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
                     </svg>
                 </a>
-                {% endif %}
                 {% if is_owner %}
                 <button x-show="status === 'active'" x-cloak
                     @click="openMapChange()"

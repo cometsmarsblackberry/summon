@@ -104,6 +104,9 @@ class ReservationResponse(BaseModel):
     starts_at: datetime
     ends_at: datetime
     first_map: str
+    current_map: Optional[str] = None
+    # Only set by the single reservation endpoint while the server is active.
+    map_download_url: Optional[str] = None
     config_file: Optional[str] = None
     created_at: datetime
     # Connection details (only for owner when active)
@@ -155,6 +158,7 @@ def reservation_to_response(
         starts_at=reservation.starts_at,
         ends_at=reservation.ends_at,
         first_map=reservation.first_map,
+        current_map=reservation.current_map,
         config_file=reservation.config_file,
         created_at=reservation.created_at,
         enable_direct_connect=reservation.enable_direct_connect,
@@ -548,11 +552,18 @@ async def get_reservation(
 
     # Include secrets only for the reservation owner or an admin.
     include_secrets = _user_can_access_reservation(user, reservation)
-    return reservation_to_response(
+    response = reservation_to_response(
         reservation, 
         include_secrets=include_secrets,
         cloud_instance=reservation.cloud_instance,
     )
+    # The status page polls this to follow map changes made in game.
+    if reservation.status == ReservationStatus.ACTIVE:
+        from app.services.maps import get_map_download_url
+        response.map_download_url = await get_map_download_url(
+            reservation.current_map or reservation.first_map, db
+        )
+    return response
 
 
 @router.get("/{reservation_id}/players")
@@ -1037,6 +1048,11 @@ async def change_level(
 
     if not await rcon_reservation_runtime(reservation, db, f"changelevel {map_name}"):
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
+
+    # Show the new map while it loads. The plugin reports the real map on map
+    # start and every ten seconds, which corrects this if the change fails.
+    reservation.current_map = map_name
+    await db.commit()
 
     logger.info(
         f"Changelevel to {map_name} on reservation #{reservation.reservation_number}"
