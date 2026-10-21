@@ -12,6 +12,7 @@ venv/
 __pycache__/
 *.py[cod]
 static/tf2-agent
+static/tf2-agent-licenses.txt
 
 /data/
 *.db
