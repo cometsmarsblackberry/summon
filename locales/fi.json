@@ -218,7 +218,7 @@
         "cmd_config": "Lataa liiga-asetuksen palvelimelle. Käytä ilman argumentteja avataksesi valikon saatavilla olevista vaihtoehdoista (RGL, ETF2L, FBTF tai nollaa oletusarvoihin) tai määritä asetuksen nimi suoraan.",
         "cmd_restart": "Avaa valikon turnauksen, pelin tai kierroksen uudelleenkäynnistämiseksi.",
         "cmd_server": "Suorittaa palvelinkomennon valinnaisilla argumenteilla.",
-        "cmd_sdr": "Muodosta uudelleen yhteys palvelimeen käyttämällä SDR:ää.",
+        "cmd_sdr": "Muodosta uudelleen yhteys palvelimeen käyttämällä Steam Datagram Relay -palvelua.",
         "owner_only": "Vain omistaja",
         "open_source_title": "Avoin lähdekoodi",
         "open_source_body": "Tämä projekti on avoimen lähdekoodin, lisensoitu GNU Affero General Public License v3 (AGPL-3.0) -lisenssillä, ja saatavilla",

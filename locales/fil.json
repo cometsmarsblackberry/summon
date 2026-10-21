@@ -218,7 +218,7 @@
         "cmd_config": "Naglo-load ng league config sa server. Gamitin nang wala pang args para buksan ang menu na may mga available na opsyon (RGL, ETF2L, FBTF, o i-reset sa mga default), o tukuyin nang direkta ang pangalan ng config.",
         "cmd_restart": "Nagbubukas ng menu para i-restart ang tournament, laro, o round.",
         "cmd_server": "Nagpapatakbo ng server command na may mga opsyonal na argument.",
-        "cmd_sdr": "Muling kumonekta sa server gamit ang SDR.",
+        "cmd_sdr": "Muling kumonekta sa server gamit ang Steam Datagram Relay.",
         "owner_only": "May-ari lamang",
         "open_source_title": "Open Source",
         "open_source_body": "Ang proyektong ito ay open source, lisensyado sa ilalim ng GNU Affero General Public License v3 (AGPL-3.0), at makukuha sa",

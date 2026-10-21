@@ -218,7 +218,7 @@
         "cmd_config": "Laddar en ligakonfiguration på servern. Använd utan argument för att öppna en meny med tillgängliga alternativ (RGL, ETF2L, FBTF eller återställ till standard), eller ange ett konfigurationsnamn direkt.",
         "cmd_restart": "Öppnar en meny för att starta om turneringen, spelet eller rundan.",
         "cmd_server": "Kör ett serverkommando med valfria argument.",
-        "cmd_sdr": "Återanslut till servern med SDR.",
+        "cmd_sdr": "Återanslut till servern med Steam Datagram Relay.",
         "owner_only": "Endast ägare",
         "open_source_title": "Öppen källkod",
         "open_source_body": "Detta projekt är öppen källkod, licensierat under GNU Affero General Public License v3 (AGPL-3.0), och tillgängligt på",

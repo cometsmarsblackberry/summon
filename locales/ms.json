@@ -218,7 +218,7 @@
         "cmd_config": "Memuatkan konfigurasi liga pada pelayan. Gunakan tanpa argumen untuk membuka menu dengan pilihan yang tersedia (RGL, ETF2L, FBTF, atau set semula ke lalai), atau nyatakan nama konfigurasi terus.",
         "cmd_restart": "Membuka menu untuk memulakan semula pertandingan, permainan, atau pusingan.",
         "cmd_server": "Menjalankan arahan pelayan dengan argumen pilihan.",
-        "cmd_sdr": "Sambung semula ke pelayan menggunakan SDR.",
+        "cmd_sdr": "Sambung semula ke pelayan menggunakan Steam Datagram Relay.",
         "owner_only": "Pemilik sahaja",
         "open_source_title": "Sumber Terbuka",
         "open_source_body": "Projek ini adalah sumber terbuka, dilesenkan di bawah GNU Affero General Public License v3 (AGPL-3.0), dan boleh didapati di",

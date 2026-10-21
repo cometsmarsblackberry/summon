@@ -218,7 +218,7 @@
         "cmd_config": "サーバーにリーグ設定を読み込みます。引数なしで使用すると利用可能なオプションのメニューが開き（RGL、ETF2L、FBTF、またはデフォルトにリセット）、設定名を直接指定することもできます。",
         "cmd_restart": "トーナメント、ゲーム、またはラウンドを再起動するためのメニューを開きます。",
         "cmd_server": "任意の引数を指定してサーバーコマンドを実行します。",
-        "cmd_sdr": "SDRを使用してサーバーに再接続します。",
+        "cmd_sdr": "Steam Datagram Relayを使用してサーバーに再接続します。",
         "owner_only": "オーナー専用",
         "open_source_title": "オープンソース",
         "open_source_body": "このプロジェクトはオープンソースであり、GNU Affero General Public License v3（AGPL-3.0）の下でライセンスされており、以下で公開されています：",

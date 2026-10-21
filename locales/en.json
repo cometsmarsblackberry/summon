@@ -218,7 +218,7 @@
         "cmd_config": "Loads a league config on the server. Use without arguments to open a menu with available options (RGL, ETF2L, FBTF, or reset to defaults), or specify a config name directly.",
         "cmd_restart": "Opens a menu to restart the tournament, game, or round.",
         "cmd_server": "Runs a server command with optional arguments.",
-        "cmd_sdr": "Re-connect to the server using SDR.",
+        "cmd_sdr": "Reconnect to the server using Steam Datagram Relay.",
         "owner_only": "Owner only",
         "open_source_title": "Open Source",
         "open_source_body": "This project is open source, licensed under the GNU Affero General Public License v3 (AGPL-3.0), and available on",

@@ -218,7 +218,7 @@
         "cmd_config": "서버에 리그 설정을 불러옵니다. 인수 없이 사용하면 가능한 옵션 메뉴가 열리고 (RGL, ETF2L, FBTF, 또는 기본값 초기화), 설정 이름을 직접 지정할 수도 있습니다.",
         "cmd_restart": "토너먼트, 게임 또는 라운드를 재시작하기 위한 메뉴를 엽니다.",
         "cmd_server": "선택적 인수와 함께 서버 명령어를 실행합니다.",
-        "cmd_sdr": "SDR을 사용하여 서버에 다시 연결합니다.",
+        "cmd_sdr": "Steam Datagram Relay를 사용하여 서버에 다시 연결합니다.",
         "owner_only": "소유자 전용",
         "open_source_title": "오픈 소스",
         "open_source_body": "이 프로젝트는 오픈 소스이며, GNU Affero General Public License v3(AGPL-3.0)에 따라 라이선스되었으며, 다음에서 이용할 수 있습니다:",
