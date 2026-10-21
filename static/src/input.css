@@ -290,6 +290,10 @@ html.dark {
     border-color: rgb(96 165 250 / 0.35);
 }
 
+.dark .text-blue-900 {
+    color: #dbeafe;
+}
+
 .dark .text-blue-800,
 .dark .text-blue-700,
 .dark .text-blue-600 {
