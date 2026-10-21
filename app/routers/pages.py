@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -392,7 +392,7 @@ async def maps_page(
         select(GameMap)
         .where(GameMap.enabled == True)
         .where(GameMap.is_default == False)
-        .order_by(GameMap.display_order)
+        .order_by(func.lower(GameMap.name), GameMap.name)
     )
     custom_maps = result.scalars().all()
 
