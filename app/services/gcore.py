@@ -30,10 +30,11 @@ GCORE_FCOS_IMAGE = "fedora-coreos-42-x64"
 GCORE_BOOT_VOLUME_SIZE = 20
 
 # Boot volume types, preferred first. A 20 GB Standard volume tops out around
-# 100 MB/s, so unpacking the game image takes ~40 s longer than on Low-latency
-# or High IOPS; Low-latency is also the cheaper of the two. Regions offer
-# different subsets.
-GCORE_BOOT_VOLUME_TYPES = ("ssd_lowlatency", "ssd_hiiops", "standard")
+# 100 MB/s, so unpacking the game image takes ~40 s longer than on High IOPS.
+# Low-latency unpacks as fast, but Gcore copies the OS image onto it, which
+# adds 1.5-4 minutes to instance creation and more than cancels the gain.
+# Regions offer different subsets.
+GCORE_BOOT_VOLUME_TYPES = ("ssd_hiiops", "standard")
 
 # Security group for direct connect (UDP game ports)
 DIRECT_CONNECT_SG_NAME = "tf2-direct-connect"

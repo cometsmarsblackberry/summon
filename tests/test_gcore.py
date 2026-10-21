@@ -16,10 +16,11 @@ def region_request(volume_types):
 
 
 class BootVolumeTypeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_prefers_low_latency_then_high_iops_then_standard(self):
+    async def test_prefers_high_iops_then_standard(self):
         cases = [
-            (["standard", "ssd_hiiops", "ssd_lowlatency"], "ssd_lowlatency"),
+            (["standard", "ssd_hiiops", "ssd_lowlatency"], "ssd_hiiops"),
             (["ssd_hiiops", "standard"], "ssd_hiiops"),
+            (["ssd_lowlatency", "standard"], "standard"),
             (["standard"], "standard"),
             (["cold", "ultra"], "standard"),
             (None, "standard"),
