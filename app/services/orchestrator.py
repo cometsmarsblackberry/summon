@@ -835,7 +835,7 @@ async def seed_default_providers(db: AsyncSession) -> None:
 
     default_providers = [
         Provider(code="vultr", name="Vultr", billing_model="hourly", enabled=True, display_order=1),
-        Provider(code="gcore", name="Gcore", billing_model="hourly", enabled=False, display_order=2),
+        Provider(code="gcore", name="Gcore", billing_model="per_second", enabled=False, display_order=2),
         Provider(code="onidel", name="Onidel", billing_model="hourly", enabled=False, display_order=3),
     ]
 
