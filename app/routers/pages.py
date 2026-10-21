@@ -21,6 +21,7 @@ from app.routers.auth import (
 from app.services.orchestrator import get_enabled_locations
 from app.services.reservation import (
     get_user_reservations,
+    get_user_recent_locations,
     get_user_active_reservation,
     get_reservation_by_id,
 )
@@ -73,6 +74,9 @@ GCORE_PING_SLUGS = {
 
 # Gcore regions whose speedtest server is in a nearby city, not the same city.
 GCORE_APPROXIMATE_REGIONS = {"68", "14", "34"}  # Chicago, Manassas, Santa Clara
+
+# How many of the user's previously reserved locations the home page lists first.
+RECENT_LOCATIONS_LIMIT = 3
 
 
 def _ping_url(provider: str | None, provider_region: str | None) -> str | None:
@@ -174,8 +178,14 @@ async def home(
 
     # Check for existing active reservation (to show notice instead of form)
     active_reservation = None
+    recent_locations = []
     if user and not beta_locked:
         active_reservation = await get_user_active_reservation(user, db)
+        enabled_codes = {loc.code for loc in locations}
+        recent_locations = [
+            code for code in await get_user_recent_locations(user, db)
+            if code in enabled_codes
+        ][:RECENT_LOCATIONS_LIMIT]
 
     # Fetch enabled maps for the reservation form
     from app.services.maps import get_selectable_maps
@@ -208,6 +218,7 @@ async def home(
             "approximate_pings": [loc.code for loc in locations
                                   if _ping_approximate(loc.provider, loc.provider_region)],
             "location_cities": location_cities,
+            "recent_locations": recent_locations,
             "reservation_settings": res_settings,
             "hcaptcha_site_key": settings.hcaptcha_site_key if settings.hcaptcha_configured else "",
             "initial_status": initial_status,

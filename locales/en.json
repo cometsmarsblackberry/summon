@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "Remaining slots across all regions",
         "all_regions": "All",
         "other_region": "Other",
+        "recent": "Recent",
         "disabled": "Disabled",
         "loading": "Loading...",
         "ping_timed_out": "Timed out",

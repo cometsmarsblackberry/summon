@@ -12,13 +12,22 @@
     pingDone: false,
     activeContinent: 'All',
     sortBy: 'region',
+    nearContinent: null,
+    recentCodes: typeof _recentLocations !== 'undefined' ? _recentLocations : [],
     get continents() {
         const cs = new Set();
         Object.values(this.status).forEach(loc => { if (loc.continent) cs.add(loc.continent); });
         return [
             {value: 'All', label: {{ _('home.all_regions') | tojson | forceescape }}},
-            ...[...cs].sort().map(value => ({value, label: value})),
+            ...[...cs].sort((a, b) => this.compareContinents(a, b)).map(value => ({value, label: value})),
         ];
+    },
+    // Nearest continent first, the rest alphabetically
+    compareContinents(a, b) {
+        if (a === b) return 0;
+        if (a === this.nearContinent) return -1;
+        if (b === this.nearContinent) return 1;
+        return a.localeCompare(b);
     },
     get flatList() {
         const entries = this.activeContinent === 'All'
@@ -30,28 +39,79 @@
                 const b = this.pings[codeB] || Infinity;
                 return a - b;
             });
-            return sorted.map(e => ({type: 'row', entry: e}));
+            return sorted.map(e => ({type: 'row', key: e[0], entry: e}));
         }
-        const sorted = entries.sort(([, a], [, b]) => {
-            const ca = a.continent || '', cb = b.continent || '';
-            if (ca !== cb) return ca.localeCompare(cb);
-            return (a.city || a.name || '').localeCompare(b.city || b.name || '');
-        });
-        if (this.activeContinent !== 'All') return sorted.map(e => ({type: 'row', entry: e}));
+        const sorted = entries.sort(([, a], [, b]) =>
+            this.compareContinents(a.continent || '', b.continent || '')
+            || (a.city || a.name || '').localeCompare(b.city || b.name || ''));
+        if (this.activeContinent !== 'All') return sorted.map(e => ({type: 'row', key: e[0], entry: e}));
         const result = [];
+        const recent = this.recentCodes.filter(code => this.status[code]);
+        if (recent.length) {
+            result.push({type: 'header', key: 'recent', name: {{ _('home.recent') | tojson | forceescape }}});
+            recent.forEach(code => result.push({type: 'row', key: 'recent:' + code, entry: [code, this.status[code]]}));
+        }
         let lastContinent = null;
         sorted.forEach(([code, loc]) => {
             const c = loc.continent || 'Other';
             if (c !== lastContinent) {
                 result.push({
                     type: 'header',
+                    key: 'h:' + c,
                     name: c === 'Other' ? {{ _('home.other_region') | tojson | forceescape }} : c,
                 });
                 lastContinent = c;
             }
-            result.push({type: 'row', entry: [code, loc]});
+            result.push({type: 'row', key: code, entry: [code, loc]});
         });
         return result;
+    },
+    setFilter(continent, sortBy) {
+        this.activeContinent = continent;
+        this.sortBy = sortBy;
+        try { localStorage.setItem('location_filter', JSON.stringify({ continent, sortBy })); } catch {}
+    },
+    initLocationList() {
+        this.loadPingCache();
+        let saved = null;
+        try { saved = localStorage.getItem('near_continent'); } catch {}
+        this.nearContinent = (this.pingDone && this.continentOf(this.bestPingCode)) || saved || this.guessContinent();
+        let filter = {};
+        try { filter = JSON.parse(localStorage.getItem('location_filter')) || {}; } catch {}
+        // Sorting by ping while pings are still arriving would shuffle the list
+        if (filter.sortBy === 'ping' && this.pingDone) this.sortBy = 'ping';
+        else if (this.continents.some(c => c.value === filter.continent)) this.activeContinent = filter.continent;
+    },
+    continentOf(code) {
+        return (this.status[code] && this.status[code].continent) || null;
+    },
+    // First guess before any pings, from the browser time zone (e.g. Europe/Berlin)
+    guessContinent() {
+        let tz = '';
+        try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch {}
+        let candidates = [];
+        if (/^America\/(Argentina|Araguaina|Asuncion|Bahia|Belem|Boa_Vista|Bogota|Buenos_Aires|Campo_Grande|Caracas|Catamarca|Cayenne|Cordoba|Cuiaba|Eirunepe|Fortaleza|Guayaquil|Guyana|La_Paz|Lima|Maceio|Manaus|Mendoza|Montevideo|Noronha|Paramaribo|Porto_Velho|Punta_Arenas|Recife|Rio_Branco|Santarem|Santiago|Sao_Paulo)\b/.test(tz)) {
+            candidates = ['South America'];
+        } else if (tz.startsWith('America/')) {
+            candidates = ['North America'];
+        } else if (/^(Europe|Arctic)\//.test(tz) || /^Atlantic\/(Azores|Canary|Faroe|Madeira|Reykjavik)$/.test(tz)
+            || /^Africa\/(Algiers|Cairo|Casablanca|Ceuta|El_Aaiun|Tripoli|Tunis)$/.test(tz)) {
+            candidates = ['Europe'];
+        } else if (tz.startsWith('Africa/')) {
+            candidates = ['Africa'];
+        } else if (tz.startsWith('Asia/')) {
+            candidates = ['Asia'];
+        } else if (tz === 'Pacific/Honolulu') {
+            candidates = ['Oceania', 'North America'];
+        } else if (tz.startsWith('Australia/') || tz.startsWith('Pacific/')) {
+            candidates = ['Australia', 'Oceania'];
+        }
+        const present = new Set(Object.values(this.status).map(loc => loc.continent));
+        return candidates.find(c => present.has(c)) || null;
+    },
+    saveNearContinent(continent) {
+        if (!continent) return;
+        try { localStorage.setItem('near_continent', continent); } catch {}
     },
     modalOpen: false,
     loc: null,
@@ -257,19 +317,15 @@
     savePingCache(complete) {
         try { localStorage.setItem('ping_cache', JSON.stringify({ ts: Date.now(), data: this.pings, complete })); } catch {}
     },
-    loadOrRunPings() {
+    loadPingCache() {
         const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
         try {
             const cached = JSON.parse(localStorage.getItem('ping_cache'));
             if (cached && Date.now() - cached.ts < CACHE_TTL && cached.data) {
                 this.pings = cached.data;
-                if (cached.complete !== false) {
-                    this.pingDone = true;
-                    return;
-                }
+                this.pingDone = cached.complete !== false;
             }
         } catch {}
-        this.runPings();
     },
     async runPings() {
         const urls = typeof _pingUrls !== 'undefined' ? _pingUrls : {};
@@ -312,6 +368,10 @@
                 bestContinent = (this.status[code] && this.status[code].continent) || 'Other';
             }
         }
+        if (bestContinent && bestContinent !== 'Other') {
+            this.nearContinent = bestContinent;
+            this.saveNearContinent(bestContinent);
+        }
 
         // Phase 2: remaining from best continent first, then rest (skip already tested)
         const remaining = codes.filter(c => !tested.has(c));
@@ -341,6 +401,9 @@
 
         this.pingDone = true;
         this.savePingCache(true);
+        // The full results can pick a different continent than the scouts did.
+        // Keep the list still now and start with it on the next visit.
+        this.saveNearContinent(this.continentOf(this.bestPingCode));
     },
     async openModal(code, loc) {
         if (!loc.enabled || !loc.reservable) return;
@@ -447,9 +510,11 @@
         firstMap = '';
     }
     status = typeof _initialStatus !== 'undefined' ? _initialStatus : {};
+    initLocationList();
     $nextTick(() => {
-        if (document.readyState === 'complete') loadOrRunPings();
-        else window.addEventListener('load', () => loadOrRunPings());
+        if (pingDone) return;
+        if (document.readyState === 'complete') runPings();
+        else window.addEventListener('load', () => runPings());
     });
     setInterval(() => {
         if (!document.hidden) {
@@ -508,17 +573,17 @@
         <!-- Filters -->
         <div class="flex flex-wrap items-center gap-1 mb-3">
             <template x-for="c in continents" :key="c.value">
-                <button x-show="continents.length > 2" @click="activeContinent = c.value; sortBy = 'region'"
+                <button x-show="continents.length > 2" @click="setFilter(c.value, 'region')"
                     :class="activeContinent === c.value && sortBy === 'region' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
                     class="px-2.5 py-1 text-xs rounded-full transition-colors" x-text="c.label"></button>
             </template>
-            <button x-show="pingDone" @click="sortBy = 'ping'; activeContinent = 'All'"
+            <button x-show="pingDone" @click="setFilter('All', 'ping')"
                 :class="sortBy === 'ping' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:text-slate-900'"
                 class="px-2.5 py-1 text-xs rounded-full transition-colors">📍 {{ _('home.by_ping') }}</button>
         </div>
 
         <div class="space-y-0">
-            <template x-for="item in flatList" :key="item.type === 'header' ? 'h-' + item.name : item.entry[0]">
+            <template x-for="item in flatList" :key="item.key">
                 <div>
                     <template x-if="item.type === 'header'">
                         <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider pt-4 pb-1 first:pt-1"
@@ -817,5 +882,6 @@
     var _homeMaps = {{ maps | tojson }};
     var _pingUrls = {{ ping_urls | tojson }};
     var _approxPings = new Set({{ approximate_pings | tojson }});
+    var _recentLocations = {{ recent_locations | default([]) | tojson }};
 </script>
 {% endblock %}

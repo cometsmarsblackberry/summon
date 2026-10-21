@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "모든 리전의 남은 슬롯",
         "all_regions": "전체",
         "other_region": "기타",
+        "recent": "최근 사용",
         "disabled": "비활성화",
         "loading": "로딩 중...",
         "ping_timed_out": "시간 초과",

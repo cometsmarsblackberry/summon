@@ -192,3 +192,17 @@ async def get_user_reservations(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def get_user_recent_locations(
+    user: User,
+    db: AsyncSession,
+) -> list[str]:
+    """Get the location codes the user has reserved, most recently used first."""
+    result = await db.execute(
+        select(Reservation.location)
+        .where(Reservation.user_id == user.id)
+        .group_by(Reservation.location)
+        .order_by(func.max(Reservation.created_at).desc())
+    )
+    return list(result.scalars().all())

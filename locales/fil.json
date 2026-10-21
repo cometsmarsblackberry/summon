@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "Mga natitirang slot sa lahat ng rehiyon",
         "all_regions": "Lahat",
         "other_region": "Iba pa",
+        "recent": "Kamakailan",
         "disabled": "Hindi Enabled",
         "loading": "Naglo-load...",
         "ping_timed_out": "Nag-timeout",
