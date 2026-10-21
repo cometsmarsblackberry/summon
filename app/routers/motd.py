@@ -81,7 +81,7 @@ async def motd_page(
         "default-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.bunny.net; "
         "font-src 'self' https://fonts.bunny.net; "
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://d1f8nxls7qx69o.cloudfront.net; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
         "img-src 'self' data: https:; "
         "frame-ancestors 'self'"
     )
