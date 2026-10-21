@@ -31,7 +31,7 @@ GCORE_BOOT_VOLUME_SIZE = 20
 
 # Boot volume types, preferred first; selection is limited to the types
 # advertised by each region.
-GCORE_BOOT_VOLUME_TYPES = ("ssd_lowlatency", "ssd_hiiops", "standard")
+GCORE_BOOT_VOLUME_TYPES = ("ssd_hiiops", "standard")
 
 # Security group for direct connect (UDP game ports)
 DIRECT_CONNECT_SG_NAME = "tf2-direct-connect"
