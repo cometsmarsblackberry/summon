@@ -385,16 +385,17 @@ async def create_reservation_endpoint(
         # same lock as the single-active and rate checks; Instant's partial
         # unique indexes remain the cross-session final guard.
         try:
-            capacity = await ensure_location_capacity(
-                request.location,
-                db,
-                direct_connect=request.enable_direct_connect,
-            )
+            capacity = await ensure_location_capacity(request.location, db)
         except LocationCapacityError as exc:
             raise HTTPException(
                 status_code=409,
                 detail={"code": exc.code, "message": str(exc)},
             ) from exc
+        if request.enable_direct_connect and not capacity.direct_connect_available:
+            raise HTTPException(
+                status_code=409,
+                detail=t("errors.direct_connect_unavailable"),
+            )
 
         # Check circuit breaker first (admins bypass)
         if not user.is_admin:

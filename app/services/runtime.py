@@ -59,10 +59,18 @@ class RuntimeCapacity:
     instant_slots_available: int
     cloud_slots_available: int
     warm_cloud_available: bool = False
+    # Free Instant slots on hosts that may publish their address.
+    direct_instant_slots_available: int = 0
 
     @property
     def instant_available(self) -> bool:
         return self.instant_slots_available > 0
+
+    @property
+    def direct_connect_available(self) -> bool:
+        # Instant always wins over cloud, so direct connect is offered only
+        # when it would not move the reservation off Instant.
+        return not self.instant_available or self.direct_instant_slots_available > 0
 
     @property
     def cloud_available(self) -> bool:
@@ -286,21 +294,19 @@ async def _cloud_capacity(
 
 
 async def get_location_runtime_capacity(
-    location: str, db: AsyncSession, *, direct_connect: bool = False
+    location: str, db: AsyncSession
 ) -> RuntimeCapacity:
-    instant = await count_available_instant_slots(
-        location, db, direct_connect=direct_connect
+    instant = await count_available_instant_slots(location, db)
+    direct_instant = (
+        await count_available_instant_slots(location, db, direct_connect=True)
+        if instant else 0
     )
     cloud, warm = await _cloud_capacity(location, db)
-    return RuntimeCapacity(instant, cloud, warm)
+    return RuntimeCapacity(instant, cloud, warm, direct_instant)
 
 
-async def ensure_location_capacity(
-    location: str, db: AsyncSession, *, direct_connect: bool = False
-) -> RuntimeCapacity:
-    capacity = await get_location_runtime_capacity(
-        location, db, direct_connect=direct_connect
-    )
+async def ensure_location_capacity(location: str, db: AsyncSession) -> RuntimeCapacity:
+    capacity = await get_location_runtime_capacity(location, db)
     if not capacity.reservable:
         raise LocationCapacityError(location)
     return capacity

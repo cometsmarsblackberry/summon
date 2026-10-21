@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -35,6 +36,7 @@ from app.services.runtime import (
     count_available_instant_slots,
     dispatch_instant_start,
     end_reservation_runtime,
+    get_location_runtime_capacity,
     get_runtime_stats,
     handle_instant_start_failure,
     rcon_reservation_runtime,
@@ -938,6 +940,71 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await claim_instant_slot(another_direct, db))
             sdr_assignment = await claim_instant_slot(sdr, db)
             self.assertEqual(hidden.id, sdr_assignment.slot.host_id)
+
+    async def test_direct_connect_is_unavailable_while_only_sdr_only_instant_is_free(self):
+        async with self.sessions() as db:
+            hidden = await self.add_ready_host(db, "203.0.113.70", "only-hidden")
+            hidden.sdr_only = True
+            await db.commit()
+            capacity = await get_location_runtime_capacity("instant-only", db)
+            self.assertTrue(capacity.instant_available)
+            self.assertFalse(capacity.direct_connect_available)
+            snapshot = await _build_status(db)
+            self.assertFalse(snapshot["instant-only"]["direct_connect_available"])
+
+            public = await self.add_ready_host(db, "203.0.113.71", "also-public")
+            capacity = await get_location_runtime_capacity("instant-only", db)
+            self.assertTrue(capacity.direct_connect_available)
+            snapshot = await _build_status(db)
+            self.assertTrue(snapshot["instant-only"]["direct_connect_available"])
+
+            # Without free Instant slots the reservation goes to cloud, where
+            # direct connect is fine.
+            hidden.enabled = False
+            public.enabled = False
+            await db.commit()
+            capacity = await get_location_runtime_capacity("instant-only", db)
+            self.assertFalse(capacity.instant_available)
+            self.assertTrue(capacity.direct_connect_available)
+            snapshot = await _build_status(db)
+            self.assertTrue(snapshot["instant-only"]["direct_connect_available"])
+
+    async def test_direct_connect_request_is_refused_instead_of_skipping_instant(self):
+        from app.models.instance import GameMap
+        from app.routers.reservations import (
+            CreateReservationRequest,
+            create_reservation_endpoint,
+        )
+
+        async with self.sessions() as db:
+            hidden = await self.add_ready_host(db, "203.0.113.72", "refuse-direct")
+            hidden.sdr_only = True
+            db.add(GameMap(name="cp_badlands", display_name="cp_badlands", enabled=True))
+            await db.commit()
+            user = SimpleNamespace(id=1, is_banned=False, is_admin=False)
+            background = SimpleNamespace(add_task=lambda *args, **kwargs: None)
+
+            with (
+                patch("app.services.steam_trust.check_steam_trust", new=AsyncMock()),
+                patch(
+                    "app.services.captcha.requires_captcha",
+                    new=AsyncMock(return_value=False),
+                ),
+                self.assertRaises(HTTPException) as raised,
+            ):
+                await create_reservation_endpoint(
+                    CreateReservationRequest(
+                        location="instant-only", enable_direct_connect=True,
+                    ),
+                    background,
+                    user=user,
+                    db=db,
+                )
+
+            self.assertEqual(409, raised.exception.status_code)
+            self.assertIn("Direct connections", raised.exception.detail)
+            count = await db.scalar(select(func.count(Reservation.id)))
+            self.assertEqual(0, count)
 
     async def test_sdr_only_ready_without_fake_ip_stops_and_retries_elsewhere(self):
         async with self.sessions() as db:

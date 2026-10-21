@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -246,6 +246,7 @@ async def _build_status(db: AsyncSession) -> dict:
     # Load Instant capacity separately so a failed lookup leaves cloud
     # capacity available and reports zero Instant slots.
     instant_by_location: dict[str, int] = {}
+    direct_instant_by_location: dict[str, int] = {}
     try:
         from app.services.settings import get_instant_settings
         instant_enabled = (await get_instant_settings(db))["enabled"]
@@ -258,7 +259,11 @@ async def _build_status(db: AsyncSession) -> dict:
                 seconds=get_settings().instant_host_offline_seconds
             )
             instant_result = await db.execute(
-                select(InstantHost.location, func.count(InstantSlot.id))
+                select(
+                    InstantHost.location,
+                    func.count(InstantSlot.id),
+                    func.sum(case((InstantHost.sdr_only.is_(False), 1), else_=0)),
+                )
                 .join(InstantSlot, InstantSlot.host_id == InstantHost.id)
                 .where(
                     InstantHost.enabled.is_(True),
@@ -283,9 +288,9 @@ async def _build_status(db: AsyncSession) -> dict:
                 )
                 .group_by(InstantHost.location)
             )
-            instant_by_location = {
-                code: int(count) for code, count in instant_result.all()
-            }
+            for code, count, direct_count in instant_result.all():
+                instant_by_location[code] = int(count)
+                direct_instant_by_location[code] = int(direct_count or 0)
     except Exception:
         logger.debug("Instant capacity unavailable while building status", exc_info=True)
 
@@ -360,6 +365,7 @@ async def _build_status(db: AsyncSession) -> dict:
             for provider_code in configured_provider_codes
         )
         instant_slots = instant_by_location.get(location.code, 0)
+        direct_instant_slots = direct_instant_by_location.get(location.code, 0)
         cloud_available = configured_warm_count + configured_remaining > 0
 
         status[location.code] = {
@@ -380,6 +386,9 @@ async def _build_status(db: AsyncSession) -> dict:
             "instant": warm_count > 0,
             "instant_slots_available": instant_slots,
             "instant_available": instant_slots > 0,
+            # Instant always wins over cloud, so direct connect is offered only
+            # when it would not move the reservation off Instant.
+            "direct_connect_available": instant_slots == 0 or direct_instant_slots > 0,
             "cloud_available": cloud_available,
             "reservable": instant_slots > 0 or cloud_available,
             "warm_cloud_available": configured_warm_count > 0,
