@@ -5,9 +5,12 @@ WORKDIR /build/agent
 COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
+COPY scripts/agent-licenses.sh /build/scripts/
 ARG AGENT_VERSION=0.2.9
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tf2-agent .
+# The license notices of the linked Go code are served next to the agent.
+RUN export CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    && go build -trimpath -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tf2-agent . \
+    && /build/scripts/agent-licenses.sh >/tf2-agent-licenses.txt
 
 # Stage 2: Build Tailwind CSS
 FROM debian:bookworm-slim AS css-builder
@@ -41,6 +44,7 @@ COPY --from=css-builder /build/static/css/tailwind.css static/css/tailwind.css
 # The agent is intentionally generated during the image build rather than
 # committed as a platform-specific binary.
 COPY --from=agent-builder --chmod=755 /tf2-agent static/tf2-agent
+COPY --from=agent-builder /tf2-agent-licenses.txt static/tf2-agent-licenses.txt
 
 # Create data directory and non-root user
 RUN mkdir -p /data/logs \

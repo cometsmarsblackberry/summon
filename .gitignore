@@ -34,6 +34,7 @@ Thumbs.db
 # Build artifacts
 agent/tf2-agent
 static/tf2-agent
+static/tf2-agent-licenses.txt
 static/css/tailwind.css
 
 # Instance-specific templates and locale overrides
