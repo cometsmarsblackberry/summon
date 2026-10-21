@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.5"
+#define PLUGIN_VERSION "1.6.6"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -2118,6 +2118,8 @@ void ShowConfigMenu(int client, const char[] league)
         return;
     }
 
+    ArrayList configs = new ArrayList(ByteCountToCells(64));
+
     char filename[PLATFORM_MAX_PATH];
     char fileLeague[32];
     FileType type;
@@ -2135,10 +2137,23 @@ void ShowConfigMenu(int client, const char[] league)
         strcopy(cfgName, sizeof(cfgName), filename);
         cfgName[len - 4] = '\0';
 
-        menu.AddItem(cfgName, cfgName);
+        configs.PushString(cfgName);
     }
 
     delete dir;
+
+    // The directory order depends on the host filesystem (ext4 returns hash
+    // order), so sort to match the web panel.
+    configs.Sort(Sort_Ascending, Sort_String);
+
+    for (int i = 0; i < configs.Length; i++)
+    {
+        char cfgName[64];
+        configs.GetString(i, cfgName, sizeof(cfgName));
+        menu.AddItem(cfgName, cfgName);
+    }
+
+    delete configs;
     menu.Display(client, 30);
 }
 
