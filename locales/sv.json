@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "Återstående platser i alla regioner",
         "all_regions": "Alla",
         "other_region": "Övrigt",
+        "recent": "Senast använda",
         "disabled": "Inaktiverad",
         "loading": "Laddar...",
         "ping_timed_out": "Tidsgräns överskriden",

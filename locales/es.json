@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "Ranuras restantes en todas las regiones",
         "all_regions": "Todas",
         "other_region": "Otra",
+        "recent": "Recientes",
         "disabled": "Desactivado",
         "loading": "Cargando...",
         "ping_timed_out": "Tiempo de espera agotado",

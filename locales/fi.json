@@ -42,6 +42,7 @@
         "remaining_slots_tooltip": "Vapaat paikat kaikilla alueilla",
         "all_regions": "Kaikki",
         "other_region": "Muu",
+        "recent": "Viimeksi käytetyt",
         "disabled": "Poistettu käytöstä",
         "loading": "Ladataan...",
         "ping_timed_out": "Aikakatkaisu",
