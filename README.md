@@ -1,55 +1,61 @@
 # Summon
 
-On-demand Team Fortress 2 server reservation system. Reserve temporary game servers across multiple cloud providers or operator-owned Instant hosts through a web UI.
-
-## Quick Start
-
-```bash
-cp .env.example .env   # configure API keys, Steam credentials, etc.
-docker compose up       # http://localhost:8000
-```
-
-## Local UI Preview
-
-For UI development without Steam credentials, cloud provider keys, or a
-connected game-server agent, start the disposable preview environment:
-
-```bash
-./scripts/preview.sh
-```
-
-Then open <http://127.0.0.1:8000/__dev/login>. The preview creates a local test
-user and deterministic location, map, and competitive-config fixtures before
-redirecting to the home page. Its database lives in an in-memory container
-filesystem and is discarded when the script stops. It is intended for UI work
-and does not provision real game servers.
-
-To test the running-server controls, open
-<http://127.0.0.1:8000/__dev/active-reservation>. This creates an active local
-reservation backed by a harmless fake agent, so menus such as map and config
-changes can be exercised without sending commands to a game server.
-
-Application, template, locale, and tracked static-file changes are mounted into
-the preview container. Rebuild it after introducing new Tailwind utility
-classes so the generated stylesheet includes them. Set `SUMMON_PREVIEW_PORT`
-to use a port other than 8000.
-
-The `app.preview:app` entrypoint refuses to start unless `SUMMON_PREVIEW=1` is
-set. Production continues to use `app.main:app` and does not expose the local
-login route.
+On-demand Team Fortress 2 server reservations. Players sign in with Steam,
+pick a location, and get a private TF2 server for the length of their
+reservation. Servers run on cloud VMs (Vultr, Gcore, Onidel) or on
+operator-owned Instant hosts.
 
 ## Features
 
-- Steam OAuth login
-- Multi-provider server provisioning (Vultr, Gcore)
-- Multi-slot operator-owned hosts with Instant-first, cloud-overflow scheduling
-- Real-time server status via heartbeats from a Go agent
-- Auto-expiry and cleanup of unused servers
-- hCaptcha integration
-- SourceMod plugin for in-game management
-- i18n and customizable branding
+- Steam login, optional hCaptcha, and an allowlist-only beta mode
+- Instant hosts with multiple server slots are used first, and cloud VMs take
+  the overflow
+- Live server status, player list, and map, config, and command controls on
+  the reservation page
+- Automatic expiry and cleanup of servers
+- Competitive configs, logs.tf and demos.tf uploads, and optional S3 log storage
+- Translations and customizable branding
 
-## Production
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `app/`, `templates/`, `static/`, `locales/` | FastAPI web app: reservations, scheduling, cloud providers, admin panel |
+| `agent/` | Go agent that runs on each cloud VM or Instant host, starts the TF2 container, and sends heartbeats |
+| `tf2-reservation-plugin/` | SourceMod plugins for in-game reservation management ([README](tf2-reservation-plugin/README.md)) |
+
+The TF2 server image is built in a separate repository,
+[tf2-summon](https://github.com/cometsmarsblackberry/tf2-summon).
+
+## Development
+
+Requires Docker. To run the tests, you also need Python 3.12 and Go.
+
+```bash
+cp .env.example .env   # API keys, Steam, admin Steam IDs, etc.
+docker compose up      # http://localhost:8000
+```
+
+For UI work without Steam or provider credentials, run `./scripts/preview.sh`.
+It starts a disposable instance with fixture data that never creates real
+servers. Open <http://127.0.0.1:8000/__dev/login> to sign in as a test user,
+or `/__dev/active-reservation` for a running reservation backed by a fake
+agent. Rebuild the preview after adding new Tailwind classes.
+
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+scripts/test.sh        # Python tests, then Go agent tests
+```
+
+Templates should reference frontend assets with
+`{{ static_asset('path/to/asset') }}`, which gives each one a cache-busting
+URL.
+
+## Deployment
+
+CI publishes `ghcr.io/cometsmarsblackberry/summon` on every push to `main`
+(tagged `latest` and `main`) and on every `v*.*.*` tag (semantic-version
+tags). Every build is also tagged `sha-<commit>`.
 
 ```bash
 cp .env.example .env
@@ -59,23 +65,16 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-Frontend assets referenced by templates should use the
-`{{ static_asset('path/to/asset') }}` helper. It gives each asset a
-content-fingerprinted URL that can be cached long-term without serving an
-older file after a deployment. Stable `/static/...` URLs are retained for
-downloads and compatibility, but browsers must revalidate them.
+The production stack puts Caddy in front of the app. Caddy obtains a TLS
+certificate for `BASE_URL`, or for `ORIGIN_HOSTNAME` when the site is behind a
+CDN. Set `SUMMON_IMAGE` to pin a release.
 
-## Container Images
+Instant hosts are added from the admin panel's Instant Hosts tab, which
+generates a one-line install command for the host. Scheduling on them stays
+off until `INSTANT_HOSTS_ENABLED` is turned on there or in `.env`.
 
-GitHub Actions builds and publishes the Summon application image to GitHub
-Container Registry on every push to `main` and every `v*.*.*` tag:
+## License
 
-- `ghcr.io/cometsmarsblackberry/summon`
-
-The default branch is tagged as `latest` and `main`. Version tags produce
-semantic-version tags, and every published build also receives a `sha-<commit>`
-tag. Pull requests build the images for validation without publishing them.
-
-The production Compose file uses the official `caddy:2.11.4-alpine` image. Set
-`CADDY_IMAGE` only when the deployment needs a compatible Caddy build with
-additional modules.
+[GNU AGPL-3.0](LICENSE). The image also builds the agent, served at
+`/static/tf2-agent`. The licenses of the agent's Go dependencies are served at
+`/static/tf2-agent-licenses.txt`.
