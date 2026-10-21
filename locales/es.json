@@ -218,7 +218,7 @@
         "cmd_config": "Carga una configuración de liga en el servidor. Úsalo sin argumentos para abrir un menú con las opciones disponibles (RGL, ETF2L, FBTF, o restablecer a los valores predeterminados), o especifica un nombre de configuración directamente.",
         "cmd_restart": "Abre un menú para reiniciar el torneo, el juego o la ronda.",
         "cmd_server": "Ejecuta un comando del servidor con argumentos opcionales.",
-        "cmd_sdr": "Vuelve a conectarte al servidor usando SDR.",
+        "cmd_sdr": "Vuelve a conectarte al servidor usando Steam Datagram Relay.",
         "owner_only": "Solo propietario",
         "open_source_title": "Código Abierto",
         "open_source_body": "Este proyecto es de código abierto, licenciado bajo la GNU Affero General Public License v3 (AGPL-3.0), y está disponible en",
