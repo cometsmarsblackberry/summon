@@ -50,8 +50,10 @@ from app.routers.internal import (
     send_instant_command,
 )
 from app.routers.admin import (
+    UpdateInstantHostRequest,
     clear_instant_host_quarantine,
     deregister_instant_host,
+    update_instant_host,
     update_instant_host_agent,
 )
 from app.routers.status import _build_status
@@ -873,6 +875,200 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("server.stop", command["type"])
             self.assertEqual("closed_assignment", command["reason"])
 
+    async def test_sdr_only_host_never_publishes_public_ip(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.60", "sdr-only")
+            host.sdr_only = True
+            reservation = self.reservation(360)
+            db.add(reservation)
+            await db.commit()
+
+            assignment = await claim_instant_slot(reservation, db)
+            self.assertEqual(host.id, assignment.slot.host_id)
+            self.assertIsNone(reservation.direct_ip)
+            self.assertIsNone(reservation.direct_port)
+            self.assertIsNone(reservation.direct_tv_port)
+
+            with patch("app.services.timer.schedule_expiry_timer"):
+                await _handle_instant_ready(
+                    assignment,
+                    reservation,
+                    {
+                        "container_id": "sdr-only-container",
+                        "sdr_ip": "169.254.10.20",
+                        "sdr_port": 31000,
+                    },
+                    db,
+                )
+
+            self.assertEqual(ReservationStatus.ACTIVE, reservation.status)
+            self.assertEqual("169.254.10.20", reservation.sdr_ip)
+            self.assertIsNone(reservation.direct_ip)
+            self.assertTrue(serialize_host(host, slots=[])["sdr_only"])
+
+    async def test_direct_connect_reservation_skips_sdr_only_host(self):
+        async with self.sessions() as db:
+            hidden = await self.add_ready_host(db, "203.0.113.61", "hidden")
+            hidden.sdr_only = True
+            public = await self.add_ready_host(db, "203.0.113.62", "public")
+            await db.commit()
+            self.assertEqual(2, await count_available_instant_slots("instant-only", db))
+            self.assertEqual(1, await count_available_instant_slots(
+                "instant-only", db, direct_connect=True
+            ))
+
+            direct = self.reservation(361)
+            direct.enable_direct_connect = True
+            db.add(direct)
+            await db.commit()
+            assignment = await claim_instant_slot(direct, db)
+            self.assertEqual(public.id, assignment.slot.host_id)
+            self.assertEqual("203.0.113.62", direct.direct_ip)
+
+            # Only the SDR-only host is left: direct connect gets nothing,
+            # while an SDR reservation still lands there.
+            another_direct = self.reservation(362)
+            another_direct.enable_direct_connect = True
+            sdr = self.reservation(363)
+            db.add_all([another_direct, sdr])
+            await db.commit()
+            self.assertEqual(0, await count_available_instant_slots(
+                "instant-only", db, direct_connect=True
+            ))
+            self.assertIsNone(await claim_instant_slot(another_direct, db))
+            sdr_assignment = await claim_instant_slot(sdr, db)
+            self.assertEqual(hidden.id, sdr_assignment.slot.host_id)
+
+    async def test_sdr_only_ready_without_fake_ip_stops_and_retries_elsewhere(self):
+        async with self.sessions() as db:
+            hidden = await self.add_ready_host(db, "203.0.113.63", "no-sdr")
+            hidden.sdr_only = True
+            reservation = self.reservation(364)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            assignment.state = "starting"
+            await db.commit()
+            fallback = await self.add_ready_host(db, "203.0.113.64", "fallback")
+
+            with (
+                patch(
+                    "app.routers.internal.send_instant_command",
+                    new=AsyncMock(return_value=True),
+                ) as send,
+                patch(
+                    "app.services.runtime.dispatch_instant_start",
+                    new=AsyncMock(return_value=True),
+                ) as dispatch,
+                patch("app.services.timer.schedule_expiry_timer") as schedule,
+            ):
+                # Agents fall back to a non-SDR address when no FakeIP shows up.
+                await _handle_instant_ready(
+                    assignment,
+                    reservation,
+                    {
+                        "container_id": "no-sdr-container",
+                        "sdr_ip": "203.0.113.63",
+                        "sdr_port": 27015,
+                    },
+                    db,
+                )
+
+            send.assert_awaited_once()
+            self.assertEqual(hidden.id, send.await_args.args[0])
+            command = send.await_args.args[1]
+            self.assertEqual("server.stop", command["type"])
+            self.assertEqual("sdr_unavailable", command["reason"])
+            self.assertEqual(assignment.id, command["assignment_id"])
+            schedule.assert_not_called()
+
+            self.assertEqual("failed", assignment.state)
+            self.assertIsNotNone(assignment.closed_at)
+            self.assertEqual("sdr_unavailable", assignment.failure_code)
+            self.assertIsNotNone(hidden.quarantined_until)
+
+            dispatch.assert_awaited_once()
+            retry = dispatch.await_args.args[1]
+            self.assertEqual(fallback.id, retry.slot.host_id)
+            self.assertEqual(ReservationStatus.PROVISIONING, reservation.status)
+            self.assertIsNone(reservation.sdr_ip)
+            self.assertEqual("203.0.113.64", reservation.direct_ip)
+
+    async def test_sdr_only_restart_without_fake_ip_degrades_in_place(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.65", "restart-no-sdr")
+            host.sdr_only = True
+            reservation = self.reservation(365)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            reservation.status = ReservationStatus.ACTIVE
+            reservation.sdr_ip = "169.254.10.21"
+            assignment.state = "restarting"
+            await db.commit()
+
+            with (
+                patch(
+                    "app.routers.internal.send_instant_command",
+                    new=AsyncMock(return_value=True),
+                ) as send,
+                patch(
+                    "app.services.runtime.handle_instant_start_failure",
+                    new=AsyncMock(),
+                ) as start_failure,
+            ):
+                await _handle_instant_ready(
+                    assignment, reservation, {"container_id": "restarted"}, db,
+                )
+
+            send.assert_not_awaited()
+            start_failure.assert_not_awaited()
+            self.assertEqual("degraded", assignment.state)
+            self.assertIsNone(assignment.closed_at)
+            self.assertEqual("sdr_unavailable", assignment.failure_code)
+            self.assertEqual(ReservationStatus.ACTIVE, reservation.status)
+            self.assertEqual("169.254.10.21", reservation.sdr_ip)
+            self.assertIsNone(reservation.direct_ip)
+
+    async def test_admin_can_toggle_sdr_only_without_draining(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.66", "toggle-sdr")
+            response = await update_instant_host(
+                host.id, UpdateInstantHostRequest(sdr_only=True), user=None, db=db,
+            )
+            self.assertTrue(response["sdr_only"])
+            response = await update_instant_host(
+                host.id, UpdateInstantHostRequest(name="renamed"), user=None, db=db,
+            )
+            self.assertTrue(response["sdr_only"])
+            response = await update_instant_host(
+                host.id, UpdateInstantHostRequest(sdr_only=False), user=None, db=db,
+            )
+            self.assertFalse(response["sdr_only"])
+
+    async def test_sdr_only_survives_host_export_and_import(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.67", "exported-sdr")
+            host.sdr_only = True
+            await db.commit()
+
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        try:
+            exported = _export_instant_hosts(connection)
+            self.assertTrue(exported[0]["sdr_only"])
+            exported[0]["public_ipv4"] = "203.0.113.68"
+            result = _import_instant_hosts(connection, exported, "skip")
+            connection.commit()
+            imported = connection.execute(
+                "SELECT sdr_only, enabled FROM instant_hosts WHERE public_ipv4 = ?",
+                ("203.0.113.68",),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(1, result["created"])
+        self.assertEqual((1, 0), tuple(imported))
+
     async def test_heartbeat_cannot_restore_protocol_incompatible_host(self):
         async with self.sessions() as db:
             host = await self.add_ready_host(db, "203.0.113.20", "protocol-host")
@@ -1311,7 +1507,7 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
                     ).all()
                 }
                 instant_row = (await connection.execute(text(
-                    "SELECT id,name,location,public_ipv4 FROM instant_hosts WHERE id=7"
+                    "SELECT id,name,location,public_ipv4,sdr_only FROM instant_hosts WHERE id=7"
                 ))).one()
                 violations = (await connection.execute(text("PRAGMA foreign_key_check"))).all()
 
@@ -1322,7 +1518,7 @@ class InstantMigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("ping_url", location_columns)
             self.assertEqual(0, instant_columns["public_ipv4"][3])
             self.assertEqual(
-                (7, "legacy-host", "legacy", "8.8.4.4"), tuple(instant_row)
+                (7, "legacy-host", "legacy", "8.8.4.4", 0), tuple(instant_row)
             )
             self.assertEqual([], violations)
 

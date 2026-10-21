@@ -134,6 +134,7 @@ async def create_host(
     base_port: int = DEFAULT_BASE_PORT,
     name: str | None = None,
     public_ipv4: str | None = None,
+    sdr_only: bool = False,
 ) -> tuple[InstantHost, str]:
     """Create a disabled pending host, stable slots, and a copy-once token."""
     clean_name = name.strip() if name else ""
@@ -162,6 +163,7 @@ async def create_host(
         public_ipv4=address,
         enabled=False,
         draining=False,
+        sdr_only=sdr_only,
         health_status="unenrolled",
     )
     token = new_enrollment_token(host)
@@ -445,6 +447,7 @@ def serialize_host(
         "public_ipv4": host.public_ipv4,
         "enabled": host.enabled,
         "draining": host.draining,
+        "sdr_only": host.sdr_only,
         "deleted": host.deleted_at is not None,
         "enrolled": host.enrolled,
         "connected": host_is_online(host),
