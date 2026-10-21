@@ -220,7 +220,7 @@ def _export_instant_hosts(conn: sqlite3.Connection) -> list[dict]:
     if not _table_exists(conn, "instant_hosts"):
         return []
     host_columns = [
-        "id", "name", "location", "public_ipv4", "version_pin",
+        "id", "name", "location", "public_ipv4", "version_pin", "sdr_only",
     ]
     existing = [
         column for column in host_columns
@@ -526,11 +526,14 @@ def _import_instant_hosts(conn: sqlite3.Connection, records: list[dict], mode: s
                 skipped += 1
                 continue
             conn.execute(
-                "UPDATE instant_hosts SET name=?, location=?, version_pin=?, "
+                "UPDATE instant_hosts SET name=?, location=?, version_pin=?, sdr_only=?, "
                 "enabled=0, draining=0, credential_hash=NULL, enrollment_token_hash=NULL, "
                 "enrollment_expires_at=NULL, enrollment_used_at=NULL, health_status='unenrolled' "
                 "WHERE id=?",
-                (rec["name"], rec["location"], rec.get("version_pin"), host_id),
+                (
+                    rec["name"], rec["location"], rec.get("version_pin"),
+                    1 if rec.get("sdr_only") else 0, host_id,
+                ),
             )
             conn.execute("UPDATE instant_slots SET enabled=0 WHERE host_id=?", (host_id,))
 
@@ -571,11 +574,11 @@ def _import_instant_hosts(conn: sqlite3.Connection, records: list[dict], mode: s
             cursor = conn.execute(
                 "INSERT INTO instant_hosts "
                 "(name, location, public_ipv4, enabled, draining, health_status, "
-                "image_status, update_status, update_auto_drained, version_pin) "
-                "VALUES (?, ?, ?, 0, 0, 'unenrolled', 'unprepared', 'idle', 0, ?)",
+                "image_status, update_status, update_auto_drained, version_pin, sdr_only) "
+                "VALUES (?, ?, ?, 0, 0, 'unenrolled', 'unprepared', 'idle', 0, ?, ?)",
                 (
                     rec["name"], rec["location"], rec["public_ipv4"],
-                    rec.get("version_pin"),
+                    rec.get("version_pin"), 1 if rec.get("sdr_only") else 0,
                 ),
             )
             host_id = cursor.lastrowid

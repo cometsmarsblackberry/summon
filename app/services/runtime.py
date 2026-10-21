@@ -143,14 +143,16 @@ def _host_cutoff() -> datetime:
     return _now() - timedelta(seconds=settings.instant_host_offline_seconds)
 
 
-async def count_available_instant_slots(location: str, db: AsyncSession) -> int:
+async def count_available_instant_slots(
+    location: str, db: AsyncSession, *, direct_connect: bool = False
+) -> int:
     if not await _instant_enabled(db):
         return 0
     occupied = exists().where(
         InstantAssignment.slot_id == InstantSlot.id,
         InstantAssignment.closed_at.is_(None),
     )
-    result = await db.execute(
+    query = (
         select(func.count(InstantSlot.id))
         .join(InstantHost, InstantSlot.host_id == InstantHost.id)
         .where(
@@ -182,6 +184,9 @@ async def count_available_instant_slots(location: str, db: AsyncSession) -> int:
             ~occupied,
         )
     )
+    if direct_connect:
+        query = query.where(InstantHost.sdr_only.is_(False))
+    result = await db.execute(query)
     return int(result.scalar_one() or 0)
 
 
@@ -281,15 +286,21 @@ async def _cloud_capacity(
 
 
 async def get_location_runtime_capacity(
-    location: str, db: AsyncSession
+    location: str, db: AsyncSession, *, direct_connect: bool = False
 ) -> RuntimeCapacity:
-    instant = await count_available_instant_slots(location, db)
+    instant = await count_available_instant_slots(
+        location, db, direct_connect=direct_connect
+    )
     cloud, warm = await _cloud_capacity(location, db)
     return RuntimeCapacity(instant, cloud, warm)
 
 
-async def ensure_location_capacity(location: str, db: AsyncSession) -> RuntimeCapacity:
-    capacity = await get_location_runtime_capacity(location, db)
+async def ensure_location_capacity(
+    location: str, db: AsyncSession, *, direct_connect: bool = False
+) -> RuntimeCapacity:
+    capacity = await get_location_runtime_capacity(
+        location, db, direct_connect=direct_connect
+    )
     if not capacity.reservable:
         raise LocationCapacityError(location)
     return capacity
@@ -366,6 +377,9 @@ async def claim_instant_slot(
     )
     if excluded:
         query = query.where(InstantHost.id.not_in(excluded))
+    if reservation.enable_direct_connect:
+        # Direct connect needs a host that may publish its address.
+        query = query.where(InstantHost.sdr_only.is_(False))
     candidates = (await db.execute(query)).all()
     if not candidates:
         return None
@@ -396,9 +410,14 @@ async def claim_instant_slot(
         reservation.runtime_kind = RuntimeKind.INSTANT
         reservation.instance_id = None
         reservation.status = ReservationStatus.PROVISIONING
-        reservation.direct_ip = host.public_ipv4
-        reservation.direct_port = slot.game_port
-        reservation.direct_tv_port = slot.tv_port
+        if host.sdr_only:
+            reservation.direct_ip = None
+            reservation.direct_port = None
+            reservation.direct_tv_port = None
+        else:
+            reservation.direct_ip = host.public_ipv4
+            reservation.direct_port = slot.game_port
+            reservation.direct_tv_port = slot.tv_port
         slot.last_used_at = _now()
         host.last_used_at = _now()
         await db.commit()

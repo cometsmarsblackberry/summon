@@ -50,6 +50,9 @@ class InstantHost(Base):
 
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     draining: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # An SDR-only host never offers its public address to players: no direct
+    # connect, and no fallback to it when SDR fails to come up.
+    sdr_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # High-entropy credentials and enrollment tokens are stored only as keyed

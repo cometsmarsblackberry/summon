@@ -133,6 +133,9 @@ async def _create_and_migrate(conn) -> None:
     )
     await _migrate_add_column(conn, "instant_hosts", "quarantined_until", "DATETIME")
     await _migrate_add_column(conn, "instant_hosts", "quarantine_reason", "TEXT")
+    await _migrate_add_column(
+        conn, "instant_hosts", "sdr_only", "BOOLEAN NOT NULL DEFAULT 0"
+    )
     await _migrate_enabled_locations_nullable(conn)
     await _migrate_instant_hosts_public_ipv4_nullable(conn)
     await _migrate_shared_container_image(conn)

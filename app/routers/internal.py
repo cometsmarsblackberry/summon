@@ -589,43 +589,7 @@ async def handle_instant_host_message(
             await _handle_instant_stopped(assignment, data, db)
             return
         if message_type == "server.failed":
-            failure_class = str(data.get("failure_class") or "infrastructure")
-            failure_code = str(data.get("failure_code") or "start_failed")
-            failure_message = str(data.get("message") or "Server start failed")
-            # Only an initial start failure participates in bounded
-            # Instant-to-Instant retry and cloud fallback. Control-operation or
-            # restart failures must never duplicate an existing reservation on
-            # another runtime.
-            if assignment.state not in {"claimed", "starting"}:
-                assignment.state = "degraded"
-                assignment.failure_class = failure_class[:64]
-                assignment.failure_code = failure_code[:64]
-                assignment.failure_message = failure_message[:4000]
-                assignment.slot.error_code = failure_code[:64]
-                assignment.slot.error_message = failure_message[:4000]
-                assignment.slot.quarantined_at = datetime.now(timezone.utc)
-                if reservation.status == ReservationStatus.PROVISIONING:
-                    reservation.status = ReservationStatus.FAILED
-                    reservation.failure_reason = "The assigned server could not be restarted."
-                await db.commit()
-                return
-            # Release this session before any cloud provider fallback can wait
-            # on network I/O.
-            from app.services.runtime import handle_instant_start_failure
-            provision_cloud = await handle_instant_start_failure(
-                assignment, reservation, db,
-                failure_class=failure_class,
-                failure_code=failure_code,
-                failure_message=failure_message,
-                defer_cloud=True,
-            )
-            if provision_cloud:
-                from app.routers.reservations import provision_reservation_background
-                task = asyncio.create_task(provision_reservation_background(
-                    reservation.id, settings.database_url
-                ))
-                instant_fallback_tasks.add(task)
-                task.add_done_callback(instant_fallback_tasks.discard)
+            await _handle_instant_failed(assignment, reservation, data, db)
 
 
 async def _handle_host_status(host_id: int, data: dict, *, hello: bool) -> None:
@@ -915,24 +879,51 @@ async def _handle_instant_ready(
         await db.commit()
         await send_instant_command(assignment.slot.host_id, command)
         return
+    host = assignment.slot.host
+    sdr_ip = data.get("sdr_ip")
+    has_fake_ip = isinstance(sdr_ip, str) and sdr_ip.startswith("169.254.")
+    if host.sdr_only and not has_fake_ip:
+        # Without a FakeIP the only address left is the host's own, which an
+        # SDR-only host must never publish. Fail the start instead, so the
+        # reservation moves to another host or to cloud.
+        assignment.container_id = (
+            str(data.get("container_id") or "")[:128] or assignment.container_id
+        )
+        if assignment.state in {"claimed", "starting"}:
+            await send_instant_command(
+                host.id,
+                _instant_reconcile_command(
+                    "server.stop", assignment, reason="sdr_unavailable"
+                ),
+            )
+        await _handle_instant_failed(assignment, reservation, {
+            "failure_class": "host",
+            "failure_code": "sdr_unavailable",
+            "message": "No SDR FakeIP was detected on an SDR-only host",
+        }, db)
+        return
     assignment.state = "ready"
     assignment.ready_at = assignment.ready_at or now
     assignment.container_id = str(data.get("container_id") or "")[:128] or assignment.container_id
     reservation.status = ReservationStatus.ACTIVE
     reservation.started_at = reservation.started_at or now
     reservation.empty_since = now
-    reservation.direct_ip = assignment.slot.host.public_ipv4
-    reservation.direct_port = assignment.slot.game_port
-    reservation.direct_tv_port = assignment.slot.tv_port
+    if host.sdr_only:
+        reservation.direct_ip = None
+        reservation.direct_port = None
+        reservation.direct_tv_port = None
+    else:
+        reservation.direct_ip = host.public_ipv4
+        reservation.direct_port = assignment.slot.game_port
+        reservation.direct_tv_port = assignment.slot.tv_port
 
-    sdr_ip = data.get("sdr_ip")
-    if isinstance(sdr_ip, str) and sdr_ip.startswith("169.254."):
+    if has_fake_ip:
         reservation.sdr_ip = sdr_ip
         reservation.sdr_port, reservation.sdr_tv_port = _sdr_ports(
             data.get("sdr_port"), assignment.slot.game_port
         )
     else:
-        reservation.sdr_ip = assignment.slot.host.public_ipv4
+        reservation.sdr_ip = host.public_ipv4
         reservation.sdr_port = assignment.slot.game_port
         reservation.sdr_tv_port = assignment.slot.tv_port
     if data.get("map"):
@@ -950,6 +941,48 @@ async def _handle_instant_ready(
         reservation.reservation_number, assignment.slot.host_id, assignment.slot.slot_index,
         max(0.0, (now - claimed_at).total_seconds()),
     )
+
+
+async def _handle_instant_failed(
+    assignment: InstantAssignment, reservation: Reservation, data: dict, db
+) -> None:
+    failure_class = str(data.get("failure_class") or "infrastructure")
+    failure_code = str(data.get("failure_code") or "start_failed")
+    failure_message = str(data.get("message") or "Server start failed")
+    # Only an initial start failure participates in bounded
+    # Instant-to-Instant retry and cloud fallback. Control-operation or
+    # restart failures must never duplicate an existing reservation on
+    # another runtime.
+    if assignment.state not in {"claimed", "starting"}:
+        assignment.state = "degraded"
+        assignment.failure_class = failure_class[:64]
+        assignment.failure_code = failure_code[:64]
+        assignment.failure_message = failure_message[:4000]
+        assignment.slot.error_code = failure_code[:64]
+        assignment.slot.error_message = failure_message[:4000]
+        assignment.slot.quarantined_at = datetime.now(timezone.utc)
+        if reservation.status == ReservationStatus.PROVISIONING:
+            reservation.status = ReservationStatus.FAILED
+            reservation.failure_reason = "The assigned server could not be restarted."
+        await db.commit()
+        return
+    # Release this session before any cloud provider fallback can wait
+    # on network I/O.
+    from app.services.runtime import handle_instant_start_failure
+    provision_cloud = await handle_instant_start_failure(
+        assignment, reservation, db,
+        failure_class=failure_class,
+        failure_code=failure_code,
+        failure_message=failure_message,
+        defer_cloud=True,
+    )
+    if provision_cloud:
+        from app.routers.reservations import provision_reservation_background
+        task = asyncio.create_task(provision_reservation_background(
+            reservation.id, settings.database_url
+        ))
+        instant_fallback_tasks.add(task)
+        task.add_done_callback(instant_fallback_tasks.discard)
 
 
 async def _handle_instant_stopped(

@@ -651,6 +651,7 @@ class CreateInstantHostRequest(BaseModel):
     location: str
     slot_count: int = 1
     base_port: int = 27015
+    sdr_only: bool = False
 
 
 class UpdateInstantHostRequest(BaseModel):
@@ -660,6 +661,7 @@ class UpdateInstantHostRequest(BaseModel):
     slot_count: int | None = None
     base_port: int | None = None
     version_pin: str | None = None
+    sdr_only: bool | None = None
 
 
 class InstantHostStateRequest(BaseModel):
@@ -756,6 +758,7 @@ async def create_instant_host(
             location=request.location,
             slot_count=request.slot_count,
             base_port=request.base_port,
+            sdr_only=request.sdr_only,
         )
     except InstantHostError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -818,6 +821,8 @@ async def update_instant_host(
         if len(version_pin) > 64 or any(ch.isspace() for ch in version_pin):
             raise HTTPException(status_code=400, detail="Invalid agent version pin")
         host.version_pin = version_pin or None
+    if request.sdr_only is not None:
+        host.sdr_only = request.sdr_only
 
     if capacity_change:
         current_enabled = [slot for slot in host.slots if slot.enabled]
