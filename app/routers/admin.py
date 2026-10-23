@@ -1393,12 +1393,6 @@ class MapLeagueRotationRequest(BaseModel):
     in_league_rotation: bool
 
 
-class AddMapRequest(BaseModel):
-    """Request to add a new map."""
-    name: str
-    display_name: str
-
-
 class BulkImportMapsRequest(BaseModel):
     """Request to bulk-import maps (one map name per line)."""
     maps_text: str
@@ -1455,36 +1449,6 @@ async def set_map_league_rotation(
         "name": game_map.name,
         "in_league_rotation": game_map.in_league_rotation,
     }
-
-
-@router.post("/maps")
-async def add_map(
-    request: AddMapRequest,
-    user: User = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    """Add a new map."""
-    name = request.name.strip()
-    if not is_valid_map_name(name):
-        raise HTTPException(status_code=400, detail="Invalid map name")
-
-    display_name = request.display_name.strip() or name
-    
-    # Get max display order
-    result = await db.execute(select(func.max(GameMap.display_order)))
-    max_order = result.scalar_one() or 0
-    
-    new_map = GameMap(
-        name=name,
-        display_name=display_name,
-        enabled=True,
-        display_order=max_order + 1,
-    )
-    db.add(new_map)
-    await db.commit()
-    await db.refresh(new_map)
-    
-    return {"id": new_map.id, "name": new_map.name, "display_name": new_map.display_name}
 
 
 @router.post("/maps/bulk")

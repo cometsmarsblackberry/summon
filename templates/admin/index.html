@@ -395,8 +395,6 @@
             mapPerPage: 20,
             selectedMapIds: [],
             deletingMaps: false,
-            showAddMap: false,
-            newMapName: '',
             showBulkImport: false,
             bulkMapText: '',
             bulkImporting: false,
@@ -501,11 +499,6 @@
                 } finally {
                     this.deletingMaps = false;
                 }
-            },
-            async addMap() {
-                if (!this.newMapName) return;
-                await fetch('/admin/maps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: this.newMapName, display_name: this.newMapName }) });
-                location.reload();
             },
             async bulkImportMaps() {
                 if (!this.bulkMapText.trim()) return;
@@ -1133,19 +1126,9 @@
                     </label>
                     <input x-model="mapSearch" placeholder="Search maps..."
                         class="px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800 placeholder-slate-400 w-40">
-                    <button @click="showBulkImport = !showBulkImport; showAddMap = false"
-                        class="px-2 py-1 text-xs bg-slate-600 hover:bg-slate-500 rounded">Bulk Import</button>
-                    <button @click="showAddMap = !showAddMap; showBulkImport = false"
-                        class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded">+ Add Map</button>
+                    <button @click="showBulkImport = !showBulkImport"
+                        class="px-2 py-1 text-xs bg-brand-600 hover:bg-brand-500 rounded">+ Add Maps</button>
                 </div>
-            </div>
-
-            <!-- Inline add form -->
-            <div x-show="showAddMap" class="mb-3 p-2 bg-slate-100 rounded-lg flex gap-2" x-cloak>
-                <input x-model="newMapName" placeholder="Map name (e.g., cp_process_f12)"
-                    class="flex-1 px-2 py-1 text-sm bg-white border border-slate-300 rounded text-slate-800"
-                    @keydown.enter="addMap()">
-                <button @click="addMap()" class="px-3 py-1 text-xs bg-green-600 hover:bg-green-500 rounded">Add</button>
             </div>
 
             <!-- Bulk import form -->
