@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.i18n import t
+from app.i18n import SUPPORTED_LOCALES
 from app.models.user import User
 from app.routers.auth import (
     get_current_user,
@@ -27,6 +27,7 @@ from app.services.reservation import (
     get_reservation_by_id,
 )
 from app.routers.status import get_status_snapshot
+from app.seo import INDEXABLE_PATHS, absolute_url, alternate_links, localized_path
 
 
 # Static mapping: Vultr provider region → Looking Glass hostname slug
@@ -114,7 +115,11 @@ async def robots_txt():
         f"Allow: /\n"
         f"Disallow: /admin\n"
         f"Disallow: /api/\n"
+        f"Disallow: /auth/\n"
         f"Disallow: /feedback\n"
+        f"Disallow: /internal/\n"
+        f"Disallow: /login\n"
+        f"Disallow: /motd/\n"
         f"Disallow: /my-reservations\n"
         f"Disallow: /profile\n"
         f"Disallow: /reservations/\n"
@@ -126,43 +131,43 @@ async def robots_txt():
 
 @router.get("/sitemap.xml", response_class=HTMLResponse)
 async def sitemap_xml():
-    """Serve sitemap.xml for search engine crawlers."""
-    from datetime import date
+    """Serve sitemap.xml for search engine crawlers.
+
+    Lists every language of each indexable page, with hreflang alternates.
+    lastmod is left out: the pages have no meaningful modification date.
+    """
+    from xml.sax.saxutils import quoteattr, escape
     from fastapi.responses import Response
 
-    today = date.today().isoformat()
-    pages = [
-        ("/", "daily", "1.0"),
-        ("/about", "monthly", "0.8"),
-        ("/stats", "daily", "0.7"),
-        ("/ping", "monthly", "0.6"),
-        ("/maps", "monthly", "0.5"),
-        ("/bans", "weekly", "0.4"),
-    ]
-
-    # Only include /privacy if the template exists
-    from pathlib import Path
-    if Path("templates/privacy.html").exists():
-        pages.append(("/privacy", "monthly", "0.3"))
-
-    base = settings.base_url
-    urls = "\n".join(
-        f"  <url>\n"
-        f"    <loc>{base}{path}</loc>\n"
-        f"    <lastmod>{today}</lastmod>\n"
-        f"    <changefreq>{freq}</changefreq>\n"
-        f"    <priority>{prio}</priority>\n"
-        f"  </url>"
-        for path, freq, prio in pages
-    )
+    entries = []
+    for path in INDEXABLE_PATHS:
+        alternates = "".join(
+            f"    <xhtml:link rel=\"alternate\" hreflang={quoteattr(hreflang)} "
+            f"href={quoteattr(href)}/>\n"
+            for hreflang, href in alternate_links(path)
+        )
+        for locale in SUPPORTED_LOCALES:
+            loc = escape(absolute_url(localized_path(path, locale)))
+            entries.append(f"  <url>\n    <loc>{loc}</loc>\n{alternates}  </url>\n")
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        f"{urls}\n"
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+        'xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+        f"{''.join(entries)}"
         "</urlset>\n"
     )
     return Response(content=xml, media_type="application/xml")
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Point browsers and crawlers that ask for /favicon.ico at the icon."""
+    from fastapi.responses import RedirectResponse, Response
+
+    if settings.favicon_url:
+        return RedirectResponse(url=settings.favicon_url, status_code=302)
+    return Response(status_code=404)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -323,17 +328,9 @@ async def my_reservations_page(
     """User's reservation history page."""
     user = await get_current_user(request, db)
     if not user:
-        return templates.TemplateResponse(
-            request,
-            "home.html",
-            {
-                "user": None,
-                "locations": [],
-                "error": t("errors.login_required"),
-                "cloud_configured": settings.cloud_configured,
-            }
-        )
-    
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/login", status_code=302)
+
     reservations = await get_user_reservations(user, db)
 
     # Build location code → city name map for display

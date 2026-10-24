@@ -12,6 +12,7 @@
         "use_light_mode": "Käytä vaaleaa tilaa"
     },
     "footer": {
+        "language": "Kieli",
         "about": "Tietoa",
         "stats": "Tilastot",
         "feedback": "Palaute",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Varaa TF2-palvelin — {site_name}",
         "description": "Varaa yksityinen Team Fortress 2 -palvelin kilpailullista pelaamista varten. Valmiiksi ladatut RGL- ja ETF2L-asetukset, {count} sijaintia ympäri maailmaa.",
-        "heading": "Varaa palvelin",
+        "heading": "Varaa TF2-palvelin",
         "choose_locations": "Valitse {count} sijainnista",
         "beta_mode": "Betatila",
         "beta_notice": "Tällä hetkellä vain kutsulla. Liity Discordiimme saadaksesi pääsyn.",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "Lataa SourceTV-demot automaattisesti"
     },
     "status": {
-        "title": "Varaus #{number} - {site_name}",
+        "title": "Varaus #{number} — {site_name}",
         "heading": "Varaus #{number}",
         "pending": "odottaa",
         "provisioning": "valmistellaan",
@@ -206,7 +207,7 @@
         "progress_restarting": "Käynnistetään TF2-palvelinta uudelleen..."
     },
     "about": {
-        "title": "Tietoa - {site_name}",
+        "title": "Tietoa ja varauskomennot — {site_name}",
         "description": "Tietoa {site_name}:stä — miten varaukset toimivat, pelinsisäiset komennot, palvelinasetukset ja kieltokäytännöt.",
         "heading": "Tietoa",
         "what_is_title": "Mikä on {site_name}?",
@@ -277,7 +278,7 @@
         "fail": "Hylätty"
     },
     "my_reservations": {
-        "title": "Omat varaukset - {site_name}",
+        "title": "Omat varaukset — {site_name}",
         "heading": "Omat varaukset",
         "new_reservation": "Uusi varaus",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Varaa palvelin"
     },
     "ping": {
-        "title": "Pingtesti - {site_name}",
+        "title": "TF2-palvelinten pingtesti — {site_name}",
         "description": "Testaa viiveesi kaikkiin {site_name}-palvelinsijainteihin. Löydä lähimmäinen TF2-palvelin matalimmalla pingillä.",
         "heading": "Pingtesti",
         "retest": "Testaa uudelleen",
@@ -316,7 +317,7 @@
         "results_note": "Tulokset riippuvat verkkosi olosuhteista ja voivat vaihdella testien välillä."
     },
     "stats": {
-        "title": "Tilastot - {site_name}",
+        "title": "Tilastot — {site_name}",
         "description": "Palvelinvarausten tilastot ja yhteisön viivedata {site_name}:lle — käyttötrendit, sijaintikohtaiset erittelyt ja ping-tulokset.",
         "heading": "Tilastot",
         "tab_reservations": "Varaukset",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Yleisin paras palvelin"
     },
     "maps": {
-        "title": "Kartat - {site_name}",
+        "title": "TF2-karttojen lataukset — {site_name}",
         "description": "Lataa {site_name}-palvelimilla käytettävät Team Fortress 2 -kartat.",
         "heading": "Kartat",
         "intro": "Lataa palvelimillamme käytettävät kartat.",
         "no_maps": "Ei karttoja saatavilla."
     },
     "bans": {
-        "title": "Kiellot - {site_name}",
+        "title": "Kiellot — {site_name}",
         "description": "Luettelo kielletyistä pelaajista {site_name}:ssä. TF2-palvelinvarauspalvelun väärinkäyttö johtaa pysyvään kieltoon.",
         "heading": "Kiellot",
         "col_player": "Pelaaja",
@@ -370,7 +371,7 @@
         "no_bans": "Ei kieltoja näytettäväksi."
     },
     "feedback": {
-        "title": "Palaute - {site_name}",
+        "title": "Palaute — {site_name}",
         "description": "Ilmoita ongelmasta tai ehdota parannusta palveluun {site_name}.",
         "heading": "Palaute",
         "intro": "Oliko lagia, rikkinäinen asetus tai palvelin, joka ei käynnistynyt? Onko sinulla idea parannukseksi? Kerro siitä täällä.",

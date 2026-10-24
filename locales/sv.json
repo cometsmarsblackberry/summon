@@ -12,6 +12,7 @@
         "use_light_mode": "Använd ljust läge"
     },
     "footer": {
+        "language": "Språk",
         "about": "Om",
         "stats": "Statistik",
         "feedback": "Feedback",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Reservera en TF2-server — {site_name}",
         "description": "Reservera en privat Team Fortress 2-server för kompetitivt spel. Förinstallerade RGL- och ETF2L-konfigurationer, {count} platser världen över.",
-        "heading": "Reservera en server",
+        "heading": "Reservera en TF2-server",
         "choose_locations": "Välj bland {count} platser",
         "beta_mode": "Betaläge",
         "beta_notice": "Enbart för inbjudna för tillfället. Gå med i vår Discord för åtkomst.",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "Ladda upp SourceTV-demonstrationer automatiskt"
     },
     "status": {
-        "title": "Reservation #{number} - {site_name}",
+        "title": "Reservation #{number} — {site_name}",
         "heading": "Reservation #{number}",
         "pending": "väntande",
         "provisioning": "etablerar",
@@ -206,7 +207,7 @@
         "progress_restarting": "Startar om TF2-servern..."
     },
     "about": {
-        "title": "Om - {site_name}",
+        "title": "Om och reservationskommandon — {site_name}",
         "description": "Om {site_name} — hur reservationer fungerar, kommandon i spelet, serverkonfigurationer och banpolicyer.",
         "heading": "Om",
         "what_is_title": "Vad är {site_name}?",
@@ -277,7 +278,7 @@
         "fail": "Underkänd"
     },
     "my_reservations": {
-        "title": "Mina reservationer - {site_name}",
+        "title": "Mina reservationer — {site_name}",
         "heading": "Mina reservationer",
         "new_reservation": "Ny reservation",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Reservera en server"
     },
     "ping": {
-        "title": "Pingtest - {site_name}",
+        "title": "Pingtest för TF2-servrar — {site_name}",
         "description": "Testa din latens till alla serverplatser på {site_name}. Hitta den TF2-server med lägst ping nära dig.",
         "heading": "Pingtest",
         "retest": "Testa igen",
@@ -316,7 +317,7 @@
         "results_note": "Resultaten beror på dina nätverksförhållanden och kan variera mellan tester."
     },
     "stats": {
-        "title": "Statistik - {site_name}",
+        "title": "Statistik — {site_name}",
         "description": "Serverreservationsstatistik och gemenskapens latensdata för {site_name} — användningstrender, platsuppdelningar och pingresultat.",
         "heading": "Statistik",
         "tab_reservations": "Reservationer",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Vanligaste bästa servern"
     },
     "maps": {
-        "title": "Kartor - {site_name}",
+        "title": "Ladda ner TF2-kartor — {site_name}",
         "description": "Ladda ned Team Fortress 2-kartorna som används på {site_name}-servrar.",
         "heading": "Kartor",
         "intro": "Ladda ned kartorna som används på våra servrar.",
         "no_maps": "Inga kartor tillgängliga."
     },
     "bans": {
-        "title": "Banningar - {site_name}",
+        "title": "Banningar — {site_name}",
         "description": "Lista över bannade spelare på {site_name}. Missbruk av TF2-serverreservationstjänsten resulterar i en permanent bannning.",
         "heading": "Banningar",
         "col_player": "Spelare",
@@ -370,7 +371,7 @@
         "no_bans": "Inga banningar att visa."
     },
     "feedback": {
-        "title": "Feedback - {site_name}",
+        "title": "Feedback — {site_name}",
         "description": "Rapportera ett problem eller föreslå en förbättring av {site_name}.",
         "heading": "Feedback",
         "intro": "Hade du lagg, en trasig konfiguration eller en server som inte startade? Har du en idé om något som kan bli bättre? Berätta här.",

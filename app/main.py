@@ -29,6 +29,13 @@ from app.static_assets import (
     static_asset_url,
 )
 from app.routers import auth, reservations, status, internal, admin, pages, ping, motd, feedback
+from app.seo import (
+    PublicUrlMiddleware,
+    alternate_links,
+    is_indexable_path,
+    localized_path,
+    split_locale_prefix,
+)
 from app.i18n import (
     get_locale,
     set_current_locale,
@@ -299,6 +306,9 @@ app = FastAPI(
     description="On-demand TF2 server reservation system",
     version="0.4.5",
     lifespan=lifespan,
+    # PublicUrlMiddleware removes trailing slashes with a relative redirect.
+    # Starlette's version uses the Host header, which can name a proxy origin.
+    redirect_slashes=False,
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
     openapi_url="/openapi.json" if settings.api_docs_enabled else None,
@@ -336,6 +346,13 @@ class LocaleMiddleware(BaseHTTPMiddleware):
         request.state.locale = locale
         set_current_locale(locale)
         response = await call_next(request)
+        # Unprefixed pages pick their language from these request headers.
+        if (
+            getattr(request.state, "url_locale", None) is None
+            and response.headers.get("content-type", "").startswith("text/html")
+        ):
+            response.headers.add_vary_header("Accept-Language")
+            response.headers.add_vary_header("Cookie")
         return response
 
 
@@ -453,6 +470,9 @@ class TrustedProxyHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(LocaleMiddleware)
+# Outside LocaleMiddleware so the URL locale is known before get_locale, and
+# inside the header middlewares so its redirects get the same headers.
+app.add_middleware(PublicUrlMiddleware)
 app.add_middleware(CacheControlMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
@@ -480,6 +500,24 @@ def _install_i18n_globals(templates: Jinja2Templates) -> None:
         return translate(key, locale, **kwargs)
 
     env.globals["_"] = _translate
+
+    @pass_context
+    def _lurl(context, path: str) -> str:
+        """Link to ``path`` in the URL language of the current page."""
+        request = context.get("request")
+        url_locale = getattr(request.state, "url_locale", None) if request else None
+        return localized_path(path, url_locale)
+
+    @pass_context
+    def _canonical_url(context) -> str:
+        request = context.get("request")
+        path = request.url.path if request else "/"
+        return settings.base_url.rstrip("/") + _lurl(context, path)
+
+    env.globals["lurl"] = _lurl
+    env.globals["canonical_url"] = _canonical_url
+    env.globals["alternate_links"] = alternate_links
+    env.globals["is_indexable_path"] = is_indexable_path
     env.globals["SUPPORTED_LOCALES"] = SUPPORTED_LOCALES
     env.globals["LOCALE_NAMES"] = LOCALE_NAMES
     env.globals["DEFAULT_LOCALE"] = DEFAULT_LOCALE
@@ -527,7 +565,12 @@ async def set_language(request: Request):
         parsed = urlparse(referer)
         base_parsed = urlparse(settings.base_url)
         if parsed.netloc == "" or parsed.netloc == base_parsed.netloc:
-            redirect_to = parsed.path or "/"
+            # A single leading slash: "//host" would be protocol-relative.
+            redirect_to = "/" + parsed.path.lstrip("/\\")
+            # From a localized URL, go to the same page in the new language.
+            url_locale, path = split_locale_prefix(redirect_to)
+            if url_locale is not None and is_indexable_path(path):
+                redirect_to = localized_path(path, lang)
             if parsed.query:
                 redirect_to += f"?{parsed.query}"
 

@@ -12,6 +12,7 @@
         "use_light_mode": "Gamitin ang maliwanag na mode"
     },
     "footer": {
+        "language": "Wika",
         "about": "Tungkol",
         "stats": "Istatistika",
         "feedback": "Feedback",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Mag-reserve ng TF2 Server — {site_name}",
         "description": "Mag-reserve ng pribadong Team Fortress 2 server para sa kompetitibong laro. Mga pre-loaded na config ng RGL at ETF2L, {count} na lokasyon sa buong mundo.",
-        "heading": "Mag-reserve ng server",
+        "heading": "Mag-reserve ng TF2 server",
         "choose_locations": "Pumili mula sa {count} na lokasyon",
         "beta_mode": "Beta Mode",
         "beta_notice": "Sa ngayon ay para lang sa mga inimbitahan. Sumali sa aming Discord para makakuha ng access.",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "Awtomatikong mag-upload ng mga SourceTV demo"
     },
     "status": {
-        "title": "Reserbasyon #{number} - {site_name}",
+        "title": "Reserbasyon #{number} — {site_name}",
         "heading": "Reserbasyon #{number}",
         "pending": "naghihintay",
         "provisioning": "nagpo-provision",
@@ -206,7 +207,7 @@
         "progress_restarting": "Nire-restart ang TF2 server..."
     },
     "about": {
-        "title": "Tungkol - {site_name}",
+        "title": "Tungkol at Mga Command sa Reserbasyon — {site_name}",
         "description": "Alamin ang tungkol sa {site_name} — kung paano gumagana ang mga reserbasyon, mga command sa laro, mga config ng server, at mga patakaran sa ban.",
         "heading": "Tungkol",
         "what_is_title": "Ano ang {site_name}?",
@@ -277,7 +278,7 @@
         "fail": "Nabigo"
     },
     "my_reservations": {
-        "title": "Aking Mga Reserbasyon - {site_name}",
+        "title": "Aking Mga Reserbasyon — {site_name}",
         "heading": "Aking Mga Reserbasyon",
         "new_reservation": "Bagong Reserbasyon",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Mag-reserve ng Server"
     },
     "ping": {
-        "title": "Ping Test - {site_name}",
+        "title": "Ping Test ng Mga TF2 Server — {site_name}",
         "description": "Subukan ang iyong latency sa lahat ng lokasyon ng server ng {site_name}. Hanapin ang pinakamababang-ping na TF2 server malapit sa iyo.",
         "heading": "Ping Test",
         "retest": "Subukang muli",
@@ -316,7 +317,7 @@
         "results_note": "Ang mga resulta ay nakasalalay sa iyong mga kondisyon ng network at maaaring mag-iba sa pagitan ng mga pagsubok."
     },
     "stats": {
-        "title": "Istatistika - {site_name}",
+        "title": "Istatistika — {site_name}",
         "description": "Mga istatistika ng reserbasyon ng server at data ng community latency para sa {site_name} — mga trend ng paggamit, pagkakahati-hati ng lokasyon, at mga resulta ng ping.",
         "heading": "Istatistika",
         "tab_reservations": "Mga Reserbasyon",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Pinaka-karaniwang Pinakamahusay na Server"
     },
     "maps": {
-        "title": "Mga Mapa - {site_name}",
+        "title": "Mga Download ng TF2 Map — {site_name}",
         "description": "I-download ang mga Team Fortress 2 na mapa na ginagamit sa mga server ng {site_name}.",
         "heading": "Mga Mapa",
         "intro": "I-download ang mga mapang ginagamit sa aming mga server.",
         "no_maps": "Walang available na mapa."
     },
     "bans": {
-        "title": "Mga Ban - {site_name}",
+        "title": "Mga Ban — {site_name}",
         "description": "Listahan ng mga banned na manlalaro sa {site_name}. Ang pag-abuso sa serbisyo ng reserbasyon ng TF2 server ay nagresulta sa permanenteng ban.",
         "heading": "Mga Ban",
         "col_player": "Manlalaro",
@@ -370,7 +371,7 @@
         "no_bans": "Walang mga ban na ipapakita."
     },
     "feedback": {
-        "title": "Feedback - {site_name}",
+        "title": "Feedback — {site_name}",
         "description": "Mag-ulat ng problema o magmungkahi ng pagpapabuti para sa {site_name}.",
         "heading": "Feedback",
         "intro": "Nagkaroon ka ba ng lag, sirang config, o server na hindi nagsimula? May ideya ka ba para mas mapaganda pa? Sabihin sa amin dito.",

@@ -2,7 +2,6 @@
 
 {% block title %}{{ _('ping.title') }}{% endblock %}
 {% block meta_description %}{{ _('ping.description') }}{% endblock %}
-{% block canonical %}{{ base_url }}/ping{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-8" x-data="pingTest()" x-init="loadOrStart()">
@@ -104,7 +103,7 @@
             <div class="text-sm text-green-800">
                 <p>{{ _('ping.share_thanks') }}</p>
                 <p class="mt-1">
-                    <a href="/stats?tab=ping" class="text-brand-700 hover:underline">{{ _('ping.view_results') }}</a>
+                    <a href="{{ lurl('/stats?tab=ping') }}" class="text-brand-700 hover:underline">{{ _('ping.view_results') }}</a>
                 </p>
             </div>
         </template>

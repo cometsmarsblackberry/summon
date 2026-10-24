@@ -2,50 +2,6 @@
 
 {% block title %}{{ _('about.title') }}{% endblock %}
 {% block meta_description %}{{ _('about.description') }}{% endblock %}
-{% block canonical %}{{ base_url }}/about{% endblock %}
-
-{% block jsonld %}
-<script type="application/ld+json">
-{
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-        {
-            "@type": "Question",
-            "name": {{ _('about.what_is_title') | tojson }},
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": {{ _('about.what_is_body', max_hours=reservation_settings.max_duration_hours, auto_end_minutes=reservation_settings.auto_end_minutes) | tojson }}
-            }
-        },
-        {
-            "@type": "Question",
-            "name": {{ _('about.commands_title') | tojson }},
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": {{ (_('about.commands_intro') ~ ' !admin: ' ~ _('about.cmd_admin') ~ ' !who: ' ~ _('about.cmd_reservation') ~ ' !map: ' ~ _('about.cmd_changemap') ~ ' !config: ' ~ _('about.cmd_config') ~ ' !restart: ' ~ _('about.cmd_restart') ~ ' !cmd: ' ~ _('about.cmd_server') ~ ' !end: ' ~ _('about.cmd_end') ~ ' !cancel: ' ~ _('about.cmd_cancel') ~ ' !sdr: ' ~ _('about.cmd_sdr')) | tojson }}
-            }
-        },
-        {
-            "@type": "Question",
-            "name": {{ _('about.open_source_title') | tojson }},
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": {{ (_('about.open_source_body') ~ ' GitHub: https://github.com/cometsmarsblackberry/summon.') | tojson }}
-            }
-        },
-        {
-            "@type": "Question",
-            "name": {{ _('about.bans_title') | tojson }},
-            "acceptedAnswer": {
-                "@type": "Answer",
-                "text": {{ (_('about.bans_body_1') ~ ' ' ~ _('about.bans_body_rules') ~ ' ' ~ _('about.bans_body_2') ~ ' ' ~ _('about.bans_body_link') ~ '.') | tojson }}
-            }
-        }
-    ]
-}
-</script>
-{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-8">

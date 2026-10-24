@@ -92,16 +92,22 @@ def get_locale(request: Request) -> str:
     """Determine the locale for a request.
 
     Priority:
-    1. Cookie (lang=xx)
-    2. Accept-Language header
-    3. Default (en)
+    1. Locale prefix in the URL (/fi/about), set by PublicUrlMiddleware
+    2. Cookie (lang=xx)
+    3. Accept-Language header
+    4. Default (en)
     """
-    # 1. Cookie
+    # 1. URL prefix
+    url_locale = getattr(request.state, "url_locale", None)
+    if url_locale in SUPPORTED_LOCALES:
+        return url_locale
+
+    # 2. Cookie
     cookie_lang = request.cookies.get(LOCALE_COOKIE)
     if cookie_lang and cookie_lang in SUPPORTED_LOCALES:
         return cookie_lang
 
-    # 2. Accept-Language header
+    # 3. Accept-Language header
     accept = request.headers.get("accept-language", "")
     for part in accept.split(","):
         # Parse "en-US;q=0.9" -> "en"
@@ -114,7 +120,7 @@ def get_locale(request: Request) -> str:
         if prefix in SUPPORTED_LOCALES:
             return prefix
 
-    # 3. Default
+    # 4. Default
     return DEFAULT_LOCALE
 
 

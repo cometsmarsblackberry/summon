@@ -6,7 +6,7 @@
 <div class="max-w-4xl mx-auto px-4 py-8">
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-xl font-semibold text-slate-900">{{ _('my_reservations.heading') }}</h1>
-        <a href="/reserve"
+        <a href="/"
             class="px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm font-medium transition-colors">
             {{ _('my_reservations.new_reservation') }}
         </a>
@@ -65,7 +65,7 @@
     {% else %}
     <div class="bg-white shadow-sm rounded-lg border border-slate-200 p-8 text-center">
         <p class="text-slate-500 mb-4">{{ _('my_reservations.no_reservations') }}</p>
-        <a href="/reserve"
+        <a href="/"
             class="inline-flex px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm font-medium transition-colors">
             {{ _('my_reservations.reserve_server') }}
         </a>

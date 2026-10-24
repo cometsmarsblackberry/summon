@@ -665,6 +665,14 @@
             <div x-show="Object.keys(status).length === 0" class="text-slate-400 text-sm py-2">
                 {{ _('home.loading') }}
             </div>
+            {# The list above is drawn by Alpine; this one is for crawlers without JS. #}
+            <noscript>
+                <ul class="text-sm text-slate-800">
+                    {% for location in locations %}
+                    <li class="py-2 border-b border-slate-200">{{ location.name }}</li>
+                    {% endfor %}
+                </ul>
+            </noscript>
         </div>
     </div>
 

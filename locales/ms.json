@@ -12,6 +12,7 @@
         "use_light_mode": "Gunakan mod cerah"
     },
     "footer": {
+        "language": "Bahasa",
         "about": "Tentang",
         "stats": "Statistik",
         "feedback": "Maklum Balas",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Tempah Pelayan TF2 — {site_name}",
         "description": "Tempah pelayan Team Fortress 2 peribadi untuk permainan kompetitif. Konfigurasi RGL dan ETF2L dipramuat, {count} lokasi di seluruh dunia.",
-        "heading": "Tempah pelayan",
+        "heading": "Tempah pelayan TF2",
         "choose_locations": "Pilih daripada {count} lokasi",
         "beta_mode": "Mod Beta",
         "beta_notice": "Kini hanya untuk jemputan. Sertai Discord kami untuk akses.",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "Muat naik demo SourceTV secara automatik"
     },
     "status": {
-        "title": "Tempahan #{number} - {site_name}",
+        "title": "Tempahan #{number} — {site_name}",
         "heading": "Tempahan #{number}",
         "pending": "menunggu",
         "provisioning": "menyediakan",
@@ -206,7 +207,7 @@
         "progress_restarting": "Memulakan semula pelayan TF2..."
     },
     "about": {
-        "title": "Tentang - {site_name}",
+        "title": "Tentang & Arahan Tempahan — {site_name}",
         "description": "Ketahui tentang {site_name} — cara tempahan berfungsi, arahan dalam permainan, konfigurasi pelayan, dan polisi larangan.",
         "heading": "Tentang",
         "what_is_title": "Apakah {site_name}?",
@@ -277,7 +278,7 @@
         "fail": "Gagal"
     },
     "my_reservations": {
-        "title": "Tempahan Saya - {site_name}",
+        "title": "Tempahan Saya — {site_name}",
         "heading": "Tempahan Saya",
         "new_reservation": "Tempahan Baharu",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Tempah Pelayan"
     },
     "ping": {
-        "title": "Ujian Ping - {site_name}",
+        "title": "Ujian Ping Pelayan TF2 — {site_name}",
         "description": "Uji latensi anda ke semua lokasi pelayan {site_name}. Cari pelayan TF2 ping terendah berhampiran anda.",
         "heading": "Ujian Ping",
         "retest": "Uji semula",
@@ -316,7 +317,7 @@
         "results_note": "Keputusan bergantung pada keadaan rangkaian anda dan mungkin berbeza antara ujian."
     },
     "stats": {
-        "title": "Statistik - {site_name}",
+        "title": "Statistik — {site_name}",
         "description": "Statistik tempahan pelayan dan data latensi komuniti untuk {site_name} — trend penggunaan, pecahan lokasi, dan keputusan ping.",
         "heading": "Statistik",
         "tab_reservations": "Tempahan",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Pelayan Terbaik Paling Biasa"
     },
     "maps": {
-        "title": "Peta - {site_name}",
+        "title": "Muat Turun Peta TF2 — {site_name}",
         "description": "Muat turun peta Team Fortress 2 yang digunakan pada pelayan {site_name}.",
         "heading": "Peta",
         "intro": "Muat turun peta yang digunakan pada pelayan kami.",
         "no_maps": "Tiada peta tersedia."
     },
     "bans": {
-        "title": "Larangan - {site_name}",
+        "title": "Larangan — {site_name}",
         "description": "Senarai pemain yang dilarang di {site_name}. Penyalahgunaan perkhidmatan tempahan pelayan TF2 mengakibatkan larangan kekal.",
         "heading": "Larangan",
         "col_player": "Pemain",
@@ -370,7 +371,7 @@
         "no_bans": "Tiada larangan untuk ditunjukkan."
     },
     "feedback": {
-        "title": "Maklum Balas - {site_name}",
+        "title": "Maklum Balas — {site_name}",
         "description": "Laporkan masalah atau cadangkan penambahbaikan untuk {site_name}.",
         "heading": "Maklum Balas",
         "intro": "Mengalami lag, konfigurasi rosak atau pelayan yang tidak bermula? Ada idea untuk penambahbaikan? Beritahu kami di sini.",

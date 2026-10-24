@@ -12,6 +12,7 @@
         "use_light_mode": "Dùng chế độ sáng"
     },
     "footer": {
+        "language": "Ngôn ngữ",
         "about": "Giới thiệu",
         "stats": "Thống kê",
         "feedback": "Góp ý",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Đặt chỗ máy chủ TF2 — {site_name}",
         "description": "Đặt chỗ máy chủ Team Fortress 2 riêng tư cho thi đấu. Cấu hình RGL và ETF2L được tải sẵn, {count} địa điểm trên toàn thế giới.",
-        "heading": "Đặt chỗ máy chủ",
+        "heading": "Đặt chỗ máy chủ TF2",
         "choose_locations": "Chọn từ {count} địa điểm",
         "beta_mode": "Chế độ Beta",
         "beta_notice": "Hiện chỉ dành cho người được mời. Tham gia Discord để được cấp quyền truy cập.",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "Tự động tải lên demo SourceTV"
     },
     "status": {
-        "title": "Đặt chỗ #{number} - {site_name}",
+        "title": "Đặt chỗ #{number} — {site_name}",
         "heading": "Đặt chỗ #{number}",
         "pending": "chờ xử lý",
         "provisioning": "đang cung cấp",
@@ -206,7 +207,7 @@
         "progress_restarting": "Đang khởi động lại máy chủ TF2..."
     },
     "about": {
-        "title": "Giới thiệu - {site_name}",
+        "title": "Giới thiệu & lệnh đặt chỗ — {site_name}",
         "description": "Tìm hiểu về {site_name} — cách đặt chỗ hoạt động, lệnh trong game, cấu hình máy chủ và chính sách cấm.",
         "heading": "Giới thiệu",
         "what_is_title": "{site_name} là gì?",
@@ -277,7 +278,7 @@
         "fail": "Không đạt"
     },
     "my_reservations": {
-        "title": "Đặt chỗ của tôi - {site_name}",
+        "title": "Đặt chỗ của tôi — {site_name}",
         "heading": "Đặt chỗ của tôi",
         "new_reservation": "Đặt chỗ mới",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Đặt chỗ máy chủ"
     },
     "ping": {
-        "title": "Kiểm tra Ping - {site_name}",
+        "title": "Kiểm tra Ping máy chủ TF2 — {site_name}",
         "description": "Kiểm tra độ trễ từ bạn đến tất cả địa điểm máy chủ {site_name}. Tìm máy chủ TF2 có ping thấp nhất gần bạn.",
         "heading": "Kiểm tra Ping",
         "retest": "Kiểm tra lại",
@@ -316,7 +317,7 @@
         "results_note": "Kết quả phụ thuộc vào điều kiện mạng của bạn và có thể thay đổi giữa các lần kiểm tra."
     },
     "stats": {
-        "title": "Thống kê - {site_name}",
+        "title": "Thống kê — {site_name}",
         "description": "Thống kê đặt chỗ máy chủ và dữ liệu độ trễ cộng đồng cho {site_name} — xu hướng sử dụng, phân tích theo địa điểm và kết quả ping.",
         "heading": "Thống kê",
         "tab_reservations": "Đặt chỗ",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Máy chủ tốt nhất phổ biến nhất"
     },
     "maps": {
-        "title": "Bản đồ - {site_name}",
+        "title": "Tải bản đồ TF2 — {site_name}",
         "description": "Tải xuống các bản đồ Team Fortress 2 được sử dụng trên máy chủ {site_name}.",
         "heading": "Bản đồ",
         "intro": "Tải xuống các bản đồ được sử dụng trên máy chủ của chúng tôi.",
         "no_maps": "Không có bản đồ nào."
     },
     "bans": {
-        "title": "Cấm - {site_name}",
+        "title": "Cấm — {site_name}",
         "description": "Danh sách người chơi bị cấm trên {site_name}. Lạm dụng dịch vụ đặt chỗ máy chủ TF2 dẫn đến cấm vĩnh viễn.",
         "heading": "Cấm",
         "col_player": "Người chơi",
@@ -370,7 +371,7 @@
         "no_bans": "Không có lệnh cấm nào."
     },
     "feedback": {
-        "title": "Góp ý - {site_name}",
+        "title": "Góp ý — {site_name}",
         "description": "Báo cáo sự cố hoặc đề xuất cải tiến cho {site_name}.",
         "heading": "Góp ý",
         "intro": "Bạn gặp lag, cấu hình bị lỗi hoặc máy chủ không khởi động? Bạn có ý tưởng để cải thiện? Hãy cho chúng tôi biết tại đây.",

@@ -12,6 +12,7 @@
         "use_light_mode": "Use light mode"
     },
     "footer": {
+        "language": "Language",
         "about": "About",
         "stats": "Stats",
         "feedback": "Feedback",
@@ -22,7 +23,7 @@
     "home": {
         "title": "Reserve a TF2 Server — {site_name}",
         "description": "Reserve a private Team Fortress 2 server for competitive play. Pre-loaded RGL and ETF2L configs, {count} locations worldwide.",
-        "heading": "Reserve a server",
+        "heading": "Reserve a TF2 server",
         "choose_locations": "Choose from {count} locations",
         "beta_mode": "Beta Mode",
         "beta_notice": "Currently invite-only. Join our Discord for access.",
@@ -78,7 +79,7 @@
         "network_error": "Network error — check your connection and try again."
     },
     "status": {
-        "title": "Reservation #{number} - {site_name}",
+        "title": "Reservation #{number} — {site_name}",
         "heading": "Reservation #{number}",
         "admin_viewing": "Viewing as admin — owned by {owner}",
         "pending": "pending",
@@ -206,7 +207,7 @@
         "progress_restarting": "Restarting TF2 server..."
     },
     "about": {
-        "title": "About - {site_name}",
+        "title": "About & Reservation Commands — {site_name}",
         "description": "Learn about {site_name} — how reservations work, in-game commands, server configs, and ban policies.",
         "heading": "About",
         "what_is_title": "What is {site_name}?",
@@ -277,7 +278,7 @@
         "fail": "Fail"
     },
     "my_reservations": {
-        "title": "My Reservations - {site_name}",
+        "title": "My Reservations — {site_name}",
         "heading": "My Reservations",
         "new_reservation": "New Reservation",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "Reserve a Server"
     },
     "ping": {
-        "title": "Ping Test - {site_name}",
+        "title": "TF2 Server Ping Test — {site_name}",
         "description": "Test your latency to all {site_name} server locations. Find the lowest-ping TF2 server near you.",
         "heading": "Ping Test",
         "retest": "Re-test",
@@ -316,7 +317,7 @@
         "results_note": "Results depend on your network conditions and may vary between tests."
     },
     "stats": {
-        "title": "Stats - {site_name}",
+        "title": "Stats — {site_name}",
         "description": "Server reservation statistics and community latency data for {site_name} — usage trends, location breakdowns, and ping results.",
         "heading": "Statistics",
         "tab_reservations": "Reservations",
@@ -354,14 +355,14 @@
         "col_most_common_best": "Most Common Best Server"
     },
     "maps": {
-        "title": "Maps - {site_name}",
+        "title": "TF2 Map Downloads — {site_name}",
         "description": "Download the Team Fortress 2 maps used on {site_name} servers.",
         "heading": "Maps",
         "intro": "Download the maps used on our servers.",
         "no_maps": "No maps available."
     },
     "bans": {
-        "title": "Bans - {site_name}",
+        "title": "Bans — {site_name}",
         "description": "List of banned players on {site_name}. Abuse of the TF2 server reservation service results in a permanent ban.",
         "heading": "Bans",
         "col_player": "Player",
@@ -370,7 +371,7 @@
         "no_bans": "No bans to show."
     },
     "feedback": {
-        "title": "Feedback - {site_name}",
+        "title": "Feedback — {site_name}",
         "description": "Report a problem or suggest an improvement to {site_name}.",
         "heading": "Feedback",
         "intro": "Had lag, a broken config or a server that didn't start? Have an idea for something better? Tell us here.",

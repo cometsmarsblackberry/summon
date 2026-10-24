@@ -12,6 +12,7 @@
         "use_light_mode": "ライトモードを使用"
     },
     "footer": {
+        "language": "言語",
         "about": "概要",
         "stats": "統計",
         "feedback": "フィードバック",
@@ -22,7 +23,7 @@
     "home": {
         "title": "TF2サーバー予約 — {site_name}",
         "description": "競技プレイのためのプライベートTeam Fortress 2サーバーを予約しましょう。RGLおよびETF2Lの設定を事前ロード、世界{count}か所のロケーション。",
-        "heading": "サーバーを予約する",
+        "heading": "TF2サーバーを予約する",
         "choose_locations": "{count}か所のロケーションから選択",
         "beta_mode": "ベータモード",
         "beta_notice": "現在招待制です。アクセスするにはDiscordに参加してください。",
@@ -78,7 +79,7 @@
         "demos_tf_hint": "SourceTVデモを自動的にアップロード"
     },
     "status": {
-        "title": "予約 #{number} - {site_name}",
+        "title": "予約 #{number} — {site_name}",
         "heading": "予約 #{number}",
         "pending": "保留中",
         "provisioning": "プロビジョニング中",
@@ -206,7 +207,7 @@
         "progress_restarting": "TF2 サーバーを再起動しています..."
     },
     "about": {
-        "title": "概要 - {site_name}",
+        "title": "概要と予約コマンド — {site_name}",
         "description": "{site_name}について — 予約の仕組み、インゲームコマンド、サーバー設定、BANポリシー。",
         "heading": "概要",
         "what_is_title": "{site_name}とは？",
@@ -277,7 +278,7 @@
         "fail": "不合格"
     },
     "my_reservations": {
-        "title": "マイ予約 - {site_name}",
+        "title": "マイ予約 — {site_name}",
         "heading": "マイ予約",
         "new_reservation": "新しい予約",
         "col_number": "#",
@@ -290,7 +291,7 @@
         "reserve_server": "サーバーを予約する"
     },
     "ping": {
-        "title": "Pingテスト - {site_name}",
+        "title": "TF2サーバーPingテスト — {site_name}",
         "description": "{site_name}のすべてのサーバーロケーションまでのレイテンシをテストします。近くで最も低いPingのTF2サーバーを見つけましょう。",
         "heading": "Pingテスト",
         "retest": "再テスト",
@@ -316,7 +317,7 @@
         "results_note": "結果はネットワークの状態によって異なり、テストごとに変わる場合があります。"
     },
     "stats": {
-        "title": "統計 - {site_name}",
+        "title": "統計 — {site_name}",
         "description": "{site_name}のサーバー予約統計とコミュニティレイテンシデータ — 使用傾向、ロケーション別内訳、Ping結果。",
         "heading": "統計",
         "tab_reservations": "予約",
@@ -354,14 +355,14 @@
         "col_most_common_best": "最も一般的な最良サーバー"
     },
     "maps": {
-        "title": "マップ - {site_name}",
+        "title": "TF2マップのダウンロード — {site_name}",
         "description": "{site_name}のサーバーで使用されているTeam Fortress 2マップをダウンロードしてください。",
         "heading": "マップ",
         "intro": "サーバーで使用されているマップをダウンロードしてください。",
         "no_maps": "マップはありません。"
     },
     "bans": {
-        "title": "BAN - {site_name}",
+        "title": "BAN — {site_name}",
         "description": "{site_name}でBANされたプレイヤーのリスト。TF2サーバー予約サービスの乱用は永久BANにつながります。",
         "heading": "BAN",
         "col_player": "プレイヤー",
@@ -370,7 +371,7 @@
         "no_bans": "表示するBANはありません。"
     },
     "feedback": {
-        "title": "フィードバック - {site_name}",
+        "title": "フィードバック — {site_name}",
         "description": "{site_name}の問題を報告したり、改善案を提案したりできます。",
         "heading": "フィードバック",
         "intro": "ラグ、設定の不具合、サーバーが起動しないなどの問題がありましたか？改善のアイデアはありますか？こちらからお知らせください。",
