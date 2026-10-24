@@ -21,6 +21,28 @@ class AsiaFortressConfigTests(unittest.TestCase):
         self.assertEqual(selectable, ["af_HL_koth", "af_HL_koth_bo5", "afc_6s_5cp_match_pro"])
 
 
+class MgeConfigTests(unittest.TestCase):
+    def test_configs_are_classified_by_format(self):
+        self.assertEqual(classify_config("1v1mge"), ("MGE", "1v1"))
+        self.assertEqual(classify_config("2v2mge"), ("MGE", "2v2"))
+
+    def test_configs_are_selectable(self):
+        # The entries are whole config names, so they must not be hidden as
+        # league base configs the way "etf2l" is.
+        selectable = filter_user_selectable(["1v1mge", "2v2mge", "etf2l", "mge"])
+
+        self.assertEqual(selectable, ["1v1mge", "2v2mge"])
+
+    def test_league_is_sorted_with_the_other_leagues(self):
+        grouped = group_for_ui(["ultitrio_koth", "2v2mge", "cltf2_4s_koth", "1v1mge", "etf2l_6v6_5cp"])
+
+        self.assertEqual(list(grouped), ["ETF2L", "CLTF2", "MGE", "Ultitrio"])
+        self.assertEqual(grouped["MGE"], {
+            "1v1": [{"cfg_file": "1v1mge", "name": "1v1mge"}],
+            "2v2": [{"cfg_file": "2v2mge", "name": "2v2mge"}],
+        })
+
+
 class GroupForUiTests(unittest.TestCase):
     def test_popular_leagues_are_listed_first(self):
         grouped = group_for_ui([

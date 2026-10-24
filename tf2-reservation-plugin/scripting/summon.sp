@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.6"
+#define PLUGIN_VERSION "1.6.7"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1623,7 +1623,8 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
 // Allowed config prefixes -- any cfg file starting with one of these is valid.
 // Each prefix is paired with the league whose menu lists its configs. The names
 // match the web panel's. AsiaFortress names its 6s configs afc_* and its
-// Highlander configs af_*, so both share one league.
+// Highlander configs af_*, so both share one league. The MGE configs have no
+// league prefix, so their entries are whole config names.
 static const char g_sConfigPrefixes[][][] = {
     { "rgl_", "RGL" },
     { "etf2l_", "ETF2L" },
@@ -1633,7 +1634,9 @@ static const char g_sConfigPrefixes[][][] = {
     { "ozfortress_", "ozfortress" },
     { "cltf2_", "CLTF2" },
     { "afc_", "AsiaFortress" },
-    { "af_", "AsiaFortress" }
+    { "af_", "AsiaFortress" },
+    { "1v1mge", "MGE" },
+    { "2v2mge", "MGE" }
 };
 
 // Main leagues are listed first in the config menu; the rest follow

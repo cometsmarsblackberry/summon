@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-ALLOWED_PREFIXES = ("rgl_", "etf2l_", "fbtf_", "tfarena_", "ultitrio_", "ozfortress_", "cltf2_", "afc_", "af_")
+ALLOWED_PREFIXES = (
+    "rgl_", "etf2l_", "fbtf_", "tfarena_", "ultitrio_", "ozfortress_", "cltf2_", "afc_", "af_",
+    "1v1mge", "2v2mge",
+)
 _SKIP_SUFFIXES = ("_base", "_custom", "_common")
 
 _FORMAT_MAP: list[tuple[str, str, str]] = [
@@ -38,13 +41,18 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
     ("afc_", "AsiaFortress", "Other"),
     ("af_HL_", "AsiaFortress", "Highlander"),
     ("af_", "AsiaFortress", "Other"),
+    # The MGE configs are named after their format, without a league prefix.
+    ("1v1mge", "MGE", "1v1"),
+    ("2v2mge", "MGE", "2v2"),
     # Fallback single-prefix entries for configs like etf2l_ultiduo
     ("etf2l_", "ETF2L", "Other"),
     ("fbtf_", "FBTF", "Other"),
     ("rgl_", "RGL", "Other"),
 ]
 
-_BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP}
+# Stems like "etf2l" and "rgl" are league base configs. Entries without a
+# trailing "_" are whole config names, not prefixes.
+_BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP if prefix.endswith("_")}
 
 # Main leagues are listed first in the UI; the rest follow alphabetically.
 # The in-game config menu mirrors this order in
