@@ -89,6 +89,7 @@
         "waiting_provision": "Naghihintay na magsimulang mag-provision...",
         "creating_instance": "Nililikha ang server instance...",
         "complete_pct": "{pct}% kumpleto",
+        "slow_start": "Paumanhin, mas matagal ito kaysa karaniwan. Nagsisimula pa rin ang server mo, kaya hindi na kailangang subukan muli.",
         "server_failed": "Nabigo ang server na magsimula",
         "provision_error": "May naganap na error sa panahon ng provisioning. Paksubukan muli.",
         "try_again": "Subukan Muli",

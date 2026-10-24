@@ -90,6 +90,7 @@
         "waiting_provision": "Waiting to start provisioning...",
         "creating_instance": "Creating server instance...",
         "complete_pct": "{pct}% complete",
+        "slow_start": "Sorry, this is taking longer than usual. Your server is still starting, so there's no need to try again.",
         "server_failed": "Server failed to start",
         "provision_error": "An error occurred during provisioning. Please try again.",
         "try_again": "Try Again",

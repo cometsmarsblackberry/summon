@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -38,6 +39,82 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
             status_code=404,
         )
 
+    async def render_status_page(self, reservation):
+        request = SimpleNamespace()
+        user = SimpleNamespace(id=reservation.user_id, is_admin=False)
+        location_result = SimpleNamespace(
+            scalar_one_or_none=lambda: SimpleNamespace(city="Helsinki"),
+        )
+        map_result = SimpleNamespace(
+            scalar_one_or_none=lambda: None,
+        )
+        db = SimpleNamespace(
+            execute=AsyncMock(side_effect=[location_result, map_result]),
+        )
+
+        with (
+            patch.object(pages, "get_current_user", AsyncMock(return_value=user)),
+            patch.object(
+                pages,
+                "get_reservation_by_id",
+                AsyncMock(return_value=reservation),
+            ),
+            patch(
+                "app.services.settings.get_reservation_settings",
+                AsyncMock(return_value={
+                    "max_duration_hours": 6,
+                    "auto_end_minutes": 10,
+                }),
+            ),
+            patch.object(
+                pages.templates,
+                "TemplateResponse",
+                return_value="reservation page",
+            ) as render,
+        ):
+            await pages.reservation_status_page(
+                request=request,
+                reservation_id=42,
+                db=db,
+            )
+
+        return render.call_args.args[2]
+
+    async def test_status_page_counts_first_start_wait_on_server(self):
+        # SQLite gives back naive UTC datetimes.
+        starts_at = (
+            datetime.now(timezone.utc) - timedelta(minutes=8)
+        ).replace(tzinfo=None)
+        reservation = SimpleNamespace(
+            user_id=7,
+            location="hel",
+            first_map="cp_badlands",
+            current_map=None,
+            starts_at=starts_at,
+            started_at=None,
+        )
+
+        context = await self.render_status_page(reservation)
+
+        self.assertGreaterEqual(context["start_wait_seconds"], 8 * 60)
+        self.assertLess(context["start_wait_seconds"], 9 * 60)
+
+    async def test_status_page_skips_start_wait_after_first_start(self):
+        # A restart puts an active reservation back into provisioning; its
+        # wait must not count from when the reservation was made.
+        reservation = SimpleNamespace(
+            user_id=7,
+            location="hel",
+            first_map="cp_badlands",
+            current_map=None,
+            starts_at=datetime(2026, 10, 24, 18, 0),
+            started_at=datetime(2026, 10, 24, 18, 4),
+        )
+
+        context = await self.render_status_page(reservation)
+
+        self.assertIsNone(context["start_wait_seconds"])
+
     async def test_status_page_uses_configured_auto_end_minutes(self):
         request = SimpleNamespace()
         user = SimpleNamespace(id=7, is_admin=False)
@@ -46,6 +123,8 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
             location="hel",
             first_map="cp_badlands",
             current_map=None,
+            starts_at=datetime(2026, 10, 24, 18, 0),
+            started_at=datetime(2026, 10, 24, 18, 4),
         )
         location_result = SimpleNamespace(
             scalar_one_or_none=lambda: SimpleNamespace(city="Helsinki"),
@@ -105,6 +184,18 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
                 "minutes=reservation_settings.auto_end_minutes)"
             ),
         )
+
+    def test_slow_start_notice_follows_server_wait(self):
+        template = (
+            Path(__file__).resolve().parents[1] / "templates" / "status.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "startWaitSeconds: {{ start_wait_seconds | tojson }}",
+            template,
+        )
+        self.assertIn('x-show="startIsSlow"', template)
+        self.assertIn("_('status.slow_start')", template)
 
     def test_provisioning_layout_shows_selected_config(self):
         template = (

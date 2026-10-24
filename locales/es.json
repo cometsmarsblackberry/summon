@@ -89,6 +89,7 @@
         "waiting_provision": "Esperando para iniciar el aprovisionamiento...",
         "creating_instance": "Creando instancia del servidor...",
         "complete_pct": "{pct}% completado",
+        "slow_start": "Lo sentimos, esto está tardando más de lo habitual. Tu servidor sigue iniciándose, así que no hace falta intentarlo de nuevo.",
         "server_failed": "El servidor no pudo iniciarse",
         "provision_error": "Se produjo un error durante el aprovisionamiento. Por favor inténtalo de nuevo.",
         "try_again": "Intentar de nuevo",

@@ -1,5 +1,6 @@
 """Page rendering endpoints."""
 
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -285,6 +286,19 @@ async def reservation_status_page(
     from app.services.settings import get_reservation_settings
     reservation_settings = await get_reservation_settings(db)
 
+    # How long the first start has been running, counted on the server so a
+    # reload or a wrong client clock does not change when the page says it is
+    # slow. A restart puts an active reservation back into provisioning, so
+    # only reservations that never started count.
+    start_wait_seconds = None
+    if reservation.started_at is None:
+        starts_at = reservation.starts_at
+        if starts_at.tzinfo is None:
+            starts_at = starts_at.replace(tzinfo=timezone.utc)
+        start_wait_seconds = max(
+            0, int((datetime.now(timezone.utc) - starts_at).total_seconds())
+        )
+
     return templates.TemplateResponse(
         request,
         "status.html",
@@ -296,6 +310,7 @@ async def reservation_status_page(
             "location_display": location_display,
             "map_download_url": map_download_url,
             "reservation_settings": reservation_settings,
+            "start_wait_seconds": start_wait_seconds,
         }
     )
 

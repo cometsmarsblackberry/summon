@@ -28,6 +28,10 @@
         error: null,
         bootProgress: null,
         displayProgress: 5,
+        // Seconds the first start had been running when the server rendered
+        // this page, or null once the server has started.
+        startWaitSeconds: {{ start_wait_seconds | tojson }},
+        pageLoadedAt: performance.now(),
         pollInterval: null,
         players: [],
         playerCount: 0,
@@ -100,8 +104,9 @@
 
             if (this.status === 'pending' || this.status === 'provisioning') {
                 this.connectSSE();
-                // Also poll as fallback every 3 seconds
-                this.pollInterval = setInterval(() => this.fetchStatus(), 3000);
+                // Also poll as fallback every 3 seconds; the tick re-checks
+                // whether the start is slow.
+                this.pollInterval = setInterval(() => { this.fetchStatus(); this._tick++; }, 3000);
             }
 
             if (this.status === 'active') {
@@ -195,6 +200,15 @@
                 clearInterval(this.pollInterval);
                 this.pollInterval = null;
             }
+        },
+
+        // Show a slow-start notice after the runtime's display threshold.
+        get startIsSlow() {
+            void this._tick;
+            if (this.startWaitSeconds === null) return false;
+            if (this.status !== 'pending' && this.status !== 'provisioning') return false;
+            const waited = this.startWaitSeconds + (performance.now() - this.pageLoadedAt) / 1000;
+            return waited >= (this.runtimeKind === 'instant' ? 2 : 7) * 60;
         },
 
         resetBootProgress() {
@@ -978,6 +992,10 @@
             </p>
             <p x-show="bootProgress && displayProgress" class="text-xs text-slate-400 mt-1"
                 x-text="{{ _('status.complete_pct') | tojson | forceescape }}.replace('{pct}', displayProgress)"></p>
+            <p x-show="startIsSlow" x-cloak
+                class="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {{ _('status.slow_start') }}
+            </p>
         </div>
 
         <!-- Failed state -->

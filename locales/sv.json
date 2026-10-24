@@ -89,6 +89,7 @@
         "waiting_provision": "Väntar på att börja etablera...",
         "creating_instance": "Skapar serverinstans...",
         "complete_pct": "{pct}% klart",
+        "slow_start": "Tyvärr tar det här längre tid än vanligt. Din server håller fortfarande på att starta, så du behöver inte försöka igen.",
         "server_failed": "Servern misslyckades med att starta",
         "provision_error": "Ett fel inträffade under etablering. Försök igen.",
         "try_again": "Försök igen",

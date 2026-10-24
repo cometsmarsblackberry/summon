@@ -89,6 +89,7 @@
         "waiting_provision": "Menunggu untuk mula penyediaan...",
         "creating_instance": "Mencipta instans pelayan...",
         "complete_pct": "{pct}% selesai",
+        "slow_start": "Maaf, ini mengambil masa lebih lama daripada biasa. Pelayan anda masih sedang dimulakan, jadi tidak perlu cuba lagi.",
         "server_failed": "Pelayan gagal bermula",
         "provision_error": "Ralat berlaku semasa penyediaan. Sila cuba lagi.",
         "try_again": "Cuba lagi",

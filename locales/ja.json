@@ -89,6 +89,7 @@
         "waiting_provision": "プロビジョニング開始待ち...",
         "creating_instance": "サーバーインスタンス作成中...",
         "complete_pct": "{pct}%完了",
+        "slow_start": "申し訳ありません。通常より時間がかかっています。サーバーは引き続き起動中のため、再試行する必要はありません。",
         "server_failed": "サーバーの起動に失敗しました",
         "provision_error": "プロビジョニング中にエラーが発生しました。もう一度お試しください。",
         "try_again": "再試行",

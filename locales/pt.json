@@ -89,6 +89,7 @@
         "waiting_provision": "Aguardando início do provisionamento...",
         "creating_instance": "Criando instância do servidor...",
         "complete_pct": "{pct}% completo",
+        "slow_start": "Desculpe, isto está demorando mais do que o normal. Seu servidor ainda está iniciando, então não é preciso tentar novamente.",
         "server_failed": "O servidor falhou ao iniciar",
         "provision_error": "Ocorreu um erro durante o provisionamento. Por favor tente novamente.",
         "try_again": "Tentar novamente",

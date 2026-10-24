@@ -89,6 +89,7 @@
         "waiting_provision": "Đang chờ bắt đầu cung cấp...",
         "creating_instance": "Đang tạo phiên bản máy chủ...",
         "complete_pct": "Hoàn thành {pct}%",
+        "slow_start": "Xin lỗi, quá trình này đang mất nhiều thời gian hơn bình thường. Máy chủ của bạn vẫn đang khởi động, nên không cần thử lại.",
         "server_failed": "Máy chủ không khởi động được",
         "provision_error": "Đã xảy ra lỗi trong quá trình cung cấp. Vui lòng thử lại.",
         "try_again": "Thử lại",

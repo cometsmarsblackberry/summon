@@ -89,6 +89,7 @@
         "waiting_provision": "Odotetaan valmistelun aloittamista...",
         "creating_instance": "Luodaan palvelininstanssia...",
         "complete_pct": "{pct}% valmis",
+        "slow_start": "Pahoittelut, tämä kestää tavallista kauemmin. Palvelimesi käynnistyy yhä, joten sinun ei tarvitse yrittää uudelleen.",
         "server_failed": "Palvelimen käynnistys epäonnistui",
         "provision_error": "Valmistelussa tapahtui virhe. Yritä uudelleen.",
         "try_again": "Yritä uudelleen",
