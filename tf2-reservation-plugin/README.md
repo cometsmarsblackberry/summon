@@ -98,6 +98,12 @@ as they are, so a live match does not restart its deathmatch. Loading
 back the map's objectives, resupply cabinets, and spawn rooms. An empty
 server skips the restart, because the map is rebuilt when players join.
 
+The MGE configs disable SOAP the same way, but without the restart.
+`soap_tf2dm` refuses to load on MGE maps, so it has changed nothing there,
+and MGEMod respawns players itself. Left enabled, `soap_tournament` would
+keep loading `soap_tf2dm` again, and once both teams ready up it would unload
+SourceMod's vote and chat trigger plugins.
+
 Enabling SOAP does not restart the game, because a restart in tournament mode
 ends the ready-up period. Loaded mid-round, `soap_tf2dm` would open the doors
 and remove the resupply cabinets and spawn rooms only at the next round start.

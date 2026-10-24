@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.7"
+#define PLUGIN_VERSION "1.6.8"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1850,6 +1850,17 @@ bool DisableSOAPPlugins()
     return moved;
 }
 
+bool IsMGEConfig(const char[] cfgFile)
+{
+    for (int i = 0; i < sizeof(g_sConfigPrefixes); i++)
+    {
+        if (StrEqual(g_sConfigPrefixes[i][1], "MGE") &&
+            strncmp(cfgFile, g_sConfigPrefixes[i][0], strlen(g_sConfigPrefixes[i][0]), false) == 0)
+            return true;
+    }
+    return false;
+}
+
 void ExecuteConfig(const char[] cfgFile)
 {
     bool restartGame = false;
@@ -1879,9 +1890,22 @@ void ExecuteConfig(const char[] cfgFile)
         {
             DisableRGLPlugins();
         }
-        // No restart here: in tournament mode it would end the ready-up
-        // period. EnableSOAPPlugins applies SOAP's map changes instead.
-        EnableSOAPPlugins();
+        if (IsMGEConfig(cfgFile))
+        {
+            // soap_tf2dm refuses to load on MGE maps, so SOAP would only
+            // leave soap_tournament loading it again on every tournament
+            // restart. Once both teams ready up, soap_tournament also
+            // unloads SourceMod's vote and chat trigger plugins. No restart:
+            // on an MGE map soap_tf2dm changed nothing, and in tournament
+            // mode a restart would end the ready-up period.
+            DisableSOAPPlugins();
+        }
+        else
+        {
+            // No restart here: in tournament mode it would end the ready-up
+            // period. EnableSOAPPlugins applies SOAP's map changes instead.
+            EnableSOAPPlugins();
+        }
     }
 
     ServerCommand("exec %s", cfgFile);
