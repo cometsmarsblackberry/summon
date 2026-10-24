@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "マップ - {site_name}",
-        "description": "{site_name}のサーバーで使用されているカスタムおよび更新されたTeam Fortress 2マップをダウンロードしてください。",
-        "heading": "カスタムマップ",
-        "intro": "サーバーで使用されているマップをダウンロードしてください。TF2に同梱されていないカスタムまたは更新バージョンです。",
-        "no_maps": "カスタムマップはありません。"
+        "description": "{site_name}のサーバーで使用されているTeam Fortress 2マップをダウンロードしてください。",
+        "heading": "マップ",
+        "intro": "サーバーで使用されているマップをダウンロードしてください。",
+        "no_maps": "マップはありません。"
     },
     "bans": {
         "title": "BAN - {site_name}",

@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Mapas - {site_name}",
-        "description": "Baixe mapas personalizados e atualizados de Team Fortress 2 usados nos servidores de {site_name}.",
-        "heading": "Mapas personalizados",
-        "intro": "Baixe os mapas usados em nossos servidores. São versões personalizadas ou atualizadas que não vêm com o TF2.",
-        "no_maps": "Não há mapas personalizados disponíveis."
+        "description": "Baixe os mapas de Team Fortress 2 usados nos servidores de {site_name}.",
+        "heading": "Mapas",
+        "intro": "Baixe os mapas usados em nossos servidores.",
+        "no_maps": "Não há mapas disponíveis."
     },
     "bans": {
         "title": "Bans - {site_name}",

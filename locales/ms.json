@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Peta - {site_name}",
-        "description": "Muat turun peta Team Fortress 2 tersuai dan dikemaskini yang digunakan pada pelayan {site_name}.",
-        "heading": "Peta Tersuai",
-        "intro": "Muat turun peta yang digunakan pada pelayan kami. Ini adalah versi tersuai atau dikemaskini yang tidak disertakan dengan TF2.",
-        "no_maps": "Tiada peta tersuai tersedia."
+        "description": "Muat turun peta Team Fortress 2 yang digunakan pada pelayan {site_name}.",
+        "heading": "Peta",
+        "intro": "Muat turun peta yang digunakan pada pelayan kami.",
+        "no_maps": "Tiada peta tersedia."
     },
     "bans": {
         "title": "Larangan - {site_name}",

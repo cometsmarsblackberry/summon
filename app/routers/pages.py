@@ -380,7 +380,7 @@ async def maps_page(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Public page listing all custom maps with download links."""
+    """Public page listing the enabled maps with FastDL download links."""
     user = await get_current_user(request, db)
 
     from app.models.instance import GameMap
@@ -392,7 +392,7 @@ async def maps_page(
         .where(GameMap.is_default == False)
         .order_by(func.lower(GameMap.name), GameMap.name)
     )
-    custom_maps = result.scalars().all()
+    listed_maps = result.scalars().all()
 
     fastdl = await get_fastdl_url(db)
     if not fastdl.endswith("/"):
@@ -402,7 +402,7 @@ async def maps_page(
 
     maps_data = [
         {"name": m.name, "download_url": f"{fastdl}maps/{m.name}.bsp"}
-        for m in custom_maps
+        for m in listed_maps
     ]
 
     return templates.TemplateResponse(

@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Kartat - {site_name}",
-        "description": "Lataa mukautettuja ja päivitettyjä Team Fortress 2 -karttoja, joita käytetään {site_name}-palvelimilla.",
-        "heading": "Mukautetut kartat",
-        "intro": "Lataa palvelimillamme käytettävät kartat. Nämä ovat mukautettuja tai päivitettyjä versioita, jotka eivät tule TF2:n mukana.",
-        "no_maps": "Ei mukautettuja karttoja saatavilla."
+        "description": "Lataa {site_name}-palvelimilla käytettävät Team Fortress 2 -kartat.",
+        "heading": "Kartat",
+        "intro": "Lataa palvelimillamme käytettävät kartat.",
+        "no_maps": "Ei karttoja saatavilla."
     },
     "bans": {
         "title": "Kiellot - {site_name}",

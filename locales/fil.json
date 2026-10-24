@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Mga Mapa - {site_name}",
-        "description": "I-download ang mga custom at na-update na Team Fortress 2 na mapa na ginagamit sa mga server ng {site_name}.",
-        "heading": "Mga Custom na Mapa",
-        "intro": "I-download ang mga mapang ginagamit sa aming mga server. Ito ay mga custom o na-update na bersyon na hindi kasama ng TF2.",
-        "no_maps": "Walang available na custom na mapa."
+        "description": "I-download ang mga Team Fortress 2 na mapa na ginagamit sa mga server ng {site_name}.",
+        "heading": "Mga Mapa",
+        "intro": "I-download ang mga mapang ginagamit sa aming mga server.",
+        "no_maps": "Walang available na mapa."
     },
     "bans": {
         "title": "Mga Ban - {site_name}",

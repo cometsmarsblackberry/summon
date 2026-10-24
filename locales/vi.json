@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Bản đồ - {site_name}",
-        "description": "Tải xuống các bản đồ Team Fortress 2 tùy chỉnh và cập nhật được sử dụng trên máy chủ {site_name}.",
-        "heading": "Bản đồ tùy chỉnh",
-        "intro": "Tải xuống các bản đồ được sử dụng trên máy chủ của chúng tôi. Đây là các phiên bản tùy chỉnh hoặc cập nhật không đi kèm với TF2.",
-        "no_maps": "Không có bản đồ tùy chỉnh nào."
+        "description": "Tải xuống các bản đồ Team Fortress 2 được sử dụng trên máy chủ {site_name}.",
+        "heading": "Bản đồ",
+        "intro": "Tải xuống các bản đồ được sử dụng trên máy chủ của chúng tôi.",
+        "no_maps": "Không có bản đồ nào."
     },
     "bans": {
         "title": "Cấm - {site_name}",

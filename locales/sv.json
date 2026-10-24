@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Kartor - {site_name}",
-        "description": "Ladda ned anpassade och uppdaterade Team Fortress 2-kartor som används på {site_name}-servrar.",
-        "heading": "Anpassade kartor",
-        "intro": "Ladda ned kartorna som används på våra servrar. Dessa är anpassade eller uppdaterade versioner som inte ingår i TF2.",
-        "no_maps": "Inga anpassade kartor tillgängliga."
+        "description": "Ladda ned Team Fortress 2-kartorna som används på {site_name}-servrar.",
+        "heading": "Kartor",
+        "intro": "Ladda ned kartorna som används på våra servrar.",
+        "no_maps": "Inga kartor tillgängliga."
     },
     "bans": {
         "title": "Banningar - {site_name}",

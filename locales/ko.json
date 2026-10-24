@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "맵 - {site_name}",
-        "description": "{site_name} 서버에서 사용되는 커스텀 및 업데이트된 Team Fortress 2 맵을 다운로드하세요.",
-        "heading": "커스텀 맵",
-        "intro": "서버에서 사용하는 맵을 다운로드하세요. TF2에 기본 탑재되지 않은 커스텀 또는 업데이트된 버전입니다.",
-        "no_maps": "사용 가능한 커스텀 맵이 없습니다."
+        "description": "{site_name} 서버에서 사용되는 Team Fortress 2 맵을 다운로드하세요.",
+        "heading": "맵",
+        "intro": "서버에서 사용하는 맵을 다운로드하세요.",
+        "no_maps": "사용 가능한 맵이 없습니다."
     },
     "bans": {
         "title": "밴 - {site_name}",

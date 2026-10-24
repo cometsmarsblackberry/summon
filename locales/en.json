@@ -354,10 +354,10 @@
     },
     "maps": {
         "title": "Maps - {site_name}",
-        "description": "Download custom and updated Team Fortress 2 maps used on {site_name} servers.",
-        "heading": "Custom Maps",
-        "intro": "Download the maps used on our servers. These are custom or updated versions that don't ship with TF2.",
-        "no_maps": "No custom maps available."
+        "description": "Download the Team Fortress 2 maps used on {site_name} servers.",
+        "heading": "Maps",
+        "intro": "Download the maps used on our servers.",
+        "no_maps": "No maps available."
     },
     "bans": {
         "title": "Bans - {site_name}",
