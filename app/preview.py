@@ -252,7 +252,6 @@ async def _seed_preview_data(db: AsyncSession) -> User:
             db.add(game_map)
         game_map.display_name = display_name
         game_map.enabled = True
-        game_map.is_default = False
         game_map.in_league_rotation = in_league_rotation
         game_map.display_order = display_order
 

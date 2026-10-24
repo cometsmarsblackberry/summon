@@ -28,14 +28,14 @@ async def get_selectable_maps(db: AsyncSession) -> list[dict]:
 
 
 async def get_map_download_url(map_name: str, db: AsyncSession) -> str | None:
-    """Return the FastDL link for a listed map, or None for bundled and unknown maps.
+    """Return the FastDL link for a listed map, or None for unknown maps.
 
     Maps changed to in game can be missing from the map list, so FastDL
     may not have them.
     """
     result = await db.execute(select(GameMap).where(GameMap.name == map_name))
     game_map = result.scalar_one_or_none()
-    if not game_map or game_map.is_default:
+    if not game_map:
         return None
 
     from app.services.settings import get_fastdl_url

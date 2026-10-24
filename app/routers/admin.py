@@ -69,7 +69,6 @@ async def _get_maps_data(db: AsyncSession) -> list[dict]:
             "name": game_map.name,
             "display_name": game_map.display_name,
             "enabled": game_map.enabled,
-            "is_default": game_map.is_default,
             "in_league_rotation": bool(game_map.in_league_rotation),
             "selection_count": int(selection_count),
             "play_count": int(play_count),

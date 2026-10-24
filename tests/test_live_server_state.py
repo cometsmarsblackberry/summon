@@ -29,7 +29,7 @@ class LiveServerStateTests(unittest.IsolatedAsyncioTestCase):
 
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
-            db.add(GameMap(name="cp_process_final", display_name="Process", is_default=True))
+            db.add(GameMap(name="cp_process_final", display_name="Process"))
             db.add(GameMap(name="koth_product_final", display_name="Product"))
             db.add(Reservation(
                 id=301, reservation_number=301, user_id=USER.id, location="vultr-fra",
@@ -67,9 +67,8 @@ class LiveServerStateTests(unittest.IsolatedAsyncioTestCase):
                     db=db,
                 )
 
-    async def test_download_url_only_for_custom_maps(self):
+    async def test_download_url_only_for_listed_maps(self):
         async with self.sessions() as db:
-            self.assertIsNone(await get_map_download_url("cp_process_final", db))
             self.assertIsNone(await get_map_download_url("ctf_2fort", db))
             self.assertEqual(
                 "https://fastdl.example/tf/maps/koth_product_final.bsp",

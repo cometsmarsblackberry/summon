@@ -88,7 +88,6 @@ async def _create_and_migrate(conn) -> None:
     """Run create_all and all additive/rebuild migrations in one transaction."""
     await conn.run_sync(Base.metadata.create_all)
     # Add columns that create_all won't add to existing tables
-    await _migrate_add_column(conn, "game_maps", "is_default", "BOOLEAN DEFAULT 0")
     await _migrate_add_column(conn, "game_maps", "in_league_rotation", "BOOLEAN DEFAULT 0")
     await _migrate_add_column(conn, "enabled_locations", "region_instance_limit", "INTEGER")
     await _migrate_add_column(conn, "enabled_locations", "subdivision", "VARCHAR(16)")
@@ -135,6 +134,7 @@ async def _create_and_migrate(conn) -> None:
     await _migrate_add_column(
         conn, "instant_hosts", "sdr_only", "BOOLEAN NOT NULL DEFAULT 0"
     )
+    await _migrate_drop_column(conn, "game_maps", "is_default")
     await _migrate_enabled_locations_nullable(conn)
     await _migrate_instant_hosts_public_ipv4_nullable(conn)
     await _migrate_shared_container_image(conn)

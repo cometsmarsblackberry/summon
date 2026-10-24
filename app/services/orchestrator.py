@@ -862,7 +862,7 @@ async def seed_default_maps(db: AsyncSession):
         return  # Maps already exist
 
     default_maps = [
-        GameMap(name="cp_badlands", display_name="cp_badlands", enabled=True, is_default=True, display_order=1),
+        GameMap(name="cp_badlands", display_name="cp_badlands", enabled=True, display_order=1),
     ]
 
     for map_entry in default_maps:

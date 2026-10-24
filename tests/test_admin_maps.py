@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.database import Base
+from app.database import Base, _create_and_migrate
 from app.models.instance import GameMap
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.upload_link import UploadLink  # noqa: F401 - registers relationship
@@ -232,6 +232,45 @@ class AdminMapTests(unittest.IsolatedAsyncioTestCase):
             ],
             [(item["name"], item["in_league_rotation"]) for item in maps],
         )
+
+
+class GameMapMigrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_startup_drops_the_is_default_column(self):
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.addAsyncCleanup(engine.dispose)
+        async with engine.begin() as connection:
+            # Exercise migration of a NOT NULL column without a default.
+            await connection.execute(text(
+                "CREATE TABLE game_maps (id INTEGER NOT NULL, "
+                "name VARCHAR(64) NOT NULL, display_name VARCHAR(64) NOT NULL, "
+                "enabled BOOLEAN NOT NULL, is_default BOOLEAN NOT NULL, "
+                "display_order INTEGER NOT NULL, in_league_rotation BOOLEAN DEFAULT 0, "
+                "PRIMARY KEY (id), UNIQUE (name))"
+            ))
+            await connection.execute(text(
+                "INSERT INTO game_maps "
+                "(id, name, display_name, enabled, is_default, display_order) "
+                "VALUES (1, 'cp_badlands', 'cp_badlands', 1, 1, 1)"
+            ))
+            await _create_and_migrate(connection)
+            # A second startup must not fail on the missing column.
+            await _create_and_migrate(connection)
+
+            columns = {
+                row[1] for row in (
+                    await connection.execute(text("PRAGMA table_info(game_maps)"))
+                ).all()
+            }
+            await connection.execute(text(
+                "INSERT INTO game_maps (name, display_name, enabled, display_order) "
+                "VALUES ('cp_sunshine', 'cp_sunshine', 1, 2)"
+            ))
+            names = (await connection.execute(text(
+                "SELECT name FROM game_maps ORDER BY id"
+            ))).scalars().all()
+
+        self.assertNotIn("is_default", columns)
+        self.assertEqual(["cp_badlands", "cp_sunshine"], names)
 
 
 if __name__ == "__main__":

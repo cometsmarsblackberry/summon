@@ -51,7 +51,7 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
             scalar_one_or_none=lambda: SimpleNamespace(city="Helsinki"),
         )
         map_result = SimpleNamespace(
-            scalar_one_or_none=lambda: SimpleNamespace(is_default=True),
+            scalar_one_or_none=lambda: None,
         )
         db = SimpleNamespace(
             execute=AsyncMock(side_effect=[location_result, map_result]),

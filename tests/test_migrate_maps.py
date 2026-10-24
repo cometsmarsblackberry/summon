@@ -8,7 +8,7 @@ def _create_maps_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE TABLE game_maps ("
         "id INTEGER PRIMARY KEY, name VARCHAR(64) UNIQUE NOT NULL, "
-        "display_name VARCHAR(64) NOT NULL, enabled BOOLEAN, is_default BOOLEAN, "
+        "display_name VARCHAR(64) NOT NULL, enabled BOOLEAN, "
         "in_league_rotation BOOLEAN DEFAULT 0, display_order INTEGER)"
     )
 
@@ -25,8 +25,8 @@ class MigrateMapsTests(unittest.TestCase):
         source = self._connect()
         source.execute(
             "INSERT INTO game_maps "
-            "(name, display_name, enabled, is_default, in_league_rotation, display_order) "
-            "VALUES ('cp_process_f12', 'cp_process_f12', 1, 0, 1, 1)"
+            "(name, display_name, enabled, in_league_rotation, display_order) "
+            "VALUES ('cp_process_f12', 'cp_process_f12', 1, 1, 1)"
         )
         records = _export_maps(source)
 

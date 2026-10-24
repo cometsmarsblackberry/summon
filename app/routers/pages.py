@@ -389,7 +389,6 @@ async def maps_page(
     result = await db.execute(
         select(GameMap)
         .where(GameMap.enabled == True)
-        .where(GameMap.is_default == False)
         .order_by(func.lower(GameMap.name), GameMap.name)
     )
     listed_maps = result.scalars().all()
