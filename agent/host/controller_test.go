@@ -1045,3 +1045,39 @@ func TestPreflightRejectsMissingRootlessNetworkHelper(t *testing.T) {
 		t.Fatalf("missing helper health error was not actionable: %q", controller.healthError)
 	}
 }
+
+func TestConnectReplaysCompetitiveConfigsAfterAgentRestart(t *testing.T) {
+	stateDir := t.TempDir()
+	first := newController(Config{HostID: 7, StateDir: stateDir}, newFakeTransport(),
+		&fakePodman{}, harnessFactory(&sequenceHarness{}))
+	reporter := &slotReporter{controller: first}
+	if err := reporter.SendCompetitiveConfigs(
+		[]string{"etf2l_6v6_5cp"}, "registry.example/tf2@sha256:prepared",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// The backend may have restarted too, so the restarted agent replays the
+	// list it saved even though no boot has reported it since.
+	transport := newFakeTransport()
+	restarted := newController(Config{HostID: 7, StateDir: stateDir}, transport,
+		&fakePodman{}, harnessFactory(&sequenceHarness{}))
+	restarted.loadCompetitiveConfigs()
+	restarted.onConnected()
+
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	for _, message := range transport.sent {
+		if message["type"] != "host.competitive_configs" {
+			continue
+		}
+		configs, _ := message["configs"].([]any)
+		if len(configs) != 1 || configs[0] != "etf2l_6v6_5cp" ||
+			message["container_image"] != "registry.example/tf2@sha256:prepared" ||
+			message["protocol"] != float64(ProtocolVersion) {
+			t.Fatalf("replayed configs = %#v", message)
+		}
+		return
+	}
+	t.Fatalf("no competitive config list replayed on connect: %#v", transport.sent)
+}

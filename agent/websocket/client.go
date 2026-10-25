@@ -27,6 +27,9 @@ type Client struct {
 	closeOnce   sync.Once
 	mu          sync.Mutex
 	connected   bool
+	// lastConfigs is re-sent after a reconnect, because the backend keeps
+	// config lists only in memory and the boot sequence reports them once.
+	lastConfigs map[string]interface{}
 }
 
 // NewClient creates a new WebSocket client
@@ -222,11 +225,27 @@ func (c *Client) SendServerReadyWithSDR(info ServerReadyInfo) error {
 
 // SendCompetitiveConfigs reports the available competitive config identifiers on the server image.
 func (c *Client) SendCompetitiveConfigs(configs []string, containerImage string) error {
-	return c.Send(map[string]interface{}{
+	msg := map[string]interface{}{
 		"type":            "competitive_configs",
 		"configs":         configs,
 		"container_image": containerImage,
-	})
+	}
+	c.mu.Lock()
+	c.lastConfigs = msg
+	c.mu.Unlock()
+	return c.Send(msg)
+}
+
+func (c *Client) resendCompetitiveConfigs() {
+	c.mu.Lock()
+	msg := c.lastConfigs
+	c.mu.Unlock()
+	if msg == nil {
+		return
+	}
+	if err := c.Send(msg); err != nil {
+		log.Printf("Failed to re-send competitive config list: %v", err)
+	}
 }
 
 // readLoop continuously reads messages from the WebSocket
@@ -271,6 +290,7 @@ func (c *Client) reconnect() {
 					backoff = maxBackoff
 				}
 			} else {
+				c.resendCompetitiveConfigs()
 				return
 			}
 		}

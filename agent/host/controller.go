@@ -98,6 +98,11 @@ type Controller struct {
 	updateStatusDraining bool
 	updateStatusError    string
 
+	// The backend keeps config lists only in memory, while boots report them
+	// once per image, so the last list is kept here and replayed on connect.
+	competitiveConfigsMu   sync.Mutex
+	lastCompetitiveConfigs *competitiveConfigsState
+
 	configurationMu sync.RWMutex
 	manifestURL     string
 	versionPin      string
@@ -195,6 +200,7 @@ func (c *Controller) Run(parent context.Context) error {
 		return fmt.Errorf("create host state directory: %w", err)
 	}
 	c.loadImageState()
+	c.loadCompetitiveConfigs()
 	c.runPreflight()
 	if err := c.reconcileLocalContainers(c.ctx); err != nil {
 		c.setInventoryError(err.Error())
@@ -314,6 +320,14 @@ func (c *Controller) onConnected() {
 		if snapshot.LastReady != nil && snapshot.ContainerID != "" {
 			_ = c.transport.Send(snapshot.LastReady)
 		}
+	}
+	// A backend restart drops the config list, and the next boot on the same
+	// image does not report it again.
+	c.competitiveConfigsMu.Lock()
+	configs := c.lastCompetitiveConfigs
+	c.competitiveConfigsMu.Unlock()
+	if configs != nil {
+		_ = c.transport.Send(configs.event())
 	}
 }
 
@@ -1664,8 +1678,57 @@ func (r *slotReporter) sendReady(info wsprotocol.ServerReadyInfo) error {
 }
 
 func (r *slotReporter) SendCompetitiveConfigs(configs []string, containerImage string) error {
-	return r.controller.transport.Send(map[string]any{
+	state := &competitiveConfigsState{Configs: configs, ContainerImage: containerImage}
+	r.controller.rememberCompetitiveConfigs(state)
+	return r.controller.transport.Send(state.event())
+}
+
+type competitiveConfigsState struct {
+	Configs        []string `json:"configs"`
+	ContainerImage string   `json:"container_image"`
+}
+
+func (s *competitiveConfigsState) event() map[string]any {
+	return map[string]any{
 		"type": "host.competitive_configs", "protocol": ProtocolVersion,
-		"configs": configs, "container_image": containerImage,
-	})
+		"configs": s.Configs, "container_image": s.ContainerImage,
+	}
+}
+
+func (c *Controller) competitiveConfigsPath() string {
+	return filepath.Join(c.config.StateDir, "competitive-configs.json")
+}
+
+// rememberCompetitiveConfigs keeps the list for reconnects and saves it so an
+// agent restart (such as a self-update) can still replay it.
+func (c *Controller) rememberCompetitiveConfigs(state *competitiveConfigsState) {
+	c.competitiveConfigsMu.Lock()
+	c.lastCompetitiveConfigs = state
+	c.competitiveConfigsMu.Unlock()
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return
+	}
+	temporary := c.competitiveConfigsPath() + ".new"
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		log.Printf("Failed to save competitive config list: %v", err)
+		return
+	}
+	if err := os.Rename(temporary, c.competitiveConfigsPath()); err != nil {
+		log.Printf("Failed to save competitive config list: %v", err)
+	}
+}
+
+func (c *Controller) loadCompetitiveConfigs() {
+	data, err := os.ReadFile(c.competitiveConfigsPath())
+	if err != nil {
+		return
+	}
+	var state competitiveConfigsState
+	if json.Unmarshal(data, &state) != nil || len(state.Configs) == 0 {
+		return
+	}
+	c.competitiveConfigsMu.Lock()
+	c.lastCompetitiveConfigs = &state
+	c.competitiveConfigsMu.Unlock()
 }
