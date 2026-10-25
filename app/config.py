@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     
     # Branding
     site_name: str = "Summon"
+    source_url: str = "https://github.com/cometsmarsblackberry/summon"
     logo_url: str = ""
     favicon_url: str = ""
     og_image_url: str = ""

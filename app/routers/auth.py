@@ -464,7 +464,10 @@ async def require_user(
     if user.is_banned:
         raise HTTPException(status_code=403, detail=t("errors.account_banned"))
     if not has_beta_access(user):
-        raise HTTPException(status_code=403, detail=t("home.beta_notice"))
+        raise HTTPException(
+            status_code=403,
+            detail=t("home.beta_notice_discord" if settings.discord_url else "home.beta_notice"),
+        )
     return user
 
 
@@ -477,7 +480,10 @@ async def require_user_allow_banned(
     if user is None:
         raise HTTPException(status_code=401, detail=t("errors.not_authenticated"))
     if not has_beta_access(user):
-        raise HTTPException(status_code=403, detail=t("home.beta_notice"))
+        raise HTTPException(
+            status_code=403,
+            detail=t("home.beta_notice_discord" if settings.discord_url else "home.beta_notice"),
+        )
     return user
 
 

@@ -524,6 +524,7 @@ def _install_i18n_globals(templates: Jinja2Templates) -> None:
 
     # Branding globals
     env.globals["site_name"] = settings.site_name
+    env.globals["source_url"] = settings.source_url
     env.globals["base_url"] = settings.base_url
     env.globals["logo_url"] = settings.logo_url
     env.globals["favicon_url"] = settings.favicon_url

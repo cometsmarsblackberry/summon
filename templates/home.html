@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}{{ _('home.title') }}{% endblock %}
-{% block meta_description %}{{ _('home.description', count=locations|length if locations else 29) }}{% endblock %}
+{% block meta_description %}{{ _('home.description', count=locations|length) }}{% endblock %}
 
 {% set can_reserve = user and not beta_locked and not active_reservation and cloud_configured %}
 
@@ -536,12 +536,12 @@
 
     <div class="text-center mb-8">
         <h1 class="text-2xl font-semibold text-slate-900 mb-2">{{ _('home.heading') }}</h1>
-        <p class="text-slate-500 text-sm">{{ _('home.choose_locations', count=locations|length if locations else 29) }}</p>
+        <p class="text-slate-500 text-sm">{{ _('home.choose_locations', count=locations|length) }}</p>
     </div>
 
     {% if beta_mode %}
     <div class="mb-6 p-3 bg-slate-100 border border-slate-200 rounded text-slate-600 text-sm text-center">
-        <strong>🔒 {{ _('home.beta_mode') }}</strong> — {{ _('home.beta_notice') }}
+        <strong>🔒 {{ _('home.beta_mode') }}</strong> — {{ _('home.beta_notice_discord' if discord_url else 'home.beta_notice') }}
     </div>
     {% endif %}
 
