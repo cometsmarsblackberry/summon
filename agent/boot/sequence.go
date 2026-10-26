@@ -36,6 +36,13 @@ const (
 	RCONProbeTimeout = 2 * time.Second
 	// RCONPollInterval is the delay between RCON readiness checks
 	RCONPollInterval = 1 * time.Second
+	// RCONCommandTimeout bounds one attempt of a configuration command or
+	// status query. The bundled RCON client waits for its reply without a
+	// deadline, and SRCDS can leave a command that arrives during a level
+	// change without a reply.
+	RCONCommandTimeout = 15 * time.Second
+	// RCONCommandAttempts is how often one configuration command is tried.
+	RCONCommandAttempts = 3
 )
 
 // ServerSettings holds deployment-wide server settings
@@ -278,20 +285,29 @@ func LoadReservationConfig(stateDir string) (*ReservationConfig, error) {
 	return &config, nil
 }
 
-// retry executes a function with exponential backoff
-func retry(name string, maxRetries int, fn func() error) error {
+// retry executes a function with exponential backoff until ctx is done
+func retry(ctx context.Context, name string, maxRetries int, fn func() error) error {
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		lastErr = fn()
 		if lastErr == nil {
 			return nil
 		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%s interrupted: %w", name, err)
+		}
 
 		if attempt < maxRetries {
 			delay := RetryDelay * time.Duration(attempt) // Exponential backoff
 			log.Printf("%s failed (attempt %d/%d): %v. Retrying in %v...",
 				name, attempt, maxRetries, lastErr, delay)
-			time.Sleep(delay)
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return fmt.Errorf("%s interrupted: %w", name, ctx.Err())
+			}
 		}
 	}
 	return fmt.Errorf("%s failed after %d attempts: %w", name, maxRetries, lastErr)
@@ -431,7 +447,7 @@ func (s *Sequence) Run() error {
 	for {
 		image := s.GetConfig().ContainerImage
 		pullAttempt := 0
-		err := retry("pull image", MaxRetries, func() error {
+		err := retry(ctx, "pull image", MaxRetries, func() error {
 			pullAttempt++
 			if pullAttempt > 1 {
 				log.Printf("Retrying image pull (attempt %d)", pullAttempt)
@@ -460,7 +476,7 @@ func (s *Sequence) Run() error {
 	s.ws.SendBootProgress("starting_container", 80, "Starting TF2 server...")
 
 	var containerID string
-	err := retry("start container", MaxRetries, func() error {
+	err := retry(ctx, "start container", MaxRetries, func() error {
 		var startErr error
 		containerName := s.config.ContainerName
 		if containerName == "" {
@@ -602,11 +618,16 @@ func (s *Sequence) Run() error {
 // RunReconfigure performs a boot sequence for warm pool reuse.
 // It skips config loading (config comes from WebSocket) and image pull (image already present).
 func (s *Sequence) RunReconfigure() error {
+	return s.RunReconfigureContext(context.Background())
+}
+
+// RunReconfigureContext is RunReconfigure that stops early once ctx is done.
+// Instant hosts cancel it when the reservation is stopped mid-start.
+func (s *Sequence) RunReconfigureContext(ctx context.Context) error {
 	defer s.finish()
 	if err := s.begin(true); err != nil {
 		return err
 	}
-	ctx := context.Background()
 
 	// Stage 1: Report reconfigure started
 	log.Println("Boot stage: reconfigure_started")
@@ -619,7 +640,7 @@ func (s *Sequence) RunReconfigure() error {
 	s.ws.SendBootProgress("starting_container", 30, "Starting TF2 server...")
 
 	var containerID string
-	err := retry("start container", MaxRetries, func() error {
+	err := retry(ctx, "start container", MaxRetries, func() error {
 		var startErr error
 		containerName := s.config.ContainerName
 		if containerName == "" {
@@ -948,15 +969,62 @@ func (s *Sequence) execRCONCommand(ctx context.Context, command string) error {
 // share a semicolon-delimited command buffer.
 func (s *Sequence) execRCONCommands(ctx context.Context, commands []string) error {
 	for _, command := range commands {
-		if err := s.execRCONCommand(ctx, command); err != nil {
-			return err
+		// Values can be secrets, so only the command name is logged.
+		name := strings.SplitN(command, " ", 2)[0]
+		attempt := 0
+		err := runRCONCommandWithRetry(
+			ctx, RCONCommandAttempts, RCONCommandTimeout,
+			func(attemptCtx context.Context) error {
+				attempt++
+				if attempt > 1 {
+					log.Printf("Retrying RCON command %s (attempt %d/%d)", name, attempt, RCONCommandAttempts)
+				}
+				return s.execRCONCommand(attemptCtx, command)
+			},
+			s.waitForRCON,
+		)
+		if err != nil {
+			return fmt.Errorf("RCON command %s: %w", name, err)
 		}
 	}
 	return nil
 }
 
+// runRCONCommandWithRetry bounds each attempt of one command and, before
+// trying again, waits until RCON answers. A command that SRCDS received during
+// a level change can stay unanswered while the server itself recovers.
+func runRCONCommandWithRetry(
+	ctx context.Context,
+	attempts int,
+	attemptTimeout time.Duration,
+	run func(context.Context) error,
+	waitReady func(context.Context) error,
+) error {
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+		err = run(attemptCtx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if attempt == attempts {
+			break
+		}
+		if waitErr := waitReady(ctx); waitErr != nil {
+			return fmt.Errorf("%w (RCON did not recover: %v)", err, waitErr)
+		}
+	}
+	return err
+}
+
 // getServerInfo runs the status command and parses the output to get server info.
 func (s *Sequence) getServerInfo(ctx context.Context) (*sdr.ServerInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, RCONCommandTimeout)
+	defer cancel()
 	// Run status command via RCON using the container's RCON tool
 	output, err := s.podman.ExecInContainerWithOutput(ctx, s.containerID, []string{
 		"/home/tf2/server/rcon",

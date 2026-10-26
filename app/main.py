@@ -245,7 +245,8 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(cleanup_loop())
 
     async def instant_heartbeat_loop():
-        """Persist the 30-second offline transition independently of cloud cleanup."""
+        """Persist the 30-second offline transition and the Instant start deadline
+        independently of cloud cleanup."""
         from app.models.instant import InstantHost
         from datetime import datetime, timedelta, timezone
         from sqlalchemy import select
@@ -274,6 +275,11 @@ async def lifespan(app: FastAPI):
                         )
             except Exception:
                 logger.exception("Instant heartbeat monitor failed")
+            try:
+                from app.routers.internal import fail_stalled_instant_starts
+                await fail_stalled_instant_starts()
+            except Exception:
+                logger.exception("Instant start deadline check failed")
             await asyncio.sleep(10)
 
     instant_heartbeat_task = asyncio.create_task(instant_heartbeat_loop())

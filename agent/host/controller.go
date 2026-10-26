@@ -48,7 +48,7 @@ type podmanRuntime interface {
 }
 
 type serverSequence interface {
-	RunReconfigure() error
+	RunReconfigureContext(context.Context) error
 	SaveConfig() error
 	GetContainerID() string
 	GetConfig() *boot.ReservationConfig
@@ -131,7 +131,9 @@ type slotRuntime struct {
 	sequence      serverSequence
 	leaseExpires  time.Time
 	leaseCancel   context.CancelFunc
-	lastReady     map[string]any
+	// startCancel interrupts the start or restart running in this slot.
+	startCancel context.CancelFunc
+	lastReady   map[string]any
 
 	responses     map[string]map[string]any
 	responseOrder []string
@@ -498,11 +500,15 @@ func (c *Controller) ensureSlot(definition SlotDefinition) *slotRuntime {
 }
 
 func (c *Controller) executeSlotCommand(slot *slotRuntime, command CommandEnvelope) {
+	// Commands for one slot are serialized, so a stop would otherwise wait
+	// behind a start that never returns.
+	if command.Type == "server.stop" && validEnvelope(command) {
+		c.interruptStart(slot, command)
+	}
 	slot.opMu.Lock()
 	defer slot.opMu.Unlock()
 
-	if command.CommandID == "" || command.ReservationID <= 0 || command.AssignmentID <= 0 ||
-		command.Generation <= 0 || command.Protocol < ProtocolMin || command.Protocol > ProtocolMax {
+	if !validEnvelope(command) {
 		c.rememberAndSend(slot, command.CommandID, c.failureEvent(
 			command, "invalid_command", "invalid_envelope", "Command envelope is invalid",
 		))
@@ -630,14 +636,26 @@ func (c *Controller) startSlot(slot *slotRuntime, command CommandEnvelope) {
 	slot.sequence = sequence
 	slot.leaseExpires = time.Unix(command.LeaseExpiresAt, 0)
 	slot.lastReady = nil
+	ctx, finishStart := startContextLocked(slot)
 	slot.mu.Unlock()
+	defer finishStart()
 	c.scheduleLease(slot, command)
 
-	if err := sequence.SaveConfig(); err != nil {
-		c.failStart(slot, command, "reservation_data", "persist_config", err)
+	saveErr := sequence.SaveConfig()
+	if ctx.Err() != nil {
+		c.abandonStart(slot, sequence)
 		return
 	}
-	if err := sequence.RunReconfigure(); err != nil {
+	if saveErr != nil {
+		c.failStart(slot, command, "reservation_data", "persist_config", saveErr)
+		return
+	}
+	interrupted, err := c.runSequence(ctx, sequence)
+	if interrupted {
+		c.abandonStart(slot, sequence)
+		return
+	}
+	if err != nil {
 		if containerID := sequence.GetContainerID(); containerID != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			_ = c.podman.StopContainer(ctx, containerID)
@@ -666,6 +684,73 @@ func (c *Controller) startSlot(slot *slotRuntime, command CommandEnvelope) {
 		_ = c.transport.Send(ready)
 	}
 	rememberResponse(slot, command.CommandID, ready)
+}
+
+func validEnvelope(command CommandEnvelope) bool {
+	return command.CommandID != "" && command.ReservationID > 0 && command.AssignmentID > 0 &&
+		command.Generation > 0 && command.Protocol >= ProtocolMin && command.Protocol <= ProtocolMax
+}
+
+// startContextLocked registers cancellation before a slot publishes its start
+// or restart. slot.mu must be held; finish must run while opMu is still held.
+func startContextLocked(slot *slotRuntime) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	slot.startCancel = cancel
+	return ctx, func() {
+		slot.mu.Lock()
+		slot.startCancel = nil
+		slot.mu.Unlock()
+		cancel()
+	}
+}
+
+// runSequence runs a start or restart that a stop for the same assignment can
+// interrupt. It reports whether it was interrupted.
+func (c *Controller) runSequence(ctx context.Context, sequence serverSequence) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return true, err
+	}
+	err := sequence.RunReconfigureContext(ctx)
+	return ctx.Err() != nil, err
+}
+
+// interruptStart cancels the start or restart running for the assignment the
+// stop is for. The same checks as executeSlotCommand's apply, so the stop that
+// interrupts a start always gets to run after it.
+func (c *Controller) interruptStart(slot *slotRuntime, command CommandEnvelope) {
+	slot.mu.Lock()
+	defer slot.mu.Unlock()
+	if slot.startCancel == nil || slot.assignmentID != command.AssignmentID ||
+		command.Generation < slot.generation {
+		return
+	}
+	log.Printf(
+		"Slot %d: stop for assignment %d interrupts its %s",
+		slot.definition.SlotIndex, command.AssignmentID, slot.state,
+	)
+	slot.startCancel()
+	slot.startCancel = nil
+}
+
+// abandonStart hands an interrupted start's container to the stop that
+// interrupted it, which collects the logs and stops it as usual.
+func (c *Controller) abandonStart(slot *slotRuntime, sequence serverSequence) {
+	containerID := sequence.GetContainerID()
+	if containerID == "" {
+		// The start may have been interrupted inside podman run, after the
+		// container was created but before its ID was known. The slot's
+		// container name is unique on the host.
+		if config := sequence.GetConfig(); config != nil && config.ContainerName != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_ = c.podman.StopContainer(ctx, config.ContainerName)
+			cancel()
+		}
+	}
+	slot.mu.Lock()
+	slot.state = "stopping"
+	slot.containerID = containerID
+	slot.lastReady = nil
+	slot.mu.Unlock()
 }
 
 func (c *Controller) failStart(
@@ -803,16 +888,21 @@ func (c *Controller) restartSlot(slot *slotRuntime, command CommandEnvelope) {
 
 	slot.mu.Lock()
 	slot.state = "restarting"
+	ctx, finishStart := startContextLocked(slot)
 	slot.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := c.podman.StopContainer(ctx, snapshot.ContainerID); err != nil {
-		cancel()
+	defer finishStart()
+	stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	stopErr := c.podman.StopContainer(stopCtx, snapshot.ContainerID)
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if stopErr != nil {
 		c.rememberAndSend(slot, command.CommandID, c.failureEvent(
-			command, "infrastructure", "restart_stop_failed", err.Error(),
+			command, "infrastructure", "restart_stop_failed", stopErr.Error(),
 		))
 		return
 	}
-	cancel()
 	reporter := &slotReporter{controller: c, command: command}
 	sequence := c.factory(reporter, &configCopy, "")
 	slot.mu.Lock()
@@ -820,11 +910,21 @@ func (c *Controller) restartSlot(slot *slotRuntime, command CommandEnvelope) {
 	slot.containerID = ""
 	slot.lastReady = nil
 	slot.mu.Unlock()
-	if err := sequence.SaveConfig(); err != nil {
-		c.failStart(slot, command, "reservation_data", "persist_config", err)
+	saveErr := sequence.SaveConfig()
+	if ctx.Err() != nil {
+		c.abandonStart(slot, sequence)
 		return
 	}
-	if err := sequence.RunReconfigure(); err != nil {
+	if saveErr != nil {
+		c.failStart(slot, command, "reservation_data", "persist_config", saveErr)
+		return
+	}
+	interrupted, err := c.runSequence(ctx, sequence)
+	if interrupted {
+		c.abandonStart(slot, sequence)
+		return
+	}
+	if err != nil {
 		c.failStart(slot, command, "infrastructure", "restart_failed", err)
 		return
 	}

@@ -1,5 +1,5 @@
 // Package main is the entry point for the TF2 server agent.
-// The agent manages TF2 containers.
+// The agent manages TF2 containers on cloud instances and persistent hosts.
 package main
 
 import (

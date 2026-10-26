@@ -4,6 +4,7 @@ import asyncio
 import hmac
 import logging
 import uuid
+import weakref
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
@@ -65,6 +66,7 @@ public_ip_tasks: set[asyncio.Task] = set()
 # reservation's resource usage.
 connected_instant_hosts: dict[int, WebSocket] = {}
 instant_host_send_locks: dict[int, asyncio.Lock] = {}
+instant_host_event_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
 instant_boot_progress: dict[int, dict] = {}
 instant_container_stats: dict[int, dict] = {}
 instant_fallback_tasks: set[asyncio.Task] = set()
@@ -465,10 +467,25 @@ def _parse_protocol_range(data: dict) -> tuple[int | None, int | None, int | Non
     return version, minimum, maximum
 
 
+def _instant_host_event_lock(host_id: int) -> asyncio.Lock:
+    lock = instant_host_event_locks.get(host_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        instant_host_event_locks[host_id] = lock
+    return lock
+
+
 async def handle_instant_host_message(
     host_id: int, data: dict, websocket: WebSocket | None = None
 ) -> None:
     """Validate and apply one host protocol event."""
+    async with _instant_host_event_lock(host_id):
+        await _handle_instant_host_message(host_id, data, websocket)
+
+
+async def _handle_instant_host_message(
+    host_id: int, data: dict, websocket: WebSocket | None = None
+) -> None:
     message_type = str(data.get("type") or "")
     if message_type in {"host.hello", "host.status"}:
         await _handle_host_status(host_id, data, hello=message_type == "host.hello")
@@ -983,6 +1000,73 @@ async def _handle_instant_failed(
         ))
         instant_fallback_tasks.add(task)
         task.add_done_callback(instant_fallback_tasks.discard)
+
+
+async def fail_stalled_instant_starts() -> int:
+    """Fail initial Instant starts that never reported ready.
+
+    If a host never reports readiness or failure before the deadline, send a
+    stop command and use the usual retry path to another host or to cloud.
+    """
+    timeout = settings.instant_start_timeout_seconds
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=timeout)
+    stalled_query = (
+        select(InstantAssignment)
+        .join(Reservation, InstantAssignment.reservation_id == Reservation.id)
+        .where(
+            InstantAssignment.state.in_(("claimed", "starting")),
+            InstantAssignment.closed_at.is_(None),
+            # Reconciliation also re-sends starts for servers that were
+            # ready before; only a first start that never got there counts.
+            InstantAssignment.ready_at.is_(None),
+            InstantAssignment.claimed_at < cutoff,
+            Reservation.status.in_((
+                ReservationStatus.PENDING,
+                ReservationStatus.PROVISIONING,
+            )),
+        )
+    )
+    async with async_session_maker() as db:
+        result = await db.execute(
+            stalled_query.join(InstantSlot, InstantAssignment.slot_id == InstantSlot.id)
+            .with_only_columns(InstantAssignment.id, InstantSlot.host_id)
+        )
+        candidates = result.all()
+
+    failed = 0
+    for assignment_id, host_id in candidates:
+        # Host events may change the lease after the initial scan. Reload it
+        # while holding the same lock used by readiness and reconciliation.
+        async with _instant_host_event_lock(host_id), async_session_maker() as db:
+            result = await db.execute(
+                stalled_query.where(InstantAssignment.id == assignment_id)
+                .options(
+                    selectinload(InstantAssignment.slot).selectinload(InstantSlot.host),
+                    selectinload(InstantAssignment.reservation),
+                )
+            )
+            assignment = result.scalar_one_or_none()
+            if assignment is None:
+                continue
+            reservation = assignment.reservation
+            logger.warning(
+                "instant_event=start_timeout reservation=%s host_id=%s slot_index=%s timeout_seconds=%s",
+                reservation.reservation_number, host_id,
+                assignment.slot.slot_index, timeout,
+            )
+            stop = _instant_reconcile_command(
+                "server.stop", assignment, reason="start_timeout"
+            )
+            # Close the assignment before the stop goes out, so the host's
+            # answer finds it closed and a late ready is stopped as well.
+            await _handle_instant_failed(assignment, reservation, {
+                "failure_class": "infrastructure",
+                "failure_code": "start_timeout",
+                "message": f"Server did not become ready within {timeout} seconds",
+            }, db)
+            await send_instant_command(host_id, stop)
+            failed += 1
+    return failed
 
 
 async def _handle_instant_stopped(

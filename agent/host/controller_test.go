@@ -83,6 +83,8 @@ type fakePodman struct {
 	digest      string
 	containers  []podman.ManagedContainer
 	stopped     chan string
+	stopStarted chan string
+	stopRelease chan struct{}
 	listStarted chan struct{}
 	listRelease chan struct{}
 	pullCalls   atomic.Int32
@@ -125,7 +127,17 @@ func (f *fakePodman) ListManagedContainers(ctx context.Context) ([]podman.Manage
 func (f *fakePodman) ContainerStats(context.Context, string) (map[string]any, error) {
 	return map[string]any{"cpu": "1%"}, nil
 }
-func (f *fakePodman) StopContainer(_ context.Context, id string) error {
+func (f *fakePodman) StopContainer(ctx context.Context, id string) error {
+	if f.stopStarted != nil {
+		f.stopStarted <- id
+	}
+	if f.stopRelease != nil {
+		select {
+		case <-f.stopRelease:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if f.stopped != nil {
 		f.stopped <- id
 	}
@@ -133,12 +145,14 @@ func (f *fakePodman) StopContainer(_ context.Context, id string) error {
 }
 
 type sequenceHarness struct {
-	started chan struct{}
-	release chan struct{}
-	active  atomic.Int32
-	maximum atomic.Int32
-	created atomic.Int32
-	ids     atomic.Int32
+	started     chan struct{}
+	release     chan struct{}
+	saveStarted chan struct{}
+	saveRelease chan struct{}
+	active      atomic.Int32
+	maximum     atomic.Int32
+	created     atomic.Int32
+	ids         atomic.Int32
 
 	rconStarted chan struct{}
 	rconRelease chan struct{}
@@ -156,7 +170,7 @@ type fakeSequence struct {
 	id       string
 }
 
-func (f *fakeSequence) RunReconfigure() error {
+func (f *fakeSequence) RunReconfigureContext(ctx context.Context) error {
 	active := f.harness.active.Add(1)
 	for {
 		maximum := f.harness.maximum.Load()
@@ -168,7 +182,12 @@ func (f *fakeSequence) RunReconfigure() error {
 		f.harness.started <- struct{}{}
 	}
 	if f.harness.release != nil {
-		<-f.harness.release
+		select {
+		case <-f.harness.release:
+		case <-ctx.Done():
+			f.harness.active.Add(-1)
+			return ctx.Err()
+		}
 	}
 	f.harness.active.Add(-1)
 	if f.harness.runErr != nil {
@@ -178,7 +197,15 @@ func (f *fakeSequence) RunReconfigure() error {
 		SDRIP: "169.254.1.2", SDRPort: 30001, SDRTVPort: 30002, Map: f.config.FirstMap,
 	})
 }
-func (f *fakeSequence) SaveConfig() error                  { return nil }
+func (f *fakeSequence) SaveConfig() error {
+	if f.harness.saveStarted != nil {
+		f.harness.saveStarted <- struct{}{}
+	}
+	if f.harness.saveRelease != nil {
+		<-f.harness.saveRelease
+	}
+	return nil
+}
 func (f *fakeSequence) GetContainerID() string             { return f.id }
 func (f *fakeSequence) GetConfig() *boot.ReservationConfig { return f.config }
 func (f *fakeSequence) ExecuteRCON(context.Context, string) (string, error) {
@@ -1080,4 +1107,226 @@ func TestConnectReplaysCompetitiveConfigsAfterAgentRestart(t *testing.T) {
 		return
 	}
 	t.Fatalf("no competitive config list replayed on connect: %#v", transport.sent)
+}
+
+func eventTypesForAssignment(transport *fakeTransport, assignmentID int) []string {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	var types []string
+	for _, message := range transport.sent {
+		if message["assignment_id"] == float64(assignmentID) {
+			types = append(types, fmt.Sprint(message["type"]))
+		}
+	}
+	return types
+}
+
+// A start whose boot never returns must not prevent a stop from
+// terminating the container.
+func TestStopInterruptsAStartThatNeverFinishes(t *testing.T) {
+	harness := &sequenceHarness{started: make(chan struct{}, 1), release: make(chan struct{})}
+	runtime := &fakePodman{stopped: make(chan string, 1)}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+	defer close(harness.release)
+
+	start := startCommand(definition, 70, 1, time.Now().Add(time.Hour))
+	startDone := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(controller.slotForCommand(start), start)
+		close(startDone)
+	}()
+	select {
+	case <-harness.started:
+	case <-time.After(time.Second):
+		t.Fatal("start did not begin")
+	}
+
+	stop := stopCommand(start)
+	stopDone := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(controller.slotForCommand(stop), stop)
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop waited for the start that never finishes")
+	}
+	<-startDone
+	select {
+	case id := <-runtime.stopped:
+		if id != "container-1" {
+			t.Fatalf("stopped container %q, want container-1", id)
+		}
+	default:
+		t.Fatal("the interrupted start's container was not stopped")
+	}
+	if types := eventTypesForAssignment(transport, start.AssignmentID); strings.Join(types, ",") != "server.stopped" {
+		t.Fatalf("events = %v, want only server.stopped", types)
+	}
+
+	// The slot is free again for the next reservation.
+	next := startCommand(definition, 71, 1, time.Now().Add(time.Hour))
+	nextDone := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(controller.slotForCommand(next), next)
+		close(nextDone)
+	}()
+	<-harness.started
+	harness.release <- struct{}{}
+	<-nextDone
+	if event := lastEventForAssignment(transport, next.AssignmentID); event["type"] != "server.ready" {
+		t.Fatalf("next reservation did not start: %v", event)
+	}
+}
+
+func TestLeaseExpiryInterruptsAStartThatNeverFinishes(t *testing.T) {
+	harness := &sequenceHarness{started: make(chan struct{}, 1), release: make(chan struct{})}
+	runtime := &fakePodman{stopped: make(chan string, 1)}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+	defer close(harness.release)
+
+	start := startCommand(definition, 72, 1, time.Now().Add(1200*time.Millisecond))
+	go controller.executeSlotCommand(controller.slotForCommand(start), start)
+	select {
+	case id := <-runtime.stopped:
+		if id != "container-1" {
+			t.Fatalf("stopped container %q, want container-1", id)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("lease expiry did not interrupt the start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if event := lastEventForAssignment(transport, start.AssignmentID); event != nil && event["type"] == "server.stopped" {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("events = %v, want server.stopped", eventTypesForAssignment(transport, start.AssignmentID))
+}
+
+func TestStopForAnotherAssignmentDoesNotInterruptStart(t *testing.T) {
+	harness := &sequenceHarness{started: make(chan struct{}, 1), release: make(chan struct{})}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, &fakePodman{})
+	defer cleanup()
+
+	start := startCommand(definition, 73, 2, time.Now().Add(time.Hour))
+	startDone := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(controller.slotForCommand(start), start)
+		close(startDone)
+	}()
+	<-harness.started
+
+	slot := controller.slotForCommand(start)
+	for _, stop := range []CommandEnvelope{
+		stopCommand(startCommand(definition, 74, 2, time.Now().Add(time.Hour))),
+		stopCommand(startCommand(definition, 73, 1, time.Now().Add(time.Hour))),
+	} {
+		controller.interruptStart(slot, stop)
+	}
+	close(harness.release)
+	<-startDone
+	if event := lastEventForAssignment(transport, start.AssignmentID); event["type"] != "server.ready" {
+		t.Fatalf("a foreign or stale stop interrupted the start: %v", event)
+	}
+}
+
+func TestStopDuringConfigPersistenceSkipsBoot(t *testing.T) {
+	for _, operation := range []string{"server.start", "server.restart"} {
+		t.Run(operation, func(t *testing.T) {
+			harness := &sequenceHarness{}
+			definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+			controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, &fakePodman{})
+			defer cleanup()
+			command := startCommand(definition, 75, 1, time.Now().Add(time.Hour))
+			slot := controller.slotForCommand(command)
+			if operation == "server.restart" {
+				controller.executeSlotCommand(slot, command)
+				command.Type = operation
+				command.CommandID = "restart-75-1"
+			}
+			harness.saveStarted = make(chan struct{}, 1)
+			harness.saveRelease = make(chan struct{})
+			harness.started = make(chan struct{}, 1)
+			harness.release = make(chan struct{})
+			defer close(harness.release)
+			done := make(chan struct{})
+			go func() {
+				controller.executeSlotCommand(slot, command)
+				close(done)
+			}()
+			select {
+			case <-harness.saveStarted:
+			case <-time.After(time.Second):
+				t.Fatal("config persistence did not begin")
+			}
+
+			stop := stopCommand(command)
+			controller.interruptStart(slot, stop)
+			close(harness.saveRelease)
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("stop was lost while config persistence was running")
+			}
+			select {
+			case <-harness.started:
+				t.Fatal("boot began after the stop interrupted config persistence")
+			default:
+			}
+			controller.executeSlotCommand(slot, stop)
+			if event := lastEventForAssignment(transport, command.AssignmentID); event["type"] != "server.stopped" {
+				t.Fatalf("last event = %v, want server.stopped", event)
+			}
+		})
+	}
+}
+
+func TestStopInterruptsRestartBeforeNewBoot(t *testing.T) {
+	harness := &sequenceHarness{}
+	runtime := &fakePodman{}
+	definition := SlotDefinition{SlotID: 1, SlotIndex: 0, GamePort: 27015, TVPort: 27020}
+	controller, transport, cleanup := configuredController(t, []SlotDefinition{definition}, harness, runtime)
+	defer cleanup()
+	command := startCommand(definition, 76, 1, time.Now().Add(time.Hour))
+	slot := controller.slotForCommand(command)
+	controller.executeSlotCommand(slot, command)
+	command.Type = "server.restart"
+	command.CommandID = "restart-76-1"
+	runtime.stopStarted = make(chan string, 1)
+	runtime.stopRelease = make(chan struct{})
+	defer close(runtime.stopRelease)
+	done := make(chan struct{})
+	go func() {
+		controller.executeSlotCommand(slot, command)
+		close(done)
+	}()
+	select {
+	case <-runtime.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("restart did not begin stopping the old container")
+	}
+	stop := stopCommand(command)
+	controller.interruptStart(slot, stop)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stop did not interrupt the restart's old-container stop")
+	}
+	if got := harness.created.Load(); got != 1 {
+		t.Fatalf("created %d sequences, want only the original boot", got)
+	}
+	runtime.stopStarted = nil
+	runtime.stopRelease = nil
+	controller.executeSlotCommand(slot, stop)
+	if types := eventTypesForAssignment(transport, command.AssignmentID); strings.Join(types, ",") != "server.ready,server.stopped" {
+		t.Fatalf("events = %v, want ready followed by stopped", types)
+	}
 }

@@ -44,6 +44,7 @@ from app.services.runtime import (
 )
 from app.routers.internal import (
     _handle_host_status,
+    fail_stalled_instant_starts,
     _handle_instant_ready,
     _reconcile_host_inventory,
     connected_instant_hosts,
@@ -1060,6 +1061,124 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ReservationStatus.PROVISIONING, reservation.status)
             self.assertIsNone(reservation.sdr_ip)
             self.assertEqual("203.0.113.64", reservation.direct_ip)
+
+    async def test_stalled_start_is_stopped_and_retried_elsewhere(self):
+        async with self.sessions() as db:
+            stalled_host = await self.add_ready_host(db, "203.0.113.65", "stalled", slots=3)
+            old = datetime.now(timezone.utc) - timedelta(minutes=10)
+            assignments = {}
+            for number, state in (
+                (366, "starting"),  # never ready: the one to fail
+                (367, "starting"),  # claimed just now
+                (368, "starting"),  # was ready before; reconciliation restarts it
+            ):
+                reservation = self.reservation(number)
+                reservation.status = ReservationStatus.PROVISIONING
+                db.add(reservation)
+                await db.commit()
+                assignment = await claim_instant_slot(reservation, db)
+                assignment.state = state
+                assignment.claimed_at = old
+                assignments[number] = assignment
+            assignments[367].claimed_at = datetime.now(timezone.utc)
+            assignments[368].ready_at = old
+            await db.commit()
+            fallback = await self.add_ready_host(db, "203.0.113.66", "fallback-host")
+
+        with (
+            patch("app.routers.internal.async_session_maker", self.sessions),
+            patch(
+                "app.routers.internal.send_instant_command",
+                new=AsyncMock(return_value=True),
+            ) as send,
+            patch(
+                "app.services.runtime.dispatch_instant_start",
+                new=AsyncMock(return_value=True),
+            ) as dispatch,
+        ):
+            failed = await fail_stalled_instant_starts()
+
+        self.assertEqual(1, failed)
+        send.assert_awaited_once()
+        self.assertEqual(stalled_host.id, send.await_args.args[0])
+        command = send.await_args.args[1]
+        self.assertEqual("server.stop", command["type"])
+        self.assertEqual("start_timeout", command["reason"])
+        self.assertEqual(assignments[366].id, command["assignment_id"])
+        dispatch.assert_awaited_once()
+        self.assertEqual(fallback.id, dispatch.await_args.args[1].slot.host_id)
+
+        async with self.sessions() as db:
+            stalled = await db.get(InstantAssignment, assignments[366].id)
+            self.assertEqual("failed", stalled.state)
+            self.assertEqual("start_timeout", stalled.failure_code)
+            self.assertIsNotNone(stalled.closed_at)
+            for number in (367, 368):
+                untouched = await db.get(InstantAssignment, assignments[number].id)
+                self.assertEqual("starting", untouched.state)
+                self.assertIsNone(untouched.closed_at)
+
+    async def test_start_becoming_ready_after_deadline_scan_is_not_stopped(self):
+        async with self.sessions() as db:
+            host = await self.add_ready_host(db, "203.0.113.65", "ready-at-deadline")
+            reservation = self.reservation(369)
+            db.add(reservation)
+            await db.commit()
+            assignment = await claim_instant_slot(reservation, db)
+            assignment.state = "starting"
+            assignment.claimed_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+            await db.commit()
+            await self.add_ready_host(db, "203.0.113.66", "fallback-host")
+            ready_event = {
+                "type": "server.ready",
+                "protocol": 1,
+                "command_id": assignment.command_id,
+                "reservation_id": reservation.id,
+                "assignment_id": assignment.id,
+                "slot_id": assignment.slot_id,
+                "generation": assignment.generation,
+                "container_id": "ready-container",
+                "sdr_ip": "169.254.1.2",
+                "sdr_port": 27015,
+            }
+
+        ready_event_sent = False
+
+        def sessions_with_readiness_after_scan():
+            db = self.sessions()
+            execute = db.execute
+
+            async def execute_then_report_ready(*args, **kwargs):
+                nonlocal ready_event_sent
+                result = await execute(*args, **kwargs)
+                if not ready_event_sent:
+                    ready_event_sent = True
+                    await handle_instant_host_message(host.id, ready_event)
+                return result
+
+            db.execute = execute_then_report_ready
+            return db
+
+        with (
+            patch("app.routers.internal.async_session_maker", sessions_with_readiness_after_scan),
+            patch("app.routers.internal.send_instant_command", new=AsyncMock(return_value=True)) as send,
+            patch("app.services.runtime.dispatch_instant_start", new=AsyncMock(return_value=True)) as dispatch,
+            patch("app.services.timer.schedule_expiry_timer"),
+        ):
+            failed = await fail_stalled_instant_starts()
+
+        self.assertTrue(ready_event_sent)
+        self.assertEqual(0, failed)
+        send.assert_not_awaited()
+        dispatch.assert_not_awaited()
+        async with self.sessions() as db:
+            ready = await db.get(InstantAssignment, assignment.id)
+            active = await db.get(Reservation, reservation.id)
+            self.assertEqual("ready", ready.state)
+            self.assertIsNotNone(ready.ready_at)
+            self.assertIsNone(ready.closed_at)
+            self.assertEqual(ReservationStatus.ACTIVE, active.status)
+            self.assertEqual(1, await db.scalar(select(func.count(InstantAssignment.id))))
 
     async def test_sdr_only_restart_without_fake_ip_degrades_in_place(self):
         async with self.sessions() as db:

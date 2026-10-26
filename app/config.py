@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     # How long a host stays out of scheduling after a host-level start failure
     # (Podman, disk, image, ...). Administrators can clear it sooner.
     instant_host_quarantine_seconds: int = 600
+    # An Instant start that has not reported ready this long after its slot was
+    # claimed is abandoned and the reservation moves to another host or to
+    # cloud.
+    instant_start_timeout_seconds: int = 180
     instant_protocol_min: int = 1
     instant_protocol_max: int = 1
     agent_version: str = "0.2.9"
