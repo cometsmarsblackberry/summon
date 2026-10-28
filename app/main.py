@@ -310,7 +310,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.site_name,
     description="On-demand TF2 server reservation system",
-    version="0.4.6",
+    version="0.4.7",
     lifespan=lifespan,
     # PublicUrlMiddleware removes trailing slashes with a relative redirect.
     # Starlette's version uses the Host header, which can name a proxy origin.

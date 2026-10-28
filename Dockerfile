@@ -6,7 +6,7 @@ COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 COPY agent/ ./
 COPY scripts/agent-licenses.sh /build/scripts/
-ARG AGENT_VERSION=0.2.9
+ARG AGENT_VERSION=0.2.10
 # The license notices of the linked Go code are served next to the agent.
 RUN export CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     && go build -trimpath -ldflags "-s -w -X main.agentVersion=${AGENT_VERSION}" -o /tf2-agent . \
