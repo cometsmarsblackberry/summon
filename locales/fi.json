@@ -464,6 +464,7 @@
         "command_unsafe": "Komentojen erottimia ja ohjausmerkkejä ei sallita.",
         "command_invalid_name": "Palvelinkomennon nimi on virheellinen.",
         "command_not_allowed": "Tätä palvelinkomentoa ei sallita.",
+        "command_invalid_tv_delay": "tv_delay hyväksyy yhden kokonaisluvun sekunteina väliltä 0–120.",
         "profile_not_public": "Steam-profiilisi täytyy olla julkinen luodaksesi varauksia.",
         "feedback_invalid_category": "Valitse palautteen luokka.",
         "feedback_message_required": "Kirjoita viesti ennen lähettämistä.",

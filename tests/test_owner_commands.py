@@ -141,6 +141,30 @@ class OwnerCommandPolicyTests(unittest.TestCase):
                     validate_owner_command_line(command, allowed)
                 self.assertEqual("invalid_arguments", invalid.exception.code)
 
+    def test_tv_delay_takes_whole_seconds_up_to_the_engine_limit(self):
+        allowed = ("tv_delay",)
+        for command in ("tv_delay", "tv_delay 0", "tv_delay 90", "TV_DELAY 120"):
+            with self.subTest(command=command):
+                self.assertEqual(
+                    command, validate_owner_command_line(f" {command} ", allowed)
+                )
+
+        rejected = (
+            "tv_delay 121",
+            "tv_delay 1000",
+            "tv_delay -1",
+            "tv_delay 30.5",
+            "tv_delay abc",
+            "tv_delay 0x10",
+            'tv_delay "30"',
+            "tv_delay 30 60",
+        )
+        for command in rejected:
+            with self.subTest(command=command):
+                with self.assertRaises(OwnerCommandValidationError) as invalid:
+                    validate_owner_command_line(command, allowed)
+                self.assertEqual("invalid_tv_delay", invalid.exception.code)
+
     def test_exec_takes_one_config_name_outside_the_allowlist(self):
         allowed = ("mp_timelimit",)
         accepted = (
@@ -182,6 +206,10 @@ class OwnerCommandPolicyTests(unittest.TestCase):
 
     def test_checked_in_allowlist_includes_changelevel(self):
         self.assertIn("changelevel", get_owner_commands())
+
+    def test_checked_in_allowlist_includes_only_tv_delay_from_sourcetv(self):
+        sourcetv = [name for name in get_owner_commands() if name.startswith("tv_")]
+        self.assertEqual(["tv_delay"], sourcetv)
 
     def test_plugin_result_parser_requires_marker_and_caps_utf8_output(self):
         self.assertIsNone(parse_plugin_command_result("Unknown command"))
@@ -406,6 +434,33 @@ class OwnerCommandEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({
             "code": "invalid_config",
             "message": "errors.invalid_config",
+        }, rejected.exception.detail)
+
+    async def test_bad_tv_delay_is_rejected_before_reaching_the_plugin(self):
+        with (
+            patch(
+                "app.routers.reservations.get_reservation_by_id",
+                new=AsyncMock(return_value=self.reservation),
+            ),
+            patch(
+                "app.routers.reservations.awaited_rcon_reservation_runtime",
+                new=AsyncMock(),
+            ) as execute,
+            patch("app.routers.reservations.t", side_effect=lambda key: key),
+        ):
+            with self.assertRaises(HTTPException) as rejected:
+                await run_reservation_command(
+                    9,
+                    OwnerCommandRequest(command="tv_delay 300"),
+                    user=self.user,
+                    db=object(),
+                )
+
+        execute.assert_not_awaited()
+        self.assertEqual(400, rejected.exception.status_code)
+        self.assertEqual({
+            "code": "invalid_tv_delay",
+            "message": "errors.command_invalid_tv_delay",
         }, rejected.exception.detail)
 
     async def test_plugin_policy_rejection_is_a_completed_attempt(self):

@@ -464,6 +464,7 @@
         "command_unsafe": "Pemisah arahan dan aksara kawalan tidak dibenarkan.",
         "command_invalid_name": "Nama arahan pelayan tidak sah.",
         "command_not_allowed": "Arahan pelayan itu tidak dibenarkan.",
+        "command_invalid_tv_delay": "tv_delay menerima satu nombor bulat saat dari 0 hingga 120.",
         "profile_not_public": "Profil Steam anda mesti awam untuk membuat tempahan.",
         "feedback_invalid_category": "Pilih kategori maklum balas.",
         "feedback_message_required": "Tulis mesej sebelum menghantar.",

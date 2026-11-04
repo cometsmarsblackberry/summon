@@ -27,6 +27,8 @@ image. Operators do not install the plugins or their dependencies separately.
   installed.
 - Downloads a missing map before changing to it when the companion map
   downloader is installed.
+- Holds a map change during or after a match until SourceTV viewers have
+  caught up, but only while someone is watching.
 
 ## Commands
 
@@ -84,8 +86,9 @@ The special `summon_reset` config resets the server to its defaults. Loading an
 RGL config also enables Summon's built-in RGL plugin set; loading any other
 config, including `summon_reset`, disables it again. Disabling it also unloads
 `p4sstime` and `roundtimer_override`, which RGL configs load from
-`plugins/disabled/` themselves. RGL's QoL plugin unloads Wait For STV on every
-map start, so disabling the set loads Wait For STV again.
+`plugins/disabled/` themselves. While the set is loaded, RGL's QoL plugin holds
+map changes for SourceTV instead of Summon; see
+[SourceTV map-change wait](#sourcetv-map-change-wait).
 
 SOAP DM, the deathmatch that runs until both teams ready up, is enabled only
 by a competitive config. Without tournament mode no one readies up, so SOAP
@@ -122,6 +125,7 @@ executed with the native `exec` from the server console is not tracked.
 | --- | --- |
 | `sm_summon_reload_owner_commands` | Reload the owner-command allowlist. Requires the SourceMod config admin flag. |
 | `sm_config <name>` | Load an approved competitive config from the server console. |
+| `stopchangelevel` | Cancel a map change that is waiting for SourceTV viewers. |
 | `sm_reservation_warning <minutes>` | Broadcast a remaining-time warning. Intended for the Summon agent. |
 | `sm_reservation_ending` | Broadcast the final message and remove players after five seconds. Intended for the Summon agent. |
 | `sm_summon_owner_command <actor_steamid64> <command> [arguments...]` | Run an allowlisted owner command for the Summon web console. Intended for the backend/agent integration. |
@@ -182,6 +186,11 @@ Owner-command execution has the following safeguards:
   underscores, or hyphens.
 - `mp_tournament_whitelist` may only read the current value, clear it, or name
   one existing `cfg/*.txt` file without path traversal.
+- `tv_delay` may only read the current delay or set one whole number of
+  seconds from 0 to 120, the range TF2 allows. The plugin makes `tv_delay` a
+  notify ConVar, so the engine announces every change in chat, including
+  changes made by configs. Players cannot see who watches SourceTV, so a
+  shorter delay would otherwise go unnoticed.
 - A shared one-second cooldown applies between owner commands, including
   commands sent through the web console.
 - Every dispatched command and policy rejection is written to the SourceMod
@@ -215,6 +224,29 @@ smaller than 1 KiB are retried after two and five seconds, up to three attempts
 within a four-minute overall budget. Other non-200 responses fail immediately.
 Successful downloads are saved under the server's `maps/` directory before the
 level changes.
+
+## SourceTV map-change wait
+
+SourceTV viewers see the game `tv_delay` seconds late, so a map change cuts off
+the end of a match for them. Summon holds `changelevel` until they have caught
+up, but only while someone is watching. Demos are recorded in real time and
+lose nothing either way.
+
+- A map change waits while a tournament match is live, or after one ended on
+  the current map. The wait lasts the full `tv_delay` during a match, and until
+  `tv_delay` plus 3 seconds have passed since the match ended after it.
+- Before waiting, Summon reads `tv_status`. With no SourceTV spectators and no
+  relays connected, the map changes at once. During the wait it checks again
+  every five seconds and changes the map as soon as nobody is watching.
+- Players are told in chat when the map will change. A second map change
+  request skips the wait, and `stopchangelevel` from the server console or RCON
+  cancels it.
+
+League configs turn on `tv_delaymapchange_protect`. With it, the engine refuses
+every map change for `tv_delay` plus 3 seconds after a round ends, even when
+nobody is watching, so Summon keeps it off. Under RGL configs, RGL's QoL plugin
+holds map changes after a match itself, so Summon leaves the setting and the
+wait to it.
 
 ## Backend integration
 

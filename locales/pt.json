@@ -464,6 +464,7 @@
         "command_unsafe": "Separadores de comandos e caracteres de controle não são permitidos.",
         "command_invalid_name": "O nome do comando do servidor é inválido.",
         "command_not_allowed": "Esse comando do servidor não é permitido.",
+        "command_invalid_tv_delay": "tv_delay aceita um único número inteiro de segundos entre 0 e 120.",
         "profile_not_public": "Seu perfil Steam deve ser público para criar reservas.",
         "feedback_invalid_category": "Escolha uma categoria para o feedback.",
         "feedback_message_required": "Escreva uma mensagem antes de enviar.",

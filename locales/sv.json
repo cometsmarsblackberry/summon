@@ -464,6 +464,7 @@
         "command_unsafe": "Kommandoavgränsare och kontrolltecken är inte tillåtna.",
         "command_invalid_name": "Serverkommandots namn är ogiltigt.",
         "command_not_allowed": "Det serverkommandot är inte tillåtet.",
+        "command_invalid_tv_delay": "tv_delay tar ett heltal sekunder från 0 till 120.",
         "profile_not_public": "Din Steam-profil måste vara offentlig för att skapa reservationer.",
         "feedback_invalid_category": "Välj en kategori för din feedback.",
         "feedback_message_required": "Skriv ett meddelande innan du skickar.",

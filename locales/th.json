@@ -464,6 +464,7 @@
         "command_unsafe": "ไม่อนุญาตตัวคั่นคำสั่งและอักขระควบคุม",
         "command_invalid_name": "ชื่อคำสั่งเซิร์ฟเวอร์ไม่ถูกต้อง",
         "command_not_allowed": "ไม่อนุญาตคำสั่งเซิร์ฟเวอร์นั้น",
+        "command_invalid_tv_delay": "tv_delay รับค่าเป็นจำนวนเต็มวินาทีเพียงค่าเดียวตั้งแต่ 0 ถึง 120",
         "profile_not_public": "โปรไฟล์ Steam ของคุณต้องเป็นสาธารณะเพื่อสร้างการจอง",
         "feedback_invalid_category": "กรุณาเลือกหมวดหมู่ความคิดเห็น",
         "feedback_message_required": "กรุณาเขียนข้อความก่อนส่ง",

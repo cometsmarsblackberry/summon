@@ -669,6 +669,7 @@ async def run_reservation_command(
             "command_not_allowed": "errors.command_not_allowed",
             "invalid_arguments": "errors.invalid_map_name",
             "invalid_config": "errors.invalid_config",
+            "invalid_tv_delay": "errors.command_invalid_tv_delay",
         }.get(exc.code, "errors.command_failed")
         logger.warning(
             "Owner command rejected reservation=%s actor=%s command=%r outcome=%s",

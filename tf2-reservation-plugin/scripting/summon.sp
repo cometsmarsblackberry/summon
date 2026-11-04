@@ -33,7 +33,14 @@
 // native exec: a config is a command script, so that would grant every
 // command in every reachable .cfg. It loads through !config's checks instead.
 #define OWNER_CONFIG_COMMAND "exec"
+// TF2 clamps tv_delay to 0-120 seconds. Owners may set whole seconds in that
+// range, and OnPluginStart makes the engine announce every change.
+#define OWNER_TV_DELAY_COMMAND "tv_delay"
+#define MAX_OWNER_TV_DELAY 120
 #define OWNER_COMMAND_RESULT_MARKER "SUMMON_OWNER_COMMAND_RESULT"
+// The engine's own SourceTV map-change protection lasts tv_delay plus 3
+// seconds after a round ends. The SourceTV wait keeps the same margin.
+#define STV_WAIT_MARGIN 3.0
 
 // ConVars - set by agent RCON at boot
 ConVar g_cvOwnerSteamID;
@@ -59,6 +66,18 @@ int g_iOwnerCommandCount = 0;
 // Last config loaded through ExecuteConfig. Real configs need a league
 // prefix, so "none" cannot collide with one.
 char g_sCurrentConfig[64] = "none";
+
+// SourceTV wait. g_fMatchLastLiveTime is 0.0 until a tournament match is seen
+// live on the current map.
+ConVar g_cvTournament;
+ConVar g_cvTVDelayMapChangeProtect;
+Handle g_hMatchStateTimer = INVALID_HANDLE;
+float g_fMatchLastLiveTime = 0.0;
+bool g_bSTVWaitActive = false;
+Handle g_hSTVWaitTimer = INVALID_HANDLE;
+int g_iSTVWaitStart = 0;
+int g_iSTVWaitRemaining = 0;
+char g_sSTVWaitMap[PLATFORM_MAX_PATH];
 
 public Plugin myinfo = {
     name = PLUGIN_NAME,
@@ -111,6 +130,37 @@ public void OnPluginStart()
 
     LoadOwnerCommandAllowlist();
 
+    // tv_delay is not a notify ConVar, so the engine tells nobody when it
+    // changes, and players cannot see who watches SourceTV. With the flag,
+    // every change is announced in chat, whether it comes from an owner
+    // command or a config, so a shorter delay cannot go unnoticed.
+    ConVar tvDelay = FindConVar("tv_delay");
+    if (tvDelay == null)
+    {
+        LogError("[summon] tv_delay not found; SourceTV delay changes will not be announced");
+    }
+    else
+    {
+        tvDelay.Flags |= FCVAR_NOTIFY;
+    }
+
+    g_cvTournament = FindConVar("mp_tournament");
+
+    // League configs turn on the engine's map-change protection. It refuses
+    // every map change for tv_delay + 3 seconds after a round ends, even when
+    // nobody watches SourceTV. Summon's SourceTV wait replaces it.
+    g_cvTVDelayMapChangeProtect = FindConVar("tv_delaymapchange_protect");
+    if (g_cvTVDelayMapChangeProtect == null)
+    {
+        LogError("[summon] tv_delaymapchange_protect not found; configs may block map changes after each round");
+    }
+    else
+    {
+        g_cvTVDelayMapChangeProtect.AddChangeHook(ConVar_TVDelayMapChangeProtect);
+        if (!IsRGLQoLLoaded())
+            DisableTVDelayMapChangeProtect();
+    }
+
     if (CommandExists("sm_command"))
     {
         // A shared Reg*Cmd name can execute multiple plugin callbacks. Do not
@@ -161,6 +211,15 @@ public void OnPluginStart()
         Command_ServerOwnerCommand,
         "Run one restricted reservation-owner command for the web console"
     );
+
+    // changelevel only runs as a server command: from the console, RCON,
+    // owner commands, and ForceChangeLevel.
+    RegServerCmd("changelevel", Command_Changelevel);
+    RegServerCmd(
+        "stopchangelevel",
+        Command_StopChangelevel,
+        "Cancel a map change that is waiting for SourceTV viewers"
+    );
     LogMessage("[summon] Plugin loaded v%s", PLUGIN_VERSION);
 }
 
@@ -194,6 +253,9 @@ public void OnMapEnd()
     // so reset handles to avoid invalid-handle errors in OnMapStart.
     g_hPlayerUpdateTimer = INVALID_HANDLE;
     g_hExpiryTimer = INVALID_HANDLE;
+    g_hMatchStateTimer = INVALID_HANDLE;
+    g_hSTVWaitTimer = INVALID_HANDLE;
+    g_bSTVWaitActive = false;
 }
 
 public void OnMapStart()
@@ -212,6 +274,13 @@ public void OnMapStart()
     }
     g_bExpiryKickDone = false;
     g_hExpiryTimer = CreateTimer(1.0, Timer_ExpiryCheck, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+
+    if (g_hMatchStateTimer != INVALID_HANDLE)
+    {
+        KillTimer(g_hMatchStateTimer);
+    }
+    g_fMatchLastLiveTime = 0.0;
+    g_hMatchStateTimer = CreateTimer(1.0, Timer_MatchState, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 
     // Report the new map before players finish loading it, so the MOTD they
     // are shown already has it.
@@ -628,6 +697,23 @@ bool GetOwnerConfigName(const char[] value, char[] name, int nameSize)
     return true;
 }
 
+bool IsAllowedTVDelay(const char[] value)
+{
+    // Whole seconds only. The engine reads any other text as 0, so a typo
+    // would otherwise remove the delay.
+    int length = strlen(value);
+    if (length <= 0 || length > 3)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        if (value[i] < '0' || value[i] > '9')
+            return false;
+    }
+
+    return StringToInt(value) <= MAX_OWNER_TV_DELAY;
+}
+
 bool AreOwnerCommandArgumentsAllowed(
     const char[] operation,
     int valueArgumentCount,
@@ -636,6 +722,11 @@ bool AreOwnerCommandArgumentsAllowed(
 {
     if (StrEqual(operation, "changelevel"))
         return valueArgumentCount == 1 && IsSafeMapName(firstValue);
+
+    // Reading the current delay takes no value argument.
+    if (StrEqual(operation, OWNER_TV_DELAY_COMMAND))
+        return valueArgumentCount == 0
+            || (valueArgumentCount == 1 && IsAllowedTVDelay(firstValue));
 
     if (StrEqual(operation, OWNER_CONFIG_COMMAND))
     {
@@ -989,6 +1080,14 @@ bool ExecuteOwnerServerCommand(
                 argumentError,
                 sizeof(argumentError),
                 "Changelevel requires exactly one map name containing only letters, numbers, underscores, or hyphens."
+            );
+        }
+        else if (StrEqual(operation, OWNER_TV_DELAY_COMMAND))
+        {
+            strcopy(
+                argumentError,
+                sizeof(argumentError),
+                "tv_delay takes one whole number of seconds from 0 to 120."
             );
         }
         else
@@ -1546,6 +1645,255 @@ public int OwnerMapMenuHandler(Menu menu, MenuAction action, int param1, int par
 }
 
 // ============================================================================
+// SourceTV Wait
+// ============================================================================
+
+// SourceTV viewers see the game tv_delay seconds late, and a map change cuts
+// off what they have not seen yet. During or after a tournament match, a map
+// change waits for them to catch up, but only while someone watches SourceTV
+// or a relay is connected. Demos are recorded in real time and lose nothing.
+// A second changelevel during the wait changes the map at once.
+
+bool IsRGLQoLLoaded()
+{
+    return FindPluginByFile("rglqol.smx") != null;
+}
+
+bool IsTournamentMatchLive()
+{
+    if (g_cvTournament == null || !g_cvTournament.BoolValue)
+        return false;
+
+    // Teams have not readied up yet, or the match ended and the server went
+    // back to waiting for them.
+    if (GameRules_GetProp("m_bAwaitingReadyRestart") || GameRules_GetProp("m_bInWaitingForPlayers"))
+        return false;
+
+    RoundState state = GameRules_GetRoundState();
+    return state != RoundState_Pregame && state != RoundState_GameOver;
+}
+
+public Action Timer_MatchState(Handle timer)
+{
+    if (IsTournamentMatchLive())
+        g_fMatchLastLiveTime = GetEngineTime();
+    return Plugin_Continue;
+}
+
+// Returns how many seconds a map change must wait for SourceTV viewers to
+// catch up with this map's match, or 0 if it need not wait.
+int GetSTVWaitSeconds()
+{
+    // RGL's QoL plugin holds map changes after a match itself.
+    if (IsRGLQoLLoaded())
+        return 0;
+
+    ConVar tvEnable = FindConVar("tv_enable");
+    ConVar tvDelay = FindConVar("tv_delay");
+    if (tvEnable == null || tvDelay == null || !tvEnable.BoolValue || tvDelay.FloatValue <= 0.0)
+        return 0;
+
+    if (IsTournamentMatchLive())
+        return RoundToCeil(tvDelay.FloatValue);
+
+    if (g_fMatchLastLiveTime <= 0.0)
+        return 0;
+
+    float remaining = g_fMatchLastLiveTime + tvDelay.FloatValue + STV_WAIT_MARGIN - GetEngineTime();
+    if (remaining < 1.0)
+        return 0;
+    return RoundToCeil(remaining);
+}
+
+// Reads the spectators and relays connected to this server from tv_status.
+// Viewers on a relay are not counted, but their relay is. Returns false if
+// the output cannot be read.
+bool GetSTVAudience(int &spectators, int &relays)
+{
+    spectators = 0;
+    relays = 0;
+
+    char status[2048];
+    ServerCommandEx(status, sizeof(status), "tv_status");
+
+    if (StrContains(status, "SourceTV not active") != -1)
+        return true;
+
+    int local = StrContains(status, "Local Slots ");
+    if (local == -1)
+        return false;
+
+    int spectatorsOffset = StrContains(status[local], "Spectators ");
+    if (spectatorsOffset == -1)
+        return false;
+    spectatorsOffset += local + strlen("Spectators ");
+
+    int relaysOffset = StrContains(status[spectatorsOffset], "Proxies ");
+    if (relaysOffset == -1)
+        return false;
+    relaysOffset += spectatorsOffset + strlen("Proxies ");
+
+    return StringToIntEx(status[spectatorsOffset], spectators) > 0
+        && StringToIntEx(status[relaysOffset], relays) > 0;
+}
+
+public Action Command_Changelevel(int args)
+{
+    // g_bSTVWaitActive stays set until the map changes, so a second
+    // changelevel, and Summon's own when the wait ends, go straight through.
+    if (args < 1 || g_bSTVWaitActive)
+        return Plugin_Continue;
+
+    int waitSeconds = GetSTVWaitSeconds();
+    if (waitSeconds <= 0)
+        return Plugin_Continue;
+
+    // mapdownloader handles a missing map and changes the level again once
+    // it is downloaded.
+    char mapName[PLATFORM_MAX_PATH];
+    GetCmdArg(1, mapName, sizeof(mapName));
+    if (!IsMapValid(mapName))
+        return Plugin_Continue;
+
+    g_bSTVWaitActive = true;
+    g_iSTVWaitStart = waitSeconds;
+    g_iSTVWaitRemaining = waitSeconds;
+    strcopy(g_sSTVWaitMap, sizeof(g_sSTVWaitMap), mapName);
+
+    // Inside a command run from the command buffer, as changelevel always
+    // is, ServerCommandEx returns before tv_status has printed anything.
+    RequestFrame(Frame_StartSTVWait);
+    return Plugin_Stop;
+}
+
+public void Frame_StartSTVWait()
+{
+    // Cancelled, or the map changed some other way.
+    if (!g_bSTVWaitActive)
+        return;
+
+    int spectators, relays;
+    if (!GetSTVAudience(spectators, relays))
+    {
+        LogError(
+            "[summon] Could not read tv_status; changelevel to %s waits %d seconds for SourceTV",
+            g_sSTVWaitMap,
+            g_iSTVWaitRemaining
+        );
+    }
+    else if (spectators == 0 && relays == 0)
+    {
+        LogMessage("[summon] Nobody is watching SourceTV; changelevel to %s does not wait", g_sSTVWaitMap);
+        ForceChangeLevel(g_sSTVWaitMap, "Summon: nobody is watching SourceTV");
+        return;
+    }
+    else
+    {
+        LogMessage(
+            "[summon] Changelevel to %s waits %d seconds for %d SourceTV spectator(s) and %d relay(s)",
+            g_sSTVWaitMap,
+            g_iSTVWaitRemaining,
+            spectators,
+            relays
+        );
+    }
+
+    PrintToChatAll(
+        "\x01[\x07FF6600Reserve\x01] Changing map to \x0799FF99%s\x01 in %d seconds so SourceTV viewers can catch up.",
+        g_sSTVWaitMap,
+        g_iSTVWaitRemaining
+    );
+    PrintToChatAll("\x01[\x07FF6600Reserve\x01] Change the map again to skip the wait.");
+    PrintToServer("[summon] To cancel the map change, run stopchangelevel.");
+    g_hSTVWaitTimer = CreateTimer(1.0, Timer_STVWait, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_STVWait(Handle timer)
+{
+    g_iSTVWaitRemaining--;
+
+    if (g_iSTVWaitRemaining <= 0)
+    {
+        g_hSTVWaitTimer = INVALID_HANDLE;
+        ForceChangeLevel(g_sSTVWaitMap, "Summon: SourceTV viewers caught up");
+        return Plugin_Stop;
+    }
+
+    // tv_status also prints its output to the server console, so check only
+    // every few seconds.
+    int spectators, relays;
+    if ((g_iSTVWaitStart - g_iSTVWaitRemaining) % 5 == 0
+        && GetSTVAudience(spectators, relays)
+        && spectators == 0
+        && relays == 0)
+    {
+        g_hSTVWaitTimer = INVALID_HANDLE;
+        LogMessage("[summon] SourceTV viewers left; changing level to %s", g_sSTVWaitMap);
+        PrintToChatAll("\x01[\x07FF6600Reserve\x01] Nobody is watching SourceTV any more. Changing map now.");
+        ForceChangeLevel(g_sSTVWaitMap, "Summon: SourceTV viewers left");
+        return Plugin_Stop;
+    }
+
+    // Skip reminders right after the first announcement.
+    bool reminder = g_iSTVWaitRemaining == 60
+        || g_iSTVWaitRemaining == 30
+        || g_iSTVWaitRemaining == 10;
+    if (reminder && g_iSTVWaitStart - g_iSTVWaitRemaining >= 5)
+    {
+        PrintToChatAll(
+            "\x01[\x07FF6600Reserve\x01] Changing map to \x0799FF99%s\x01 in %d seconds...",
+            g_sSTVWaitMap,
+            g_iSTVWaitRemaining
+        );
+    }
+
+    if (g_iSTVWaitRemaining <= 5)
+    {
+        PrintHintTextToAll(
+            "Changing map in %d second%s...",
+            g_iSTVWaitRemaining,
+            g_iSTVWaitRemaining == 1 ? "" : "s"
+        );
+    }
+
+    return Plugin_Continue;
+}
+
+public Action Command_StopChangelevel(int args)
+{
+    if (!g_bSTVWaitActive)
+    {
+        PrintToServer("[summon] No map change is waiting for SourceTV.");
+        return Plugin_Handled;
+    }
+
+    if (g_hSTVWaitTimer != INVALID_HANDLE)
+    {
+        KillTimer(g_hSTVWaitTimer);
+        g_hSTVWaitTimer = INVALID_HANDLE;
+    }
+    g_bSTVWaitActive = false;
+
+    LogMessage("[summon] Changelevel to %s cancelled", g_sSTVWaitMap);
+    PrintToServer("[summon] Map change cancelled.");
+    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Map change cancelled.");
+    return Plugin_Handled;
+}
+
+void DisableTVDelayMapChangeProtect()
+{
+    if (g_cvTVDelayMapChangeProtect != null && g_cvTVDelayMapChangeProtect.BoolValue)
+        g_cvTVDelayMapChangeProtect.BoolValue = false;
+}
+
+public void ConVar_TVDelayMapChangeProtect(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+    // RGL configs keep the protection along with RGL's own wait.
+    if (!IsRGLQoLLoaded())
+        DisableTVDelayMapChangeProtect();
+}
+
+// ============================================================================
 // Restart
 // ============================================================================
 
@@ -1756,10 +2104,6 @@ void EnableRGLPlugins()
 
 void DisableRGLPlugins()
 {
-    // rglqol unloads Wait For STV on every map start. SourceMod loads it
-    // again only on the next map change.
-    bool restoreWaitForSTV = FindPluginByFile("rglqol.smx") != null;
-
     // Unload all RGL plugins first to stop the Updater from re-downloading
     // files while we move them.
     for (int i = sizeof(g_sRGLPlugins) - 1; i >= 0; i--)
@@ -1779,13 +2123,11 @@ void DisableRGLPlugins()
         MovePlugin(g_sRGLPlugins[i], false);
     }
 
-    if (restoreWaitForSTV && FindPluginByFile("waitforstv.smx") == null)
-    {
-        char path[PLATFORM_MAX_PATH];
-        BuildPath(Path_SM, path, sizeof(path), "plugins/waitforstv.smx");
-        if (FileExists(path))
-            ServerCommand("sm plugins load waitforstv.smx");
-    }
+    // RGL configs turn the engine's map-change protection on, and a config
+    // that does not set it would leave it on. Run from RCON, the unloads
+    // above may not have happened yet, so the change hook could still find
+    // rglqol loaded.
+    DisableTVDelayMapChangeProtect();
 }
 
 void EnableSOAPPlugins()

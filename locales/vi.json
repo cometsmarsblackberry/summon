@@ -464,6 +464,7 @@
         "command_unsafe": "Không cho phép ký tự phân tách lệnh và ký tự điều khiển.",
         "command_invalid_name": "Tên lệnh máy chủ không hợp lệ.",
         "command_not_allowed": "Lệnh máy chủ đó không được phép.",
+        "command_invalid_tv_delay": "tv_delay chỉ nhận một số giây nguyên từ 0 đến 120.",
         "profile_not_public": "Hồ sơ Steam của bạn phải công khai để tạo đặt chỗ.",
         "feedback_invalid_category": "Hãy chọn danh mục góp ý.",
         "feedback_message_required": "Hãy viết nội dung trước khi gửi.",

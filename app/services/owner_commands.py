@@ -33,6 +33,10 @@ _COMMAND_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 # command in the file.  The plugin decides whether the config exists.
 OWNER_CONFIG_COMMAND = "exec"
 _CONFIG_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,63}(?:\.cfg)?$", re.IGNORECASE)
+# TF2 clamps tv_delay to 0-120 seconds.  Only whole seconds are accepted: the
+# engine reads other text as 0, so a typo would remove the delay.
+MAX_TV_DELAY_SECONDS = 120
+_TV_DELAY_RE = re.compile(r"^[0-9]{1,3}$")
 _ERROR_CODE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
 
 
@@ -246,6 +250,18 @@ def validate_owner_command_line(
             raise OwnerCommandValidationError(
                 "invalid_arguments",
                 "Changelevel requires exactly one valid map name.",
+            )
+    if operation.lower() == "tv_delay":
+        # Without an argument the command only reports the current delay.
+        arguments = [argument for argument in command.split(" ")[1:] if argument]
+        if arguments and (
+            len(arguments) != 1
+            or _TV_DELAY_RE.fullmatch(arguments[0]) is None
+            or int(arguments[0]) > MAX_TV_DELAY_SECONDS
+        ):
+            raise OwnerCommandValidationError(
+                "invalid_tv_delay",
+                "tv_delay takes one whole number of seconds from 0 to 120.",
             )
     return command
 

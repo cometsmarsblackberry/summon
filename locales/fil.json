@@ -464,6 +464,7 @@
         "command_unsafe": "Hindi pinapayagan ang command separator at control character.",
         "command_invalid_name": "Hindi valid ang pangalan ng server command.",
         "command_not_allowed": "Hindi pinapayagan ang server command na iyon.",
+        "command_invalid_tv_delay": "Isang buong bilang ng segundo mula 0 hanggang 120 lang ang tinatanggap ng tv_delay.",
         "profile_not_public": "Ang iyong Steam profile ay dapat na pampubliko para gumawa ng mga reserbasyon.",
         "feedback_invalid_category": "Pumili ng kategorya ng feedback.",
         "feedback_message_required": "Sumulat ng mensahe bago magpadala.",

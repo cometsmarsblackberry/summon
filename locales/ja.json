@@ -464,6 +464,7 @@
         "command_unsafe": "コマンド区切り文字と制御文字は使用できません。",
         "command_invalid_name": "サーバーコマンド名が無効です。",
         "command_not_allowed": "そのサーバーコマンドは許可されていません。",
+        "command_invalid_tv_delay": "tv_delay には 0〜120 の整数（秒）を 1 つ指定してください。",
         "profile_not_public": "予約を作成するにはSteamプロフィールを公開に設定する必要があります。",
         "feedback_invalid_category": "フィードバックのカテゴリを選択してください。",
         "feedback_message_required": "送信する前にメッセージを入力してください。",
