@@ -228,10 +228,13 @@
         "open_source_title": "오픈 소스",
         "open_source_body": "이 프로젝트는 오픈 소스이며, GNU Affero General Public License v3(AGPL-3.0)에 따라 라이선스되었으며, 다음에서 이용할 수 있습니다:",
         "bans_title": "밴",
-        "bans_body_1": "서비스를 남용하면 영구 밴됩니다.",
-        "bans_body_rules": "{site_name} 규칙",
-        "bans_body_2": "도 예약된 서버에 적용됩니다. 밴된 플레이어의 전체 목록은",
-        "bans_body_link": "밴 페이지"
+        "bans_body": "서비스를 남용하면 영구 밴됩니다.",
+        "bans_rules_1": "플레이하기 전에",
+        "bans_rules_link": "규칙을",
+        "bans_rules_2": "확인하세요.",
+        "bans_list_1": "밴된 플레이어의 전체 목록은",
+        "bans_list_link": "밴 페이지",
+        "bans_list_2": "에서 확인할 수 있습니다."
     },
     "profile": {
         "title": "프로필 — {site_name}",

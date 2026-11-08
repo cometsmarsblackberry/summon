@@ -228,10 +228,13 @@
         "open_source_title": "Öppen källkod",
         "open_source_body": "Detta projekt är öppen källkod, licensierat under GNU Affero General Public License v3 (AGPL-3.0), och tillgängligt på",
         "bans_title": "Banningar",
-        "bans_body_1": "Om du missbrukar tjänsten blir du permanent bannad. De",
-        "bans_body_rules": "{site_name}-reglerna",
-        "bans_body_2": "gäller även för reserverade servrar. Du kan se hela listan över bannade spelare på",
-        "bans_body_link": "bannsidan"
+        "bans_body": "Om du missbrukar tjänsten blir du permanent bannad.",
+        "bans_rules_1": "Läs",
+        "bans_rules_link": "reglerna",
+        "bans_rules_2": "innan du spelar.",
+        "bans_list_1": "Du kan se hela listan över bannade spelare på",
+        "bans_list_link": "bannsidan",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Profil — {site_name}",

@@ -228,10 +228,13 @@
         "open_source_title": "Open Source",
         "open_source_body": "Ang proyektong ito ay open source, lisensyado sa ilalim ng GNU Affero General Public License v3 (AGPL-3.0), at makukuha sa",
         "bans_title": "Mga Ban",
-        "bans_body_1": "Kung aabusuhan mo ang serbisyo, permanente kang maba-ban.",
-        "bans_body_rules": "mga patakaran ng {site_name}",
-        "bans_body_2": "nalalapat din sa mga reserved na server. Maaari mong tingnan ang buong listahan ng mga banned na manlalaro sa",
-        "bans_body_link": "pahina ng mga ban"
+        "bans_body": "Kung aabusuhan mo ang serbisyo, permanente kang maba-ban.",
+        "bans_rules_1": "Basahin ang",
+        "bans_rules_link": "mga patakaran",
+        "bans_rules_2": "bago maglaro.",
+        "bans_list_1": "Maaari mong tingnan ang buong listahan ng mga banned na manlalaro sa",
+        "bans_list_link": "pahina ng mga ban",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Profile — {site_name}",

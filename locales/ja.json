@@ -228,10 +228,13 @@
         "open_source_title": "オープンソース",
         "open_source_body": "このプロジェクトはオープンソースであり、GNU Affero General Public License v3（AGPL-3.0）の下でライセンスされており、以下で公開されています：",
         "bans_title": "BAN",
-        "bans_body_1": "サービスを乱用すると、永久にBANされます。",
-        "bans_body_rules": "{site_name}のルール",
-        "bans_body_2": "も予約済みサーバーに適用されます。BANされたプレイヤーの全リストは",
-        "bans_body_link": "BANページ"
+        "bans_body": "サービスを乱用すると、永久にBANされます。",
+        "bans_rules_1": "プレイする前に",
+        "bans_rules_link": "ルール",
+        "bans_rules_2": "をご確認ください。",
+        "bans_list_1": "BANされたプレイヤーの全リストは",
+        "bans_list_link": "BANページ",
+        "bans_list_2": "で確認できます。"
     },
     "profile": {
         "title": "プロフィール — {site_name}",

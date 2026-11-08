@@ -228,10 +228,13 @@
         "open_source_title": "Open Source",
         "open_source_body": "This project is open source, licensed under the GNU Affero General Public License v3 (AGPL-3.0), and available on",
         "bans_title": "Bans",
-        "bans_body_1": "If you abuse the service, you will be permanently banned. The",
-        "bans_body_rules": "{site_name} rules",
-        "bans_body_2": "also apply to reserved servers. You can view the full list of banned players on the",
-        "bans_body_link": "bans page"
+        "bans_body": "If you abuse the service, you will be permanently banned.",
+        "bans_rules_1": "Read the",
+        "bans_rules_link": "rules",
+        "bans_rules_2": "before you play.",
+        "bans_list_1": "You can view the full list of banned players on the",
+        "bans_list_link": "bans page",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Profile — {site_name}",

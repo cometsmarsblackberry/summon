@@ -78,10 +78,12 @@
 
         <div class="bg-white rounded-lg p-8 border border-slate-200">
             <h2 class="text-2xl font-bold text-slate-900">{{ _('about.bans_title') }}</h2>
-            <p class="mt-2 text-slate-600">{{ _('about.bans_body_1') }}
-                {% if rules_url %}<a href="{{ rules_url }}" class="text-brand-600 hover:underline">{{ _('about.bans_body_rules') }}</a>
-                {{ _('about.bans_body_2') }}{% endif %}
-                <a href="/bans" class="text-brand-600 hover:underline">{{ _('about.bans_body_link') }}</a>.</p>
+            <p class="mt-2 text-slate-600">{{ _('about.bans_body') }}
+                {% if rules_url %}{{ _('about.bans_rules_1') }}
+                <a href="{{ rules_url }}" class="text-brand-600 hover:underline">{{ _('about.bans_rules_link') }}</a>
+                {{ _('about.bans_rules_2') }}{% endif %}
+                {{ _('about.bans_list_1') }}
+                <a href="/bans" class="text-brand-600 hover:underline">{{ _('about.bans_list_link') }}</a>{{ _('about.bans_list_2') }}</p>
         </div>
 
         <div class="bg-white rounded-lg p-8 border border-slate-200">

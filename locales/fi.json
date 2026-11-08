@@ -228,10 +228,13 @@
         "open_source_title": "Avoin lähdekoodi",
         "open_source_body": "Tämä projekti on avoimen lähdekoodin, lisensoitu GNU Affero General Public License v3 (AGPL-3.0) -lisenssillä, ja saatavilla",
         "bans_title": "Kiellot",
-        "bans_body_1": "Jos väärinkäytät palvelua, sinut kielletään pysyvästi.",
-        "bans_body_rules": "{site_name}:n säännöt",
-        "bans_body_2": "koskevat myös varattuja palvelimia. Voit tarkastella täydellistä luetteloa kielletyistä pelaajista",
-        "bans_body_link": "kieltosivu"
+        "bans_body": "Jos väärinkäytät palvelua, sinut kielletään pysyvästi.",
+        "bans_rules_1": "Lue",
+        "bans_rules_link": "säännöt",
+        "bans_rules_2": "ennen kuin pelaat.",
+        "bans_list_1": "Voit tarkastella täydellistä luetteloa kielletyistä pelaajista",
+        "bans_list_link": "kieltosivulla",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Profiili — {site_name}",

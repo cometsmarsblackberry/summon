@@ -228,10 +228,13 @@
         "open_source_title": "Mã nguồn mở",
         "open_source_body": "Dự án này là mã nguồn mở, được cấp phép theo GNU Affero General Public License v3 (AGPL-3.0), và có sẵn trên",
         "bans_title": "Cấm",
-        "bans_body_1": "Nếu bạn lạm dụng dịch vụ, bạn sẽ bị cấm vĩnh viễn.",
-        "bans_body_rules": "Quy tắc {site_name}",
-        "bans_body_2": "cũng áp dụng cho các máy chủ đã đặt. Bạn có thể xem danh sách đầy đủ người chơi bị cấm trên",
-        "bans_body_link": "trang cấm"
+        "bans_body": "Nếu bạn lạm dụng dịch vụ, bạn sẽ bị cấm vĩnh viễn.",
+        "bans_rules_1": "Hãy đọc",
+        "bans_rules_link": "quy tắc",
+        "bans_rules_2": "trước khi chơi.",
+        "bans_list_1": "Bạn có thể xem danh sách đầy đủ người chơi bị cấm trên",
+        "bans_list_link": "trang cấm",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Hồ sơ — {site_name}",

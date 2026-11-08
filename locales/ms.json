@@ -228,10 +228,13 @@
         "open_source_title": "Sumber Terbuka",
         "open_source_body": "Projek ini adalah sumber terbuka, dilesenkan di bawah GNU Affero General Public License v3 (AGPL-3.0), dan boleh didapati di",
         "bans_title": "Larangan",
-        "bans_body_1": "Jika anda menyalahgunakan perkhidmatan, anda akan dilarang secara kekal.",
-        "bans_body_rules": "Peraturan {site_name}",
-        "bans_body_2": "juga terpakai kepada pelayan yang ditempah. Anda boleh melihat senarai penuh pemain yang dilarang di",
-        "bans_body_link": "halaman larangan"
+        "bans_body": "Jika anda menyalahgunakan perkhidmatan, anda akan dilarang secara kekal.",
+        "bans_rules_1": "Baca",
+        "bans_rules_link": "peraturan",
+        "bans_rules_2": "sebelum bermain.",
+        "bans_list_1": "Anda boleh melihat senarai penuh pemain yang dilarang di",
+        "bans_list_link": "halaman larangan",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Profil — {site_name}",

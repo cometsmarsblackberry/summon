@@ -228,10 +228,13 @@
         "open_source_title": "Código Abierto",
         "open_source_body": "Este proyecto es de código abierto, licenciado bajo la GNU Affero General Public License v3 (AGPL-3.0), y está disponible en",
         "bans_title": "Bans",
-        "bans_body_1": "Si abusas del servicio, serás baneado permanentemente. Las",
-        "bans_body_rules": "reglas de {site_name}",
-        "bans_body_2": "también se aplican a los servidores reservados. Puedes ver la lista completa de jugadores baneados en la",
-        "bans_body_link": "página de bans"
+        "bans_body": "Si abusas del servicio, serás baneado permanentemente.",
+        "bans_rules_1": "Lee las",
+        "bans_rules_link": "reglas",
+        "bans_rules_2": "antes de jugar.",
+        "bans_list_1": "Puedes ver la lista completa de jugadores baneados en la",
+        "bans_list_link": "página de bans",
+        "bans_list_2": "."
     },
     "profile": {
         "title": "Perfil — {site_name}",
