@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 ALLOWED_PREFIXES = (
     "rgl_", "etf2l_", "fbtf_", "tfarena_", "ultitrio_", "ozfortress_", "cltf2_", "afc_", "af_",
-    "1v1mge", "2v2mge",
+    "1v1mge", "2v2mge", "kotf",
 )
 _SKIP_SUFFIXES = ("_base", "_custom", "_common")
 
@@ -44,6 +44,9 @@ _FORMAT_MAP: list[tuple[str, str, str]] = [
     # The MGE configs are named after their format, without a league prefix.
     ("1v1mge", "MGE", "1v1"),
     ("2v2mge", "MGE", "2v2"),
+    # The King of the Flag config has no league prefix either. It allows two
+    # soldiers per team.
+    ("kotf", "KOTF", "2v2"),
     # Fallback single-prefix entries for configs like etf2l_ultiduo
     ("etf2l_", "ETF2L", "Other"),
     ("fbtf_", "FBTF", "Other"),

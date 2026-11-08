@@ -43,6 +43,20 @@ class MgeConfigTests(unittest.TestCase):
         })
 
 
+class KotfConfigTests(unittest.TestCase):
+    def test_config_is_classified(self):
+        self.assertEqual(classify_config("kotf"), ("KOTF", "2v2"))
+
+    def test_config_is_selectable(self):
+        self.assertEqual(filter_user_selectable(["kotf", "etf2l"]), ["kotf"])
+
+    def test_league_is_sorted_with_the_other_leagues(self):
+        grouped = group_for_ui(["ultitrio_koth", "kotf", "1v1mge", "etf2l_6v6_5cp"])
+
+        self.assertEqual(list(grouped), ["ETF2L", "KOTF", "MGE", "Ultitrio"])
+        self.assertEqual(grouped["KOTF"], {"2v2": [{"cfg_file": "kotf", "name": "kotf"}]})
+
+
 class GroupForUiTests(unittest.TestCase):
     def test_popular_leagues_are_listed_first(self):
         grouped = group_for_ui([
