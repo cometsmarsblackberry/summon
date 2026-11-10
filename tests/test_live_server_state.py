@@ -67,13 +67,34 @@ class LiveServerStateTests(unittest.IsolatedAsyncioTestCase):
                     db=db,
                 )
 
-    async def test_download_url_only_for_listed_maps(self):
+    async def test_download_url_for_listed_and_unlisted_maps(self):
         async with self.sessions() as db:
-            self.assertIsNone(await get_map_download_url("ctf_2fort", db))
             self.assertEqual(
                 "https://fastdl.example/tf/maps/koth_product_final.bsp",
                 await get_map_download_url("koth_product_final", db),
             )
+            self.assertEqual(
+                "https://fastdl.example/tf/maps/ctf_2fort.bsp",
+                await get_map_download_url("ctf_2fort", db),
+            )
+
+    async def test_no_download_url_for_names_that_are_not_plain(self):
+        async with self.sessions() as db:
+            for name in ("workshop/123456", "../cfg/server", "cp_a?b=c", "", None):
+                self.assertIsNone(await get_map_download_url(name, db), name)
+
+    async def test_status_links_an_unlisted_map_changed_to_in_game(self):
+        async with self.sessions() as db:
+            reservation = await db.get(Reservation, 301)
+            reservation.current_map = "ctf_2fort"
+            await db.commit()
+
+        response = await self.get_status()
+
+        self.assertEqual(
+            "https://fastdl.example/tf/maps/ctf_2fort.bsp",
+            response.map_download_url,
+        )
 
     async def test_status_reports_map_and_config_changed_in_game(self):
         async with self.sessions() as db:

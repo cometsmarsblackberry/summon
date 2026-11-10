@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.instance import GameMap
+from app.utils.maps import is_valid_map_name
 
 
 async def get_selectable_maps(db: AsyncSession) -> list[dict]:
@@ -28,14 +29,15 @@ async def get_selectable_maps(db: AsyncSession) -> list[dict]:
 
 
 async def get_map_download_url(map_name: str, db: AsyncSession) -> str | None:
-    """Return the FastDL link for a listed map, or None for unknown maps.
+    """Return the FastDL link for a map, or None when the name is not plain.
 
-    Maps changed to in game can be missing from the map list, so FastDL
-    may not have them.
+    The map does not have to be in the map list. A server downloads the maps
+    it lacks from FastDL, so a map changed to in game is normally there too.
+    The name can come from the game server, so only a plain one is put in
+    the link.
     """
-    result = await db.execute(select(GameMap).where(GameMap.name == map_name))
-    game_map = result.scalar_one_or_none()
-    if not game_map:
+    map_name = (map_name or "").strip()
+    if not is_valid_map_name(map_name):
         return None
 
     from app.services.settings import get_fastdl_url
