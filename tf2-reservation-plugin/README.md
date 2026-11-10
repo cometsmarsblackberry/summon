@@ -119,6 +119,27 @@ at boot, the web panel, `!config`, the menus, or `exec` through `!command`. It
 shows as `none` before any config is loaded and after `summon_reset`. A config
 executed with the native `exec` from the server console is not tracked.
 
+A config stays loaded when the map changes, so it can end up on a map of
+another game mode. When the current config is named for one mode (`5cp`,
+`3cp`, `koth`, `stopwatch`, or `ctf`) and the map plays another, Summon says so
+in chat and names the config for the map's mode in the same league and format,
+if one exists:
+
+```
+[Reserve] Config mismatch: koth_product_final is KOTH, but the config is etf2l_6v6_5cp.
+[Reserve] The reservation owner can load !config etf2l_6v6_koth instead.
+```
+
+The warning appears 30 seconds after the first player joins a map, a second
+after a config loads, and when a team first readies up. Each map and config
+pair is reported at most once after joining or loading and once at ready-up.
+Summon never changes the config itself. The map's mode comes from the game
+rules: Payload and Attack/Defend maps, where RED starts with every control
+point, count as `stopwatch`, and other control point maps as `5cp` or `3cp`.
+Nothing is reported for configs named for no mode, such as `etf2l_ultiduo`,
+for Payload Race and other modes without a config of their own, or for BBall,
+Ultiduo, Ultitrio, and King of the Flag maps.
+
 ### Administrators and server console
 
 | Console command | Description |

@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.9"
+#define PLUGIN_VERSION "1.6.10"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -41,6 +41,15 @@
 // The engine's own SourceTV map-change protection lasts tv_delay plus 3
 // seconds after a round ends. The SourceTV wait keeps the same margin.
 #define STV_WAIT_MARGIN 3.0
+// The config mismatch check waits for joining players to finish loading, and
+// for the "Loaded config" chat line that follows a config load.
+#define CONFIG_MISMATCH_JOIN_DELAY 30.0
+#define CONFIG_MISMATCH_LOAD_DELAY 1.0
+// CTFGameRules m_nGameType values. KOTH maps are control point maps too.
+#define TF_GAMETYPE_CTF 1
+#define TF_GAMETYPE_CP 2
+#define TF_GAMETYPE_ESCORT 3
+#define TF_TEAM_RED 2
 
 // ConVars - set by agent RCON at boot
 ConVar g_cvOwnerSteamID;
@@ -66,6 +75,12 @@ int g_iOwnerCommandCount = 0;
 // Last config loaded through ExecuteConfig. Real configs need a league
 // prefix, so "none" cannot collide with one.
 char g_sCurrentConfig[64] = "none";
+
+// Config mismatch warning. Both flags are cleared when the map or the config
+// changes.
+Handle g_hConfigMismatchTimer = INVALID_HANDLE;
+bool g_bConfigMismatchChecked = false;
+bool g_bConfigMismatchReadyChecked = false;
 
 // SourceTV wait. g_fMatchLastLiveTime is 0.0 until a tournament match is seen
 // live on the current map.
@@ -145,6 +160,11 @@ public void OnPluginStart()
     }
 
     g_cvTournament = FindConVar("mp_tournament");
+
+    if (!HookEventEx("tournament_stateupdate", Event_TournamentStateUpdate))
+    {
+        LogError("[summon] tournament_stateupdate not found; config mismatches will not be reported at ready-up");
+    }
 
     // League configs turn on the engine's map-change protection. It refuses
     // every map change for tv_delay + 3 seconds after a round ends, even when
@@ -256,6 +276,7 @@ public void OnMapEnd()
     g_hMatchStateTimer = INVALID_HANDLE;
     g_hSTVWaitTimer = INVALID_HANDLE;
     g_bSTVWaitActive = false;
+    g_hConfigMismatchTimer = INVALID_HANDLE;
 }
 
 public void OnMapStart()
@@ -282,6 +303,11 @@ public void OnMapStart()
     g_fMatchLastLiveTime = 0.0;
     g_hMatchStateTimer = CreateTimer(1.0, Timer_MatchState, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 
+    // The loaded config may not suit the new map. The check runs once
+    // players have joined.
+    g_bConfigMismatchChecked = false;
+    g_bConfigMismatchReadyChecked = false;
+
     // Report the new map before players finish loading it, so the MOTD they
     // are shown already has it.
     SendPlayerUpdate();
@@ -294,6 +320,11 @@ public void OnClientPostAdminCheck(int client)
 
     SendPlayerUpdate();
     CreateTimer(PLAYER_JOIN_REFRESH_DELAY, Timer_SendPlayerUpdate, _, TIMER_FLAG_NO_MAPCHANGE);
+
+    // Players rejoin after every map change, so this also covers a config
+    // that no longer suits the map, and one loaded while the server was empty.
+    if (!g_bConfigMismatchChecked && g_hConfigMismatchTimer == INVALID_HANDLE)
+        ScheduleConfigMismatchCheck(CONFIG_MISMATCH_JOIN_DELAY);
 }
 
 public void OnClientDisconnect(int client)
@@ -2261,6 +2292,10 @@ void ExecuteConfig(const char[] cfgFile)
     else
         strcopy(g_sCurrentConfig, sizeof(g_sCurrentConfig), cfgFile);
 
+    g_bConfigMismatchChecked = false;
+    g_bConfigMismatchReadyChecked = false;
+    ScheduleConfigMismatchCheck(CONFIG_MISMATCH_LOAD_DELAY);
+
     SendPlayerUpdate();
 }
 
@@ -2556,6 +2591,280 @@ public int ConfigMenuHandler(Menu menu, MenuAction action, int param1, int param
         delete menu;
     }
     return 0;
+}
+
+// ============================================================================
+// Config Mismatch Warning
+// ============================================================================
+
+// A league config is written for one game mode, and it stays loaded when the
+// map changes, so a KOTH map can end up with a 5CP config. When the map's
+// mode and the config's differ, everyone is told in chat, at most twice per
+// map and config: once after players join or the config loads, and once when
+// a team first readies up. Nothing is changed, since the owner may want it.
+
+enum ConfigMode
+{
+    ConfigMode_Unknown,
+    ConfigMode_CP,          // symmetric control points: 5CP and 3CP
+    ConfigMode_KOTH,
+    ConfigMode_Stopwatch,   // Attack/Defend and Payload
+    ConfigMode_CTF
+};
+
+// Game modes as config names spell them, between underscores.
+static const char g_sConfigModeTokens[][] = {
+    "5cp",
+    "3cp",
+    "koth",
+    "stopwatch",
+    "ctf"
+};
+
+static const ConfigMode g_iConfigModeTokenModes[] = {
+    ConfigMode_CP,
+    ConfigMode_CP,
+    ConfigMode_KOTH,
+    ConfigMode_Stopwatch,
+    ConfigMode_CTF
+};
+
+// Maps for formats with their own configs. They run on KOTH or CTF logic, so
+// the game rules alone would report them as those modes. BBall maps are named
+// ctf_bball_* or ctf_ballin_*.
+static const char g_sOwnFormatMapNames[][] = {
+    "bball",
+    "ballin",
+    "ultiduo",
+    "ultitrio",
+    "kotf"
+};
+
+// Finds the game mode in a config name such as etf2l_6v6_koth. start and end
+// bound the mode within the name. Configs named for no mode, such as
+// etf2l_ultiduo, return ConfigMode_Unknown.
+ConfigMode GetConfigMode(const char[] cfgFile, int &start = 0, int &end = 0)
+{
+    int len = strlen(cfgFile);
+    int partStart = 0;
+    for (int i = 0; i <= len; i++)
+    {
+        if (i < len && cfgFile[i] != '_')
+            continue;
+
+        for (int t = 0; t < sizeof(g_sConfigModeTokens); t++)
+        {
+            int tokenLen = strlen(g_sConfigModeTokens[t]);
+            if (i - partStart == tokenLen &&
+                strncmp(cfgFile[partStart], g_sConfigModeTokens[t], tokenLen, false) == 0)
+            {
+                start = partStart;
+                end = i;
+                return g_iConfigModeTokenModes[t];
+            }
+        }
+        partStart = i + 1;
+    }
+    return ConfigMode_Unknown;
+}
+
+// Gets the current map's game mode from the game rules, which the game sets
+// from the map's entities, and its name as shown to players. Returns
+// ConfigMode_Unknown for modes no config is named for, and for maps this
+// cannot tell apart.
+ConfigMode GetMapMode(char[] name, int nameSize)
+{
+    char map[PLATFORM_MAX_PATH];
+    GetCurrentMap(map, sizeof(map));
+    for (int i = 0; i < sizeof(g_sOwnFormatMapNames); i++)
+    {
+        if (StrContains(map, g_sOwnFormatMapNames[i], false) != -1)
+            return ConfigMode_Unknown;
+    }
+
+    if (FindEntityByClassname(-1, "tf_gamerules") == -1)
+        return ConfigMode_Unknown;
+
+    if (GameRules_GetProp("m_bPlayingHybrid_CTF_CP") || GameRules_GetProp("m_bPlayingSpecialDeliveryMode"))
+        return ConfigMode_Unknown;
+
+    if (GameRules_GetProp("m_bPlayingKoth"))
+    {
+        strcopy(name, nameSize, "KOTH");
+        return ConfigMode_KOTH;
+    }
+
+    switch (GameRules_GetProp("m_nGameType"))
+    {
+        case TF_GAMETYPE_CTF:
+        {
+            strcopy(name, nameSize, "CTF");
+            return ConfigMode_CTF;
+        }
+        case TF_GAMETYPE_ESCORT:
+        {
+            // Payload Race has two carts and is not played in stopwatch mode.
+            if (GameRules_GetProp("m_bMultipleTrains"))
+                return ConfigMode_Unknown;
+
+            strcopy(name, nameSize, "Payload");
+            return ConfigMode_Stopwatch;
+        }
+        case TF_GAMETYPE_CP:
+        {
+            // On an Attack/Defend map RED starts with every point. The
+            // default owner is the map's own value and does not change as
+            // points are captured.
+            int points = 0;
+            int redPoints = 0;
+            int ent = -1;
+            while ((ent = FindEntityByClassname(ent, "team_control_point")) != -1)
+            {
+                points++;
+                if (GetEntProp(ent, Prop_Data, "m_iDefaultOwner") == TF_TEAM_RED)
+                    redPoints++;
+            }
+
+            if (points == 0)
+                return ConfigMode_Unknown;
+
+            if (redPoints == points)
+            {
+                strcopy(name, nameSize, "Attack/Defend");
+                return ConfigMode_Stopwatch;
+            }
+
+            Format(name, nameSize, "%dCP", points);
+            return ConfigMode_CP;
+        }
+    }
+    return ConfigMode_Unknown;
+}
+
+// Finds the config for another mode in the same league and format as cfgFile,
+// whose mode lies between start and end. The rest of the name is kept if such
+// a config exists (rgl_6s_5cp_scrim -> rgl_6s_koth_scrim) and dropped
+// otherwise (etf2l_9v9_koth_spooky -> etf2l_9v9_5cp). Returns false when
+// neither exists: RGL's 6s 5CP configs, for one, all name a scrim or match
+// type that a KOTH config name does not give.
+bool FindConfigForMode(const char[] cfgFile, int start, int end, ConfigMode mode, char[] suggestion, int suggestionSize)
+{
+    char prefix[64];
+    char rest[64];
+    strcopy(prefix, sizeof(prefix), cfgFile);
+    prefix[start] = '\0';
+    strcopy(rest, sizeof(rest), cfgFile[end]);
+
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
+        for (int t = 0; t < sizeof(g_sConfigModeTokens); t++)
+        {
+            if (g_iConfigModeTokenModes[t] != mode)
+                continue;
+
+            Format(suggestion, suggestionSize, "%s%s%s", prefix, g_sConfigModeTokens[t], rest);
+            if (IsAllowedConfig(suggestion))
+                return true;
+        }
+
+        if (rest[0] == '\0')
+            break;
+        rest[0] = '\0';
+    }
+
+    suggestion[0] = '\0';
+    return false;
+}
+
+bool IsAnyHumanInGame()
+{
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i) && !IsFakeClient(i))
+            return true;
+    }
+    return false;
+}
+
+// Warns everyone if the loaded config is for another game mode than the
+// current map. Returns false if no player is there to read it.
+bool CheckConfigMismatch()
+{
+    if (!IsAnyHumanInGame())
+        return false;
+
+    int start, end;
+    ConfigMode configMode = GetConfigMode(g_sCurrentConfig, start, end);
+    if (configMode == ConfigMode_Unknown)
+        return true;
+
+    char mapModeName[32];
+    ConfigMode mapMode = GetMapMode(mapModeName, sizeof(mapModeName));
+    if (mapMode == ConfigMode_Unknown || mapMode == configMode)
+        return true;
+
+    char map[PLATFORM_MAX_PATH];
+    char mapName[PLATFORM_MAX_PATH];
+    GetCurrentMap(map, sizeof(map));
+    if (!GetMapDisplayName(map, mapName, sizeof(mapName)))
+        strcopy(mapName, sizeof(mapName), map);
+
+    PrintToChatAll(
+        "\x01[\x07FF6600Reserve\x01] \x07FF6666Config mismatch: \x07FFFF00%s\x01 is %s, but the config is \x07FFFF00%s\x01.",
+        mapName,
+        mapModeName,
+        g_sCurrentConfig
+    );
+
+    char suggestion[64];
+    if (FindConfigForMode(g_sCurrentConfig, start, end, mapMode, suggestion, sizeof(suggestion)))
+    {
+        PrintToChatAll(
+            "\x01[\x07FF6600Reserve\x01] The reservation owner can load \x0799FF99!config %s\x01 instead.",
+            suggestion
+        );
+    }
+    else
+    {
+        PrintToChatAll("\x01[\x07FF6600Reserve\x01] The reservation owner can load another with \x0799FF99!config\x01.");
+    }
+    return true;
+}
+
+void ScheduleConfigMismatchCheck(float delay)
+{
+    if (g_hConfigMismatchTimer != INVALID_HANDLE)
+    {
+        KillTimer(g_hConfigMismatchTimer);
+    }
+    g_hConfigMismatchTimer = CreateTimer(delay, Timer_ConfigMismatch, _, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_ConfigMismatch(Handle timer)
+{
+    g_hConfigMismatchTimer = INVALID_HANDLE;
+    // A team that readied up in the meantime has had the warning already.
+    // With nobody on the server, the next player to join starts the check
+    // again.
+    if (!g_bConfigMismatchChecked && CheckConfigMismatch())
+        g_bConfigMismatchChecked = true;
+    return Plugin_Stop;
+}
+
+public void Event_TournamentStateUpdate(Event event, const char[] name, bool dontBroadcast)
+{
+    // The event also reports team name changes and teams that unready.
+    if (event.GetBool("namechange") || event.GetInt("readystate") == 0)
+        return;
+
+    if (g_bConfigMismatchReadyChecked)
+        return;
+
+    // The last moment a wrong config is cheap to fix. This also stands in for
+    // a check still waiting on its timer.
+    g_bConfigMismatchReadyChecked = true;
+    g_bConfigMismatchChecked = true;
+    CheckConfigMismatch();
 }
 
 // ============================================================================
