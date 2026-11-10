@@ -233,6 +233,34 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('x-show="startIsSlow"', template)
         self.assertIn("_('status.slow_start')", template)
 
+    def test_ready_notification_is_asked_on_the_page_first(self):
+        template = (
+            Path(__file__).resolve().parents[1] / "templates" / "status.html"
+        ).read_text(encoding="utf-8")
+        enable = template[
+            template.index("async enableReadyNotice() {"):
+            template.index("queueReadyNotice(prevStatus) {")
+        ]
+
+        # The browser's permission prompt may only follow the owner's click
+        # on the page's own button.
+        self.assertEqual(1, template.count("Notification.requestPermission("))
+        self.assertIn("Notification.requestPermission(", enable)
+        self.assertEqual(2, template.count('@click="enableReadyNotice()"'))
+        self.assertNotIn("this.enableReadyNotice()", template)
+        self.assertIn("_('status.notify_prompt')", template)
+        # A failed start is announced too, so the owner is not left waiting.
+        self.assertIn(
+            "if (!['active', 'failed'].includes(this.status)) return;",
+            template,
+        )
+        # Only the owner is offered it, not an admin viewing the page.
+        self.assertIn(
+            "readyNoticeOffered: "
+            "{{ 'true' if user.id == reservation.user_id else 'false' }}",
+            template,
+        )
+
     def test_provisioning_layout_shows_selected_config(self):
         template = (
             Path(__file__).resolve().parents[1] / "templates" / "status.html"
