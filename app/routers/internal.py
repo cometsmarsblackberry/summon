@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.database import async_session_maker
-from app.models.reservation import Reservation, ReservationStatus
+from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.models.instance import CloudInstance
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.utils.upload_links import is_allowed_upload_url
@@ -1823,6 +1823,7 @@ async def end_reservation_from_plugin(
         # Mark as ended
         reservation.status = ReservationStatus.ENDED
         reservation.ended_at = datetime.now(timezone.utc)
+        reservation.end_reason = EndReason.OWNER_IN_GAME
         await db.commit()
 
         from app.services.timer import cancel_expiry_timer

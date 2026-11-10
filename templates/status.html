@@ -973,6 +973,12 @@
         </div>
         {% endif %}
 
+        {% if is_ended and end_reason_message %}
+        <div class="mb-4 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            {{ end_reason_message }}
+        </div>
+        {% endif %}
+
         <div x-show="runtimeKind === 'instant' && controlDegraded" x-cloak
             class="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {{ _('status.control_degraded') }}

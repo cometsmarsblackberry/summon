@@ -7,7 +7,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.instance import CloudCreationAttempt, CloudInstance
-from app.models.reservation import Reservation, ReservationStatus
+from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.services.failure_messages import public_failure_reason
 from app.services.cloud_provider import CloudInstanceData, CloudProvider
 
@@ -39,6 +39,7 @@ async def record_created_instance(
     ):
         reservation.status = ReservationStatus.ENDED
         reservation.ended_at = now
+        reservation.end_reason = EndReason.EXPIRED
 
     try:
         created = datetime.fromisoformat(cloud.date_created.replace("Z", "+00:00"))

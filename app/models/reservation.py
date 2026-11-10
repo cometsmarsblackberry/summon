@@ -20,6 +20,22 @@ class ReservationStatus(enum.Enum):
     NO_SHOW = "no_show"           # Ended due to no players joining
 
 
+class EndReason:
+    """Why a reservation ended, stored in Reservation.end_reason.
+
+    Plain strings rather than a database enum so new reasons need no
+    migration. Reservations that ended before this was recorded have none.
+    """
+
+    OWNER = "owner"                      # Ended on the website by its owner
+    OWNER_IN_GAME = "owner_in_game"      # Ended with !end on the server
+    ADMIN = "admin"                      # Ended on the website by an admin
+    EXPIRED = "expired"                  # Reached its scheduled end time
+    EMPTY = "empty"                      # Server stayed empty too long
+    SERVER_REMOVED = "server_removed"    # Its server was destroyed under it
+    ACCOUNT_DELETED = "account_deleted"  # Owner deleted their account
+
+
 class RuntimeKind(enum.Enum):
     """Runtime backing a reservation."""
 
@@ -121,6 +137,9 @@ class Reservation(Base):
 
     # When the reservation actually ended (early end, expiry, auto-end, etc.)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Why it ended (an EndReason value); shown to the owner afterwards
+    end_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     
     # Player tracking
     player_joined: Mapped[bool] = mapped_column(Boolean, default=False)

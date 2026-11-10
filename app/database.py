@@ -111,6 +111,8 @@ async def _create_and_migrate(conn) -> None:
     await _migrate_add_column(conn, "cloud_instances", "provider_region", "VARCHAR(32)")
     # Track actual end time for accurate daily hours calculation
     await _migrate_add_column(conn, "reservations", "ended_at", "DATETIME")
+    # Why the reservation ended, shown on its page afterwards
+    await _migrate_add_column(conn, "reservations", "end_reason", "VARCHAR(32)")
     # MOTD access token (unguessable URL)
     await _migrate_add_column(conn, "reservations", "motd_token", "VARCHAR(64) DEFAULT ''")
     # Add runtime-neutral connection fields, defaulting existing rows to cloud.

@@ -623,7 +623,7 @@ async def delete_account(
     Banned users keep a skeleton record so the ban persists.
     """
     from app.models.feedback import Feedback
-    from app.models.reservation import Reservation, ReservationStatus
+    from app.models.reservation import EndReason, Reservation, ReservationStatus
     from app.models.steam_trust_snapshot import SteamTrustSnapshot
 
     # End any active/provisioning reservations first
@@ -638,6 +638,7 @@ async def delete_account(
     for reservation in active_reservations:
         reservation.status = ReservationStatus.ENDED
         reservation.ended_at = datetime.now(timezone.utc)
+        reservation.end_reason = EndReason.ACCOUNT_DELETED
         try:
             from app.services.runtime import end_reservation_runtime
             await end_reservation_runtime(

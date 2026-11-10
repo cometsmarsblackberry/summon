@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLocation, LocationProvider, Provider
-from app.models.reservation import Reservation, ReservationStatus
+from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.services.cloud_provider import get_cloud_client, CloudProviderError, CloudCreationUncertain
 from app.services.cloud_creation import reconcile_creation_attempt, record_created_instance
 from app.services.failure_messages import public_failure_reason
@@ -791,6 +791,7 @@ async def destroy_instance(instance_id: str, db: AsyncSession) -> bool:
         for reservation in reservation_result.scalars().all():
             reservation.status = ReservationStatus.ENDED
             reservation.ended_at = datetime.now(timezone.utc)
+            reservation.end_reason = EndReason.SERVER_REMOVED
             from app.services.timer import cancel_expiry_timer
             cancel_expiry_timer(reservation.id)
             logger.info(f"Marked reservation #{reservation.reservation_number} as ended (instance destroyed)")

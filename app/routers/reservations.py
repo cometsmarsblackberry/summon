@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
+from app.models.reservation import EndReason, Reservation, ReservationStatus, RuntimeKind
 from app.models.instant import InstantAssignment, InstantSlot
 from app.models.user import User
 from app.routers.auth import require_user
@@ -873,7 +873,13 @@ async def end_reservation_endpoint(
     was_active = reservation.status == ReservationStatus.ACTIVE
     had_started = reservation.started_at is not None
 
-    await end_reservation(reservation, db)
+    await end_reservation(
+        reservation,
+        db,
+        end_reason=(
+            EndReason.OWNER if reservation.user_id == user.id else EndReason.ADMIN
+        ),
+    )
 
     from app.services.timer import cancel_expiry_timer
     cancel_expiry_timer(reservation_id)

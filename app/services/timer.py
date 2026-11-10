@@ -11,7 +11,13 @@ from datetime import datetime, timezone
 from sqlalchemy import exists, select
 
 from app.database import async_session_maker
-from app.models import InstantAssignment, Reservation, ReservationStatus, RuntimeKind
+from app.models import (
+    EndReason,
+    InstantAssignment,
+    Reservation,
+    ReservationStatus,
+    RuntimeKind,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -151,6 +157,7 @@ async def _expiry_worker(
             # End the reservation
             reservation.status = ReservationStatus.ENDED
             reservation.ended_at = datetime.now(timezone.utc)
+            reservation.end_reason = EndReason.EXPIRED
             await db.commit()
             logger.info(
                 f"Expiry timer ended reservation #{reservation_number}"

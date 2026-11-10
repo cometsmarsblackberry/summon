@@ -1,6 +1,6 @@
 # Database models
 from app.models.user import User
-from app.models.reservation import Reservation, ReservationStatus, RuntimeKind
+from app.models.reservation import EndReason, Reservation, ReservationStatus, RuntimeKind
 from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLocation, Provider, LocationProvider
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.models.cost import CostRecord, MonthlyCost
@@ -15,6 +15,7 @@ __all__ = [
     "User",
     "Reservation",
     "ReservationStatus",
+    "EndReason",
     "RuntimeKind",
     "CloudInstance",
     "CloudCreationAttempt",

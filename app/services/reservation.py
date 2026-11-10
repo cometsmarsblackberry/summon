@@ -115,6 +115,7 @@ async def end_reservation(
     reservation: Reservation,
     db: AsyncSession,
     status: ReservationStatus = ReservationStatus.ENDED,
+    end_reason: str | None = None,
 ) -> None:
     """End a reservation.
     
@@ -122,12 +123,14 @@ async def end_reservation(
         reservation: Reservation to end
         db: Database session
         status: Final status (ENDED, CANCELLED, NO_SHOW)
+        end_reason: Why it ended (an EndReason value)
     """
     if not reservation.can_be_ended:
         raise ValueError(f"Cannot end reservation in status {reservation.status}")
     
     reservation.status = status
     reservation.ended_at = datetime.now(timezone.utc)
+    reservation.end_reason = end_reason
     await db.commit()
     
     logger.info(

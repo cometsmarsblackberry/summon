@@ -99,6 +99,42 @@ class ReservationStatusPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(context["start_wait_seconds"], 8 * 60)
         self.assertLess(context["start_wait_seconds"], 9 * 60)
 
+    async def test_status_page_explains_why_an_ended_reservation_ended(self):
+        from app.models.reservation import EndReason, ReservationStatus
+
+        reservation = SimpleNamespace(
+            user_id=7,
+            location="hel",
+            first_map="cp_badlands",
+            current_map=None,
+            starts_at=datetime(2026, 10, 24, 18, 0),
+            started_at=datetime(2026, 10, 24, 18, 4),
+            status=ReservationStatus.ENDED,
+            end_reason=EndReason.EMPTY,
+            player_joined=True,
+        )
+
+        context = await self.render_status_page(reservation)
+
+        self.assertEqual(
+            translate("status.end_reason_empty", "en", minutes=10),
+            context["end_reason_message"],
+        )
+
+    async def test_status_page_has_no_end_reason_while_running(self):
+        reservation = SimpleNamespace(
+            user_id=7,
+            location="hel",
+            first_map="cp_badlands",
+            current_map=None,
+            starts_at=datetime(2026, 10, 24, 18, 0),
+            started_at=datetime(2026, 10, 24, 18, 4),
+        )
+
+        context = await self.render_status_page(reservation)
+
+        self.assertIsNone(context["end_reason_message"])
+
     async def test_status_page_skips_start_wait_after_first_start(self):
         # A restart puts an active reservation back into provisioning; its
         # wait must not count from when the reservation was made.
