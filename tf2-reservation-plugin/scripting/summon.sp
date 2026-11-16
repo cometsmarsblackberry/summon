@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.10"
+#define PLUGIN_VERSION "1.6.11"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -38,6 +38,10 @@
 #define OWNER_TV_DELAY_COMMAND "tv_delay"
 #define MAX_OWNER_TV_DELAY 120
 #define OWNER_COMMAND_RESULT_MARKER "SUMMON_OWNER_COMMAND_RESULT"
+#define OWNER_CHEATS_COMMAND "sv_cheats"
+// The sv_allow_point_servercommand value that lets no map entity or script
+// run server commands.
+#define POINT_SERVERCOMMAND_DISALLOW "disallow"
 // The engine's own SourceTV map-change protection lasts tv_delay plus 3
 // seconds after a round ends. The SourceTV wait keeps the same margin.
 #define STV_WAIT_MARGIN 3.0
@@ -93,6 +97,14 @@ Handle g_hSTVWaitTimer = INVALID_HANDLE;
 int g_iSTVWaitStart = 0;
 int g_iSTVWaitRemaining = 0;
 char g_sSTVWaitMap[PLATFORM_MAX_PATH];
+
+// Cheats safeguard. While g_bCheatsGuardActive is set, Summon holds
+// sv_allow_point_servercommand at "disallow". g_sPointServerCommandRestore is
+// the value it goes back to afterwards.
+ConVar g_cvCheats;
+ConVar g_cvPointServerCommand;
+bool g_bCheatsGuardActive = false;
+char g_sPointServerCommandRestore[32];
 
 public Plugin myinfo = {
     name = PLUGIN_NAME,
@@ -179,6 +191,25 @@ public void OnPluginStart()
         g_cvTVDelayMapChangeProtect.AddChangeHook(ConVar_TVDelayMapChangeProtect);
         if (!IsRGLQoLLoaded())
             DisableTVDelayMapChangeProtect();
+    }
+
+    // With cheats on, every player can create entities and fire their inputs.
+    // A point_servercommand entity, or a script that calls
+    // SendToServerConsole, then runs any server command for them, including
+    // the ones owners are not allowed. sv_allow_point_servercommand gates
+    // both, so Summon keeps them off while cheats are on.
+    g_cvCheats = FindConVar(OWNER_CHEATS_COMMAND);
+    g_cvPointServerCommand = FindConVar("sv_allow_point_servercommand");
+    if (!IsCheatsGuardAvailable())
+    {
+        LogError("[summon] sv_cheats or sv_allow_point_servercommand not found; owners cannot change sv_cheats");
+    }
+    else
+    {
+        g_cvCheats.AddChangeHook(ConVar_Cheats);
+        g_cvPointServerCommand.AddChangeHook(ConVar_PointServerCommand);
+        if (g_cvCheats.BoolValue)
+            StartCheatsGuard();
     }
 
     if (CommandExists("sm_command"))
@@ -277,6 +308,14 @@ public void OnMapEnd()
     g_hSTVWaitTimer = INVALID_HANDLE;
     g_bSTVWaitActive = false;
     g_hConfigMismatchTimer = INVALID_HANDLE;
+}
+
+public void OnMapInit(const char[] mapName)
+{
+    // The previous map's entities and scripts are gone and this map's have
+    // not been created yet.
+    if (g_bCheatsGuardActive && !g_cvCheats.BoolValue)
+        StopCheatsGuard();
 }
 
 public void OnMapStart()
@@ -1075,12 +1114,15 @@ bool ExecuteOwnerServerCommand(
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
 
-    if (!CommandExists(operation))
+    if (!CommandExists(operation)
+        || (StrEqual(operation, OWNER_CHEATS_COMMAND) && !IsCheatsGuardAvailable()))
+    {
         return OwnerCommandFailure(
             actorSteamID, commandLine, "command_unavailable",
             "That server command is unavailable.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
+    }
 
     if (commandLength <= 0
         || commandLength >= MAX_OWNER_COMMAND_LINE
@@ -1159,6 +1201,22 @@ bool ExecuteOwnerServerCommand(
     // format string prevents user input from becoming format directives.
     ServerCommandEx(response, responseSize, "%s", commandLine);
     TrimString(response);
+
+    // The engine prints nothing when sv_cheats is set. The output is other
+    // plugins' log lines and StAC's error report, so state the result plainly.
+    // Run from RCON, the command has not executed yet, so go by the requested
+    // value, which the engine reads as a number.
+    if (valueArgumentCount > 0 && StrEqual(operation, OWNER_CHEATS_COMMAND))
+    {
+        strcopy(
+            response,
+            responseSize,
+            RoundToZero(StringToFloat(firstValue)) != 0
+                ? "Cheats are on. Maps cannot run server commands until the map changes with cheats off."
+                : "Cheats are off. Change the map to remove anything players set up while they were on."
+        );
+    }
+
     LogOwnerCommand(actorSteamID, commandLine, "ok");
     return true;
 }
@@ -1925,6 +1983,63 @@ public void ConVar_TVDelayMapChangeProtect(ConVar convar, const char[] oldValue,
 }
 
 // ============================================================================
+// Cheats Safeguard
+// ============================================================================
+
+// Players can leave entities and scripts behind while cheats are on, and
+// those keep running after cheats are turned off. The safeguard therefore
+// lasts until the first map load with cheats off, which removes them.
+
+bool IsCheatsGuardAvailable()
+{
+    return g_cvCheats != null && g_cvPointServerCommand != null;
+}
+
+void StartCheatsGuard()
+{
+    if (!g_bCheatsGuardActive)
+    {
+        g_cvPointServerCommand.GetString(g_sPointServerCommandRestore, sizeof(g_sPointServerCommandRestore));
+        g_bCheatsGuardActive = true;
+        LogMessage("[summon] sv_cheats is on; map entities and scripts cannot run server commands until a map loads with it off");
+    }
+
+    g_cvPointServerCommand.SetString(POINT_SERVERCOMMAND_DISALLOW);
+}
+
+void StopCheatsGuard()
+{
+    g_bCheatsGuardActive = false;
+    g_cvPointServerCommand.SetString(g_sPointServerCommandRestore);
+    LogMessage("[summon] sv_allow_point_servercommand restored to %s", g_sPointServerCommandRestore);
+}
+
+public void ConVar_Cheats(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+    if (convar.BoolValue)
+    {
+        StartCheatsGuard();
+        return;
+    }
+
+    // StAC stops itself when cheats turn on and does not come back by itself.
+    Handle stac = FindPluginByFile("stac.smx");
+    if (stac != null && GetPluginStatus(stac) != Plugin_Running)
+        ServerCommand("sm plugins reload stac");
+}
+
+public void ConVar_PointServerCommand(ConVar convar, const char[] oldValue, const char[] newValue)
+{
+    if (!g_bCheatsGuardActive || StrEqual(newValue, POINT_SERVERCOMMAND_DISALLOW, false))
+        return;
+
+    // A config or an admin asked for another value. It applies once the
+    // safeguard ends.
+    strcopy(g_sPointServerCommandRestore, sizeof(g_sPointServerCommandRestore), newValue);
+    convar.SetString(POINT_SERVERCOMMAND_DISALLOW);
+}
+
+// ============================================================================
 // Restart
 // ============================================================================
 
@@ -2235,6 +2350,19 @@ bool IsMGEConfig(const char[] cfgFile)
     return false;
 }
 
+// A server starts without bots. The reset config's tf_bot_quota 0 only removes
+// the bots that count toward the quota, and bot_kick needs sv_cheats.
+void KickBots()
+{
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (!IsClientConnected(i) || !IsFakeClient(i) || IsClientSourceTV(i) || IsClientReplay(i))
+            continue;
+
+        KickClient(i, "Removed by summon_reset");
+    }
+}
+
 void ExecuteConfig(const char[] cfgFile)
 {
     bool restartGame = false;
@@ -2250,6 +2378,7 @@ void ExecuteConfig(const char[] cfgFile)
         // period of a competitive config loaded in the meantime.
         bool soapDisabled = DisableSOAPPlugins();
         restartGame = soapDisabled && GameRules_GetRoundState() != RoundState_Pregame;
+        KickBots();
     }
     else
     {

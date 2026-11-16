@@ -82,9 +82,10 @@ rgl_  etf2l_  fbtf_  tfarena_  ultitrio_  ozfortress_  cltf2_  afc_  af_
 1v1mge  2v2mge  kotf
 ```
 
-The special `summon_reset` config resets the server to its defaults. Loading an
-RGL config also enables Summon's built-in RGL plugin set; loading any other
-config, including `summon_reset`, disables it again. Disabling it also unloads
+The special `summon_reset` config resets the server to its defaults and
+removes every bot except SourceTV. Loading an RGL config also enables Summon's
+built-in RGL plugin set; loading any other config, including `summon_reset`,
+disables it again. Disabling it also unloads
 `p4sstime` and `roundtimer_override`, which RGL configs load from
 `plugins/disabled/` themselves. While the set is loaded, RGL's QoL plugin holds
 map changes for SourceTV instead of Summon; see
@@ -191,7 +192,8 @@ Its `SummonOwnerCommands` sections are exact command or ConVar names:
 }
 ```
 
-The supplied file contains the default gameplay-oriented allowlist. Commands
+The supplied file contains the default gameplay-oriented allowlist, which
+includes bots, player votes, and `sv_cheats` for practice. Commands
 provided by optional image plugins remain safe to list but are reported as
 unavailable while their plugin is not loaded. The web and in-game checks must
 agree before a command can run.
@@ -212,6 +214,17 @@ Owner-command execution has the following safeguards:
   notify ConVar, so the engine announces every change in chat, including
   changes made by configs. Players cannot see who watches SourceTV, so a
   shorter delay would otherwise go unnoticed.
+- `sv_cheats` lets every player create entities and run scripts. On Valve's
+  maps a `point_servercommand` entity, or a script that calls
+  `SendToServerConsole`, would then run any server command for them. While
+  cheats are on, the plugin holds `sv_allow_point_servercommand` at
+  `disallow`, which blocks both. Entities and scripts that players set up
+  stay after cheats are turned off, so the hold lasts until the first map
+  load with cheats off. It applies however `sv_cheats` was changed. A value
+  that a config or an admin sets during the hold takes effect when it ends.
+  Do not allowlist `sv_allow_point_servercommand`.
+- StAC stops itself when cheats are turned on. The plugin reloads it when
+  they are turned off.
 - A shared one-second cooldown applies between owner commands, including
   commands sent through the web console.
 - Every dispatched command and policy rejection is written to the SourceMod

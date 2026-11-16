@@ -211,6 +211,20 @@ class OwnerCommandPolicyTests(unittest.TestCase):
         sourcetv = [name for name in get_owner_commands() if name.startswith("tv_")]
         self.assertEqual(["tv_delay"], sourcetv)
 
+    def test_checked_in_allowlist_keeps_map_server_commands_gated(self):
+        # The plugin holds this setting while sv_cheats is on. An owner who
+        # could change it would give every player the server console.
+        commands = get_owner_commands()
+        self.assertIn("sv_cheats", commands)
+        self.assertNotIn("sv_allow_point_servercommand", commands)
+
+    def test_checked_in_allowlist_excludes_commands_that_run_other_commands(self):
+        forwarding = {
+            "alias", "ent_create", "ent_fire", "plugin_load", "rcon",
+            "script", "script_execute", "sm", "sm_rcon",
+        }
+        self.assertEqual(set(), forwarding & set(get_owner_commands()))
+
     def test_plugin_result_parser_requires_marker_and_caps_utf8_output(self):
         self.assertIsNone(parse_plugin_command_result("Unknown command"))
         success = parse_plugin_command_result(
