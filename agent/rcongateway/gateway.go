@@ -285,7 +285,7 @@ func (g *Gateway) handle(conn net.Conn, ip string) {
 			timeout = idleTimeout
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(timeout))
-		packet, err := rcon.ReadPacket(conn, maxRequestPacket)
+		packet, err := rcon.ReadRequest(conn, maxRequestPacket)
 		if err != nil {
 			return
 		}

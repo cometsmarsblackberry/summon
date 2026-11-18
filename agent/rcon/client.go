@@ -3,6 +3,7 @@
 package rcon
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -61,26 +62,55 @@ func WritePacket(w io.Writer, packet Packet) error {
 
 // ReadPacket reads one packet whose declared size is at most maxSize bytes.
 func ReadPacket(r io.Reader, maxSize int) (Packet, error) {
-	var header [4]byte
-	if _, err := io.ReadFull(r, header[:]); err != nil {
+	data, err := readFrame(r, packetOverhead, maxSize)
+	if err != nil {
 		return Packet{}, err
 	}
+	return Packet{
+		ID:   int32(binary.LittleEndian.Uint32(data[0:])),
+		Type: int32(binary.LittleEndian.Uint32(data[4:])),
+		Body: data[8 : len(data)-2],
+	}, nil
+}
+
+// ReadRequest reads one packet sent by a client, as a server does, whose
+// declared size is at most maxSize bytes. SRCDS reads a request's body as a
+// C string, so the body ends at its first NUL. Some clients end packets with
+// more than the two terminators, or with only one, and SRCDS accepts them.
+func ReadRequest(r io.Reader, maxSize int) (Packet, error) {
+	data, err := readFrame(r, 4+4+1, maxSize)
+	if err != nil {
+		return Packet{}, err
+	}
+	body := data[8:]
+	if end := bytes.IndexByte(body, 0); end >= 0 {
+		body = body[:end]
+	}
+	return Packet{
+		ID:   int32(binary.LittleEndian.Uint32(data[0:])),
+		Type: int32(binary.LittleEndian.Uint32(data[4:])),
+		Body: body,
+	}, nil
+}
+
+// readFrame reads one size-prefixed packet and returns what follows the size.
+func readFrame(r io.Reader, minSize, maxSize int) ([]byte, error) {
+	var header [4]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return nil, err
+	}
 	size := int(int32(binary.LittleEndian.Uint32(header[:])))
-	if size < packetOverhead || size > maxSize {
-		return Packet{}, ErrPacketSize
+	if size < minSize || size > maxSize {
+		return nil, ErrPacketSize
 	}
 	data := make([]byte, size)
 	if _, err := io.ReadFull(r, data); err != nil {
 		if errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
-		return Packet{}, err
+		return nil, err
 	}
-	return Packet{
-		ID:   int32(binary.LittleEndian.Uint32(data[0:])),
-		Type: int32(binary.LittleEndian.Uint32(data[4:])),
-		Body: data[8 : size-2],
-	}, nil
+	return data, nil
 }
 
 // Client is one authenticated RCON connection. Calls must not overlap.

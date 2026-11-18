@@ -2,7 +2,9 @@ package rcongateway
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -332,6 +334,63 @@ func TestRepeatedFailuresBlockTheAddressForAWhile(t *testing.T) {
 	client := dial(t, gateway)
 	if err := client.Authenticate(testContext(t), testPassword); err != nil {
 		t.Fatalf("login after the block = %v", err)
+	}
+}
+
+// writeFramed sends one packet whose body is followed by nuls NUL bytes. The
+// protocol describes two, but some clients send more, or only one.
+func writeFramed(t *testing.T, conn net.Conn, id, packetType int32, body string, nuls int) {
+	t.Helper()
+	payload := binary.LittleEndian.AppendUint32(nil, uint32(id))
+	payload = binary.LittleEndian.AppendUint32(payload, uint32(packetType))
+	payload = append(payload, body...)
+	payload = append(payload, make([]byte, nuls)...)
+	frame := binary.LittleEndian.AppendUint32(nil, uint32(len(payload)))
+	if _, err := conn.Write(append(frame, payload...)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+func TestClientsWithOtherTerminatorsAreUnderstood(t *testing.T) {
+	for _, nuls := range []int{1, 4} {
+		t.Run(fmt.Sprintf("%d NULs", nuls), func(t *testing.T) {
+			server := &fakeServer{reply: func(string) (string, error) {
+				return resultMarker + "OK\n\"mp_timelimit\" = \"30\"\n", nil
+			}}
+			gateway := startGateway(t, server)
+			conn, err := net.Dial("tcp4", gateway.Addr().String())
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			read := func() rcon.Packet {
+				t.Helper()
+				packet, err := rcon.ReadPacket(conn, 8192)
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+				return packet
+			}
+
+			writeFramed(t, conn, 1337, rcon.TypeAuth, testPassword, nuls)
+			if packet := read(); packet.Type != rcon.TypeResponseValue || packet.ID != 1337 {
+				t.Fatalf("first auth reply = %+v, want an empty response value", packet)
+			}
+			if packet := read(); packet.Type != rcon.TypeAuthResponse || packet.ID != 1337 {
+				t.Fatalf("auth verdict = %+v, want success", packet)
+			}
+
+			writeFramed(t, conn, 8, rcon.TypeExecCommand, "mp_timelimit", nuls)
+			packet := read()
+			if want := "\"mp_timelimit\" = \"30\"\n"; packet.ID != 8 || string(packet.Body) != want {
+				t.Fatalf("reply = %+v, want ID 8 and %q", packet, want)
+			}
+			want := "sm_summon_rcon_command " + testActor + " mp_timelimit"
+			if got := server.received(); len(got) != 1 || got[0] != want {
+				t.Fatalf("forwarded %q, want %q", got, want)
+			}
+		})
 	}
 }
 
