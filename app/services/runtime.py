@@ -59,7 +59,8 @@ class RuntimeCapacity:
     instant_slots_available: int
     cloud_slots_available: int
     warm_cloud_available: bool = False
-    # Free Instant slots on hosts that may publish their address.
+    # Free Instant slots on hosts that may publish their address and whose
+    # agent runs the owner's RCON gateway, which direct connect includes.
     direct_instant_slots_available: int = 0
 
     @property
@@ -151,8 +152,23 @@ def _host_cutoff() -> datetime:
     return _now() - timedelta(seconds=settings.instant_host_offline_seconds)
 
 
+RCON_GATEWAY_CAPABILITY = "rcon_gateway"
+
+
+def host_supports_rcon_gateway(capabilities: object) -> bool:
+    """Whether a host's agent reported that it runs the owner RCON gateway."""
+    if isinstance(capabilities, dict):
+        return capabilities.get(RCON_GATEWAY_CAPABILITY) is True
+    if isinstance(capabilities, list):
+        return RCON_GATEWAY_CAPABILITY in capabilities
+    return False
+
+
 async def count_available_instant_slots(
-    location: str, db: AsyncSession, *, direct_connect: bool = False
+    location: str,
+    db: AsyncSession,
+    *,
+    direct_connect: bool = False,
 ) -> int:
     if not await _instant_enabled(db):
         return 0
@@ -160,8 +176,12 @@ async def count_available_instant_slots(
         InstantAssignment.slot_id == InstantSlot.id,
         InstantAssignment.closed_at.is_(None),
     )
+    # Direct connect includes the owner's RCON gateway. Capabilities are JSON,
+    # so support for it is checked per row here.
+    columns = (InstantHost.capabilities,) if direct_connect else (func.count(InstantSlot.id),)
     query = (
-        select(func.count(InstantSlot.id))
+        select(*columns)
+        .select_from(InstantSlot)
         .join(InstantHost, InstantSlot.host_id == InstantHost.id)
         .where(
             InstantHost.location == location,
@@ -195,6 +215,8 @@ async def count_available_instant_slots(
     if direct_connect:
         query = query.where(InstantHost.sdr_only.is_(False))
     result = await db.execute(query)
+    if direct_connect:
+        return sum(1 for capabilities in result.scalars() if host_supports_rcon_gateway(capabilities))
     return int(result.scalar_one() or 0)
 
 
@@ -387,6 +409,12 @@ async def claim_instant_slot(
         # Direct connect needs a host that may publish its address.
         query = query.where(InstantHost.sdr_only.is_(False))
     candidates = (await db.execute(query)).all()
+    if reservation.enable_direct_connect:
+        # It also includes the owner's RCON gateway.
+        candidates = [
+            (slot, host) for slot, host in candidates
+            if host_supports_rcon_gateway(host.capabilities)
+        ]
     if not candidates:
         return None
 

@@ -40,8 +40,9 @@ var agentVersion = "0.2.11"
 
 // agentFeatures tells the backend which optional behaviours this cloud agent
 // supports. boot-handover: a container.reconfigure received while the image is
-// still pulling switches the boot to the new reservation.
-const agentFeatures = "boot-handover"
+// still pulling switches the boot to the new reservation. rcon-gateway: the
+// agent runs the reservation owner's restricted RCON endpoint.
+const agentFeatures = "boot-handover,rcon-gateway"
 
 // Global state
 var (
@@ -336,6 +337,7 @@ func handleInitialConfig(msg []byte) {
 func handleContainerStop() {
 	containerID := ""
 	if bootSeq != nil {
+		bootSeq.StopRCONGateway()
 		containerID = bootSeq.GetContainerID()
 	}
 
@@ -420,6 +422,7 @@ func handleContainerReconfigure(msg []byte, client *websocket.Client) {
 				<-previousFinished
 			}
 
+			previous.StopRCONGateway()
 			// Stop existing container (if any)
 			if containerID := previous.GetContainerID(); containerID != "" {
 				log.Println("Stopping existing container for reconfigure...")
@@ -452,6 +455,7 @@ func handleContainerRestart(msg json.RawMessage, client *websocket.Client) {
 		return
 	}
 
+	bootSeq.StopRCONGateway()
 	containerID := bootSeq.GetContainerID()
 	if containerID != "" {
 		client.SendBootProgress("restarting", 10, "Stopping TF2 server...")
@@ -623,6 +627,8 @@ func handleReservationEnd() {
 	rconPassword := ""
 	var cfg *boot.ReservationConfig
 	if bootSeq != nil {
+		// Remote tools lose access before players are told the reservation ends.
+		bootSeq.StopRCONGateway()
 		containerID = bootSeq.GetContainerID()
 		cfg = bootSeq.GetConfig()
 		if cfg != nil {

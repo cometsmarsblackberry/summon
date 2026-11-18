@@ -112,6 +112,9 @@ class InstantRuntimeTests(unittest.IsolatedAsyncioTestCase):
             name=name,
             location="instant-only",
             public_ipv4=address,
+            # A current agent, which runs the owner RCON gateway that direct
+            # connect includes.
+            capabilities={"rcon": True, "rcon_gateway": True},
             enabled=True,
             credential_hash="enrolled",
             health_status="ready",

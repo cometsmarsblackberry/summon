@@ -35,6 +35,8 @@ GCORE_BOOT_VOLUME_TYPES = ("ssd_hiiops", "standard")
 
 # Security group for direct connect (UDP game ports)
 DIRECT_CONNECT_SG_NAME = "tf2-direct-connect"
+# Security group for the owner RCON gateway (TCP game port)
+RCON_SG_NAME = "tf2-rcon"
 
 # Task polling config
 TASK_POLL_INTERVAL = 3  # seconds
@@ -51,7 +53,8 @@ class GcoreClient(CloudProvider):
             "Authorization": f"apikey {api_key}",
             "Content-Type": "application/json",
         }
-        self._sg_cache: dict[int, str] = {}  # region_id -> security group ID
+        # (region_id, security group name) -> security group ID
+        self._sg_cache: dict[tuple[int, str], str] = {}
 
     async def _request(
         self,
@@ -151,8 +154,37 @@ class GcoreClient(CloudProvider):
         27020) and SSH (TCP 22) if they don't already exist. Returns the
         security group ID.
         """
-        if region_id in self._sg_cache:
-            return self._sg_cache[region_id]
+        return await self._ensure_security_group(
+            region_id,
+            DIRECT_CONNECT_SG_NAME,
+            "TF2 game server direct connect (UDP 27015, 27020) + SSH",
+            {("udp", 27015), ("udp", 27020), ("tcp", 22)},
+        )
+
+    async def ensure_rcon_security_group(self, region_id: int) -> str:
+        """Ensure the tf2-rcon security group exists in the region.
+
+        It opens TCP 27015, where the agent's RCON gateway listens. Only
+        reservations with RCON get it. Returns the security group ID.
+        """
+        return await self._ensure_security_group(
+            region_id,
+            RCON_SG_NAME,
+            "TF2 reservation owner RCON gateway (TCP 27015)",
+            {("tcp", 27015)},
+        )
+
+    async def _ensure_security_group(
+        self,
+        region_id: int,
+        name: str,
+        description: str,
+        needed_rules: set[tuple[str, int]],
+    ) -> str:
+        """Ensure a security group with these inbound rules exists."""
+        cache_key = (region_id, name)
+        if cache_key in self._sg_cache:
+            return self._sg_cache[cache_key]
 
         # List existing security groups in this region
         data = await self._request(
@@ -162,7 +194,7 @@ class GcoreClient(CloudProvider):
         sg_id = None
         existing_rules = []
         for sg in data.get("results", []):
-            if sg.get("name") == DIRECT_CONNECT_SG_NAME:
+            if sg.get("name") == name:
                 sg_id = sg["id"]
                 existing_rules = sg.get("security_group_rules", [])
                 break
@@ -173,19 +205,19 @@ class GcoreClient(CloudProvider):
                 f"/securitygroups/{self.project_id}/{region_id}",
                 json={
                     "security_group": {
-                        "name": DIRECT_CONNECT_SG_NAME,
-                        "description": "TF2 game server direct connect (UDP 27015, 27020) + SSH",
+                        "name": name,
+                        "description": description,
                     },
                 },
             )
             sg_id = create_data["id"]
             existing_rules = []
             logger.info(
-                f"Created security group '{DIRECT_CONNECT_SG_NAME}' in region {region_id}: {sg_id}"
+                f"Created security group '{name}' in region {region_id}: {sg_id}"
             )
 
         # Check which port rules already exist
-        needed_rules = {("udp", 27015), ("udp", 27020), ("tcp", 22)}
+        needed_rules = set(needed_rules)
         for rule in existing_rules:
             key = (rule.get("protocol"), rule.get("port_range_min"))
             if rule.get("direction") == "ingress" and key in needed_rules:
@@ -205,10 +237,10 @@ class GcoreClient(CloudProvider):
                 },
             )
             logger.info(
-                f"Added {protocol.upper()}/{port} ingress rule to '{DIRECT_CONNECT_SG_NAME}' in region {region_id}"
+                f"Added {protocol.upper()}/{port} ingress rule to '{name}' in region {region_id}"
             )
 
-        self._sg_cache[region_id] = sg_id
+        self._sg_cache[cache_key] = sg_id
         return sg_id
 
     async def add_security_group_to_instance(

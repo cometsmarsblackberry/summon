@@ -109,6 +109,19 @@
             return 'connect ' + address + '; password ' + password;
         },
 
+        // The owner's RCON gateway listens on the direct address and game
+        // port, over TCP, while the server runs.
+        hasRcon() {
+            const c = this.connection;
+            return this.status === 'active' && Boolean(
+                c && c.enable_rcon && c.owner_rcon_password && c.direct_ip && c.direct_port
+            );
+        },
+
+        rconAddress() {
+            return this.hasRcon() ? this.connection.direct_ip + ':' + this.connection.direct_port : '';
+        },
+
         init() {
             this.initReadyNotice();
 
@@ -175,6 +188,8 @@
                             // rcon_password: data.rcon_password,
                             tv_password: data.tv_password,
                             enable_direct_connect: data.enable_direct_connect,
+                            enable_rcon: data.enable_rcon,
+                            owner_rcon_password: data.owner_rcon_password,
                             ip_address: data.ip_address,
                             direct_ip: data.direct_ip || data.ip_address,
                             direct_port: data.direct_port || (data.ip_address ? 27015 : null),
@@ -1409,6 +1424,9 @@
                     <template x-if="connection && connection.direct_ip">
                         <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
                     </template>
+                    <template x-if="hasRcon()">
+                        <option value="rcon">{{ _('status.rcon') }}</option>
+                    </template>
                 </select>
             </div>
 
@@ -1469,6 +1487,38 @@
                         <span x-show="!copied">{{ _('status.copy') }}</span>
                         <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
                     </button>
+                </div>
+            </div>
+
+            <!-- RCON for the owner's remote tools -->
+            <div x-show="connType === 'rcon' && hasRcon()" class="space-y-3">
+                <div x-data="{ copied: false }">
+                    <p class="mb-1 text-xs text-slate-500">{{ _('status.rcon_address') }}</p>
+                    <div class="flex items-center gap-2">
+                        <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                            x-text="rconAddress()"></code>
+                        <button
+                            @click="navigator.clipboard.writeText(rconAddress()); copied = true; setTimeout(() => copied = false, 2000)"
+                            class="px-2 py-2 rounded text-xs transition-colors"
+                            :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                            <span x-show="!copied">{{ _('status.copy') }}</span>
+                            <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                        </button>
+                    </div>
+                </div>
+                <div x-data="{ copied: false }">
+                    <p class="mb-1 text-xs text-slate-500">{{ _('status.rcon_password') }}</p>
+                    <div class="flex items-center gap-2">
+                        <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                            x-text="hasRcon() ? connection.owner_rcon_password : ''"></code>
+                        <button
+                            @click="navigator.clipboard.writeText(connection.owner_rcon_password); copied = true; setTimeout(() => copied = false, 2000)"
+                            class="px-2 py-2 rounded text-xs transition-colors"
+                            :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                            <span x-show="!copied">{{ _('status.copy') }}</span>
+                            <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 

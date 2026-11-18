@@ -38,6 +38,12 @@ _CONFIG_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,63}(?:\.cfg)?$", re.IGNORECASE)
 MAX_TV_DELAY_SECONDS = 120
 _TV_DELAY_RE = re.compile(r"^[0-9]{1,3}$")
 _ERROR_CODE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+_IPV4_RE = re.compile(r"\b[0-9]{1,3}(?:\.[0-9]{1,3}){3}\b")
+_MASKED_IPV4 = "0.0.0.0"
+# Commands whose values stay out of the logs, as in the plugin's own log.
+_SECRET_COMMANDS = frozenset(
+    {"sv_password", "sv_logsecret", "tv_password", "rcon_password"}
+)
 
 
 class OwnerCommandAllowlistError(RuntimeError):
@@ -266,6 +272,34 @@ def validate_owner_command_line(
     return command
 
 
+def redact_owner_command(value: object) -> str:
+    """Return a submitted command line for logging, without password values.
+
+    Refused lines are covered too, since an owner may type a password into a
+    command that the policy then rejects.
+    """
+    text = "" if value is None else str(value)
+    parts = text.strip().split(None, 1)
+    if len(parts) == 2 and parts[0].strip('"').lower() in _SECRET_COMMANDS:
+        return f"{parts[0]} <hidden>"
+    return text
+
+
+def mask_status_addresses(output: str) -> str:
+    """Replace every IPv4 address in ``status`` output with 0.0.0.0.
+
+    That covers each player's address and the server's own, which owners do
+    not otherwise see when players connect through Steam's relays.  It goes by
+    the output, not the command's name, so no spelling of the command skips
+    it.  The plugin cannot do this for the web console: a command run over
+    RCON prints its output after the plugin has returned.
+    """
+    for line in output.split("\n"):
+        if line.startswith(("udp/ip", "# userid")):
+            return _IPV4_RE.sub(_MASKED_IPV4, output)
+    return output
+
+
 def truncate_command_output(value: object, limit: int = MAX_OUTPUT_BYTES) -> str:
     """Return valid UTF-8 bounded to the protocol's output budget."""
     text = "" if value is None else str(value)
@@ -297,7 +331,9 @@ def parse_plugin_command_result(output: object) -> PluginCommandResult | None:
         return None
     header = lines[marker_index]
     status = header[len(prefix) :]
-    body = truncate_command_output("\n".join(lines[marker_index + 1 :]).strip())
+    body = truncate_command_output(
+        mask_status_addresses("\n".join(lines[marker_index + 1 :]).strip())
+    )
     if status == "OK":
         return PluginCommandResult(ok=True, output=body)
     error_prefix = "ERROR "

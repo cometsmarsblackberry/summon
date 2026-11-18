@@ -205,6 +205,8 @@ type ServerReadyInfo struct {
 	SDRPort    int
 	SDRTVPort  int
 	Map        string
+	// RCONGateway is set when the owner's RCON gateway is listening.
+	RCONGateway bool
 }
 
 // SendServerReadyWithSDR notifies the backend that the server is ready,
@@ -220,6 +222,7 @@ func (c *Client) SendServerReadyWithSDR(info ServerReadyInfo) error {
 		"sdr_port":     info.SDRPort,
 		"sdr_tv_port":  info.SDRTVPort,
 		"map":          info.Map,
+		"rcon_gateway": info.RCONGateway,
 	})
 }
 

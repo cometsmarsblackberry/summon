@@ -39,6 +39,8 @@ boot_progress: dict[str, dict] = {}
 # Optional behaviours each cloud agent advertised on connect (WebSocket id -> features)
 agent_features: dict[int, frozenset[str]] = {}
 BOOT_HANDOVER_FEATURE = "boot-handover"
+# The agent runs the reservation owner's restricted RCON gateway.
+RCON_GATEWAY_FEATURE = "rcon-gateway"
 
 # Server-side view of whether a boot is moving (instance_id -> activity). Pull
 # progress repeats unchanged as a heartbeat, so only changes count.
@@ -165,6 +167,14 @@ def boot_handover_ready(instance_id: str) -> bool:
         and not activity["pull_retried"]
         and datetime.now(timezone.utc) - activity["changed_at"] < HANDOVER_PROGRESS_WINDOW
     )
+
+
+def agent_has_feature(instance_id: str, feature: str) -> bool:
+    """Whether the cloud agent connected as instance_id advertised feature."""
+    websocket = connected_agents.get(instance_id)
+    if websocket is None:
+        return False
+    return feature in agent_features.get(id(websocket), ())
 
 
 def get_agent_stats(instance_id: str) -> Optional[dict]:
@@ -919,6 +929,7 @@ async def _handle_instant_ready(
             "message": "No SDR FakeIP was detected on an SDR-only host",
         }, db)
         return
+    _warn_if_rcon_gateway_missing(reservation, data)
     assignment.state = "ready"
     assignment.ready_at = assignment.ready_at or now
     assignment.container_id = str(data.get("container_id") or "")[:128] or assignment.container_id
@@ -1366,6 +1377,19 @@ async def _record_booting_public_ip(instance_id: str) -> None:
             await db.commit()
 
 
+def _warn_if_rcon_gateway_missing(reservation: Reservation, data: dict) -> None:
+    """Log when a server that should run the owner's RCON gateway does not.
+
+    The reservation still starts: players can join, and the owner keeps the
+    in-game and web commands.
+    """
+    if getattr(reservation, "enable_rcon", False) and data.get("rcon_gateway") is False:
+        logger.warning(
+            "Reservation #%s is ready without its RCON gateway",
+            reservation.reservation_number,
+        )
+
+
 async def handle_server_ready(instance_id: str, data: dict):
     """Handle server ready notification from agent.
     
@@ -1441,6 +1465,7 @@ async def handle_server_ready(instance_id: str, data: dict):
             return
 
         # Normal PROVISIONING → ACTIVE transition
+        _warn_if_rcon_gateway_missing(reservation, data)
         reservation.status = ReservationStatus.ACTIVE
         if not reservation.started_at:
             reservation.started_at = datetime.now(timezone.utc)

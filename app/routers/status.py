@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -21,6 +21,7 @@ from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.services.cloud_provider import get_cloud_client
 from app.services.failure_messages import public_failure_reason
 from app.services.orchestrator import get_enabled_locations
+from app.services.runtime import host_supports_rcon_gateway
 from app.utils.location_flags import build_location_flag
 
 
@@ -258,11 +259,14 @@ async def _build_status(db: AsyncSession) -> dict:
             cutoff = datetime.now(timezone.utc) - timedelta(
                 seconds=get_settings().instant_host_offline_seconds
             )
+            # One row per free slot: direct connect needs the RCON gateway,
+            # whose support is in the hosts' JSON capabilities, so the
+            # counting happens here.
             instant_result = await db.execute(
                 select(
                     InstantHost.location,
-                    func.count(InstantSlot.id),
-                    func.sum(case((InstantHost.sdr_only.is_(False), 1), else_=0)),
+                    InstantHost.sdr_only,
+                    InstantHost.capabilities,
                 )
                 .join(InstantSlot, InstantSlot.host_id == InstantHost.id)
                 .where(
@@ -286,11 +290,11 @@ async def _build_status(db: AsyncSession) -> dict:
                     InstantSlot.error_code.is_(None),
                     ~occupied,
                 )
-                .group_by(InstantHost.location)
             )
-            for code, count, direct_count in instant_result.all():
-                instant_by_location[code] = int(count)
-                direct_instant_by_location[code] = int(direct_count or 0)
+            for code, sdr_only, capabilities in instant_result.all():
+                instant_by_location[code] = instant_by_location.get(code, 0) + 1
+                if not sdr_only and host_supports_rcon_gateway(capabilities):
+                    direct_instant_by_location[code] = direct_instant_by_location.get(code, 0) + 1
     except Exception:
         logger.debug("Instant capacity unavailable while building status", exc_info=True)
 
@@ -540,6 +544,10 @@ async def reservation_event_generator(
                     # "rcon_password": reservation.rcon_password,
                     "tv_password": reservation.tv_password,
                     "enable_direct_connect": reservation.enable_direct_connect,
+                    "enable_rcon": bool(reservation.enable_rcon),
+                    "owner_rcon_password": (
+                        reservation.owner_rcon_password if reservation.enable_rcon else None
+                    ),
                     "runtime_kind": getattr(runtime_kind, "value", runtime_kind),
                     "direct_ip": reservation.direct_ip,
                     "direct_port": reservation.direct_port,

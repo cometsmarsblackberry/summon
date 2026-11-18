@@ -127,6 +127,20 @@ func TestBuildRunArgsPreservesCloudDefaults(t *testing.T) {
 	}
 }
 
+// The RCON gateway takes the game port's TCP side on the host. Remote clients
+// must reach it, never the game server's own RCON.
+func TestBuildRunArgsLeavesTCPToTheRCONGateway(t *testing.T) {
+	joined := strings.Join(BuildRunArgs(ContainerConfig{Image: "tf2", RCONGateway: true}), " ")
+	if strings.Contains(joined, "/tcp") {
+		t.Fatalf("container publishes TCP although the RCON gateway runs: %s", joined)
+	}
+	for _, mapping := range []string{"27015:27015/udp", "27020:27020/udp"} {
+		if !strings.Contains(joined, mapping) {
+			t.Fatalf("missing %s in %s", mapping, joined)
+		}
+	}
+}
+
 func TestBuildRunArgsLeavesUDPFragmentationToHostOnInstantHosts(t *testing.T) {
 	args := BuildRunArgs(ContainerConfig{
 		Name: "summon-h4-s2", Image: "tf2:test", GamePort: 27035, TVPort: 27040,

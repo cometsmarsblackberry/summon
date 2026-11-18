@@ -100,6 +100,8 @@ async def _create_and_migrate(conn) -> None:
     await _migrate_add_column(conn, "users", "steam_data_updated_at", "DATETIME")
     await _migrate_add_column(conn, "reservations", "provision_attempts", "INTEGER DEFAULT 0")
     await _migrate_add_column(conn, "reservations", "enable_direct_connect", "BOOLEAN DEFAULT 0")
+    await _migrate_add_column(conn, "reservations", "enable_rcon", "BOOLEAN DEFAULT 0")
+    await _migrate_add_column(conn, "reservations", "owner_rcon_password", "VARCHAR(32)")
     await _migrate_add_column(conn, "reservations", "config_file", "VARCHAR(64)")
     await _migrate_add_column(conn, "reservations", "enable_logs_tf_upload", "BOOLEAN DEFAULT 1")
     await _migrate_add_column(conn, "reservations", "enable_demos_tf_upload", "BOOLEAN DEFAULT 1")

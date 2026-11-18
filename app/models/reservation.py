@@ -99,6 +99,12 @@ class Reservation(Base):
     config_file: Mapped[str | None] = mapped_column(String(64), nullable=True)
     auto_end: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_direct_connect: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Restricted RCON for the owner's remote tools, such as lobby sites. Every
+    # direct-connect reservation has it, and only those: RCON is TCP, which
+    # SDR does not carry. The agent's gateway checks owner_rcon_password;
+    # rcon_password above stays private.
+    enable_rcon: Mapped[bool] = mapped_column(Boolean, default=False)
+    owner_rcon_password: Mapped[str | None] = mapped_column(String(32), nullable=True)
     enable_logs_tf_upload: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_demos_tf_upload: Mapped[bool] = mapped_column(Boolean, default=True)
 

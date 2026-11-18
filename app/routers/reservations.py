@@ -84,7 +84,10 @@ class CreateReservationRequest(BaseModel):
     location: str = Field(..., description="Location code (e.g., 'santiago', 'seoul')")
     first_map: str = Field("cp_badlands", description="Initial map")
     config_file: str | None = Field(None, description="Competitive config to load on startup")
-    enable_direct_connect: bool = Field(False, description="Allow direct IP connections (opens UDP ports)")
+    enable_direct_connect: bool = Field(
+        False,
+        description="Allow direct IP connections and the owner's restricted RCON",
+    )
     enable_logs_tf_upload: bool = Field(True, description="Upload match logs to logs.tf")
     enable_demos_tf_upload: bool = Field(True, description="Upload SourceTV demos to demos.tf")
     captcha_token: str | None = Field(None, description="hCaptcha response token")
@@ -120,6 +123,10 @@ class ReservationResponse(BaseModel):
     sdr_tv_port: Optional[int] = None
     # Direct connect
     enable_direct_connect: bool = False
+    # Restricted RCON on the direct address and game port, over TCP. The
+    # password is the gateway's own, never the server's rcon_password.
+    enable_rcon: bool = False
+    owner_rcon_password: Optional[str] = None
     enable_logs_tf_upload: bool = True
     enable_demos_tf_upload: bool = True
     ip_address: Optional[str] = None
@@ -162,6 +169,7 @@ def reservation_to_response(
         config_file=reservation.config_file,
         created_at=reservation.created_at,
         enable_direct_connect=reservation.enable_direct_connect,
+        enable_rcon=bool(getattr(reservation, "enable_rcon", False)),
         enable_logs_tf_upload=reservation.enable_logs_tf_upload,
         enable_demos_tf_upload=reservation.enable_demos_tf_upload,
         failure_reason=public_failure_reason(
@@ -178,6 +186,8 @@ def reservation_to_response(
         # Re-enable by uncommenting this line and the ReservationResponse field.
         # response.rcon_password = reservation.rcon_password
         response.tv_password = reservation.tv_password
+        if response.enable_rcon:
+            response.owner_rcon_password = getattr(reservation, "owner_rcon_password", None)
         response.sdr_ip = reservation.sdr_ip
         response.sdr_port = reservation.sdr_port
         response.sdr_tv_port = reservation.sdr_tv_port
@@ -652,6 +662,7 @@ async def run_reservation_command(
         OwnerCommandValidationError,
         get_owner_commands,
         parse_plugin_command_result,
+        redact_owner_command,
         truncate_command_output,
         validate_owner_command_line,
     )
@@ -675,7 +686,7 @@ async def run_reservation_command(
             "Owner command rejected reservation=%s actor=%s command=%r outcome=%s",
             reservation.id,
             user.steam_id,
-            body.command,
+            redact_owner_command(body.command),
             exc.code,
         )
         raise HTTPException(
@@ -687,7 +698,7 @@ async def run_reservation_command(
             "Owner command unavailable reservation=%s actor=%s command=%r outcome=allowlist_unavailable",
             reservation.id,
             user.steam_id,
-            body.command,
+            redact_owner_command(body.command),
         )
         raise HTTPException(
             status_code=503,
@@ -700,7 +711,7 @@ async def run_reservation_command(
             "Owner command unavailable reservation=%s actor=%r command=%r outcome=invalid_actor",
             reservation.id,
             actor_steam_id,
-            command,
+            redact_owner_command(command),
         )
         raise HTTPException(
             status_code=503,
@@ -713,7 +724,7 @@ async def run_reservation_command(
                 "Owner command rejected reservation=%s actor=%s command=%r outcome=in_progress",
                 reservation.id,
                 actor_steam_id,
-                command,
+                redact_owner_command(command),
             )
             raise HTTPException(
                 status_code=409,
@@ -733,7 +744,7 @@ async def run_reservation_command(
                 "Owner command agent failure reservation=%s actor=%s command=%r error=%r",
                 reservation.id,
                 actor_steam_id,
-                command,
+                redact_owner_command(command),
                 truncate_command_output(transport.get("error")),
             )
             raise HTTPException(
@@ -775,7 +786,7 @@ async def run_reservation_command(
             "Owner command failed reservation=%s actor=%s command=%r",
             reservation.id,
             actor_steam_id,
-            command,
+            redact_owner_command(command),
         )
         raise HTTPException(
             status_code=500, detail=t("errors.command_failed")
@@ -787,7 +798,7 @@ async def run_reservation_command(
             "Owner command reservation=%s actor=%s command=%r outcome=%s",
             reservation.id,
             actor_steam_id,
-            command,
+            redact_owner_command(command),
             outcome,
         )
 

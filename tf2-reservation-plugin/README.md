@@ -20,6 +20,10 @@ image. Operators do not install the plugins or their dependencies separately.
   restart the match, and end the reservation.
 - Gives the owner restricted access to an operator-maintained allowlist of
   server commands without granting unrestricted RCON access.
+- Runs the same allowlisted commands for the owner's remote tools, such as
+  lobby sites, which connect through the Summon agent's RCON gateway.
+- Keeps players' IP addresses out of the game log and `status` output, which
+  the owner and the owner's log receivers can see.
 - Reports player count, SteamID64, connection time, and ping, along with the
   current map and config, to the Summon backend every 10 seconds, when players
   join or leave, when a map starts, and when a config loads.
@@ -151,6 +155,7 @@ Ultiduo, Ultitrio, and King of the Flag maps.
 | `sm_reservation_warning <minutes>` | Broadcast a remaining-time warning. Intended for the Summon agent. |
 | `sm_reservation_ending` | Broadcast the final message and remove players after five seconds. Intended for the Summon agent. |
 | `sm_summon_owner_command <actor_steamid64> <command> [arguments...]` | Run an allowlisted owner command for the Summon web console. Intended for the backend/agent integration. |
+| `sm_summon_rcon_command <actor_steamid64> <command> [arguments...]` | Run an allowlisted owner command from a remote RCON client of the owner, without the cooldown. Intended for the agent's RCON gateway. |
 
 The plugin also performs its own expiry countdown from `sm_reserve_ends_at`, so
 agent-issued warning commands are not required for expiry enforcement.
@@ -168,6 +173,7 @@ boot:
 | `sm_reserve_ends_at` | Reservation end time as a Unix timestamp in seconds. |
 | `sm_reserve_backend_url` | Summon backend base URL, without a trailing slash. |
 | `sm_reserve_api_key` | Internal API key sent as the `X-API-Key` header. |
+| `sm_reserve_direct_connect` | `1` when the reservation has direct connections, so the server's address is public. Defaults to `0`. |
 
 For local plugin testing, set the same ConVars through RCON. The plugin does
 not load the provided, commented `configs/summon.cfg` automatically; the
@@ -176,7 +182,8 @@ current ConVar names are listed above.
 ### Owner-command allowlist
 
 `configs/summon_owner_commands.cfg` is the policy source used by the web
-application. The `tf2-summon` image carries the same file at
+application, and the one list for every route: `!command`, `!cmd`, `!rcon`,
+the web console, and the RCON gateway. The `tf2-summon` image carries the same file at
 `sourcemod/configs/summon_owner_commands.cfg` and installs it as
 `addons/sourcemod/configs/summon_owner_commands.cfg`. Keep those copies in sync
 when changing the policy.
@@ -193,7 +200,11 @@ Its `SummonOwnerCommands` sections are exact command or ConVar names:
 ```
 
 The supplied file contains the default gameplay-oriented allowlist, which
-includes bots, player votes, and `sv_cheats` for practice. Commands
+includes bots, player votes, and `sv_cheats` for practice. It also has what
+lobby and pickup sites use to set up a match and follow it: `status`,
+`kickid`, `kickall`, `say`, `sv_password`, `sv_tags`, `log`, `sv_logsecret`,
+`logaddress_add`, `logaddress_del`, `logaddress_delall`, `logaddress_list`,
+`tv_port`, `tv_password`, and `sm_whitelist_id`. Commands
 provided by optional image plugins remain safe to list but are reported as
 unavailable while their plugin is not loaded. The web and in-game checks must
 agree before a command can run.
@@ -209,6 +220,26 @@ Owner-command execution has the following safeguards:
   underscores, or hyphens.
 - `mp_tournament_whitelist` may only read the current value, clear it, or name
   one existing `cfg/*.txt` file without path traversal.
+- `kickid` takes a user ID from `status` or a SteamID, and refuses SourceTV's
+  user ID. `kickall` leaves SourceTV connected.
+- `sv_password` can be read or set to 1 to 64 characters without quotes, but
+  not cleared.
+- `log` only turns logging on.
+- `logaddress_add` takes one public IPv4 address and port. Host names and
+  private, loopback, and reserved addresses are refused, and at most four
+  receivers can be added. The log includes chat and Steam IDs; remove the six
+  logging entries to keep it on the server.
+- `logaddress_add` is refused unless the reservation has direct connections.
+  Log packets come from the server's own address, which stays hidden when
+  players connect through Steam's relays.
+- `status`, `logaddress_list`, `logaddress_delall`, `tv_port`, and
+  `tv_password` take no arguments. `status` output has every IPv4 address
+  replaced with `0.0.0.0`, including the server's own, which owners do not
+  otherwise see when players connect through Steam's relays. In game, the
+  plugin does this. A command run over RCON prints its output after the
+  plugin has returned, so for the web console and the RCON gateway, the
+  backend and the agent mask any output that looks like `status`, whatever
+  the command was called.
 - `tv_delay` may only read the current delay or set one whole number of
   seconds from 0 to 120, the range TF2 allows. The plugin makes `tv_delay` a
   notify ConVar, so the engine announces every change in chat, including
@@ -226,13 +257,56 @@ Owner-command execution has the following safeguards:
 - StAC stops itself when cheats are turned on. The plugin reloads it when
   they are turned off.
 - A shared one-second cooldown applies between owner commands, including
-  commands sent through the web console.
+  commands sent through the web console. Commands from the RCON gateway are
+  exempt; see [RCON gateway](#rcon-gateway).
 - Every dispatched command and policy rejection is written to the SourceMod
-  log with the reservation number and actor SteamID64.
+  log with the reservation number and actor SteamID64. Values given to
+  `sv_password`, `sv_logsecret`, `tv_password`, and `rcon_password` are left
+  out.
+- In chat, output longer than one short line, such as the player list from
+  `status`, goes to the owner's console.
 
 After editing the file, run `sm_summon_reload_owner_commands` or reload the
 plugin. Do not allowlist command-forwarding or config-execution commands unless
 their transitive access is intentional.
+
+### RCON gateway
+
+Lobby and pickup sites configure a server over RCON.
+Every reservation with direct connections gets RCON: the Summon agent
+listens for RCON on the game port over TCP and checks a password of its own,
+which the reservation page shows the owner. The server's real RCON password
+stays with the agent. The agent splits every request into
+single commands and passes each one to `sm_summon_rcon_command`. It refuses
+a command that still contains a semicolon or a control character, so the
+engine can never split a forwarded line and run part of it unchecked.
+
+A remote tool holds the owner's password, so it gets exactly what the owner
+gets: the same allowlist and argument checks as every other route. RCON
+commands have no cooldown, because a lobby site sends dozens of them at once.
+The agent's gateway limits their rate instead.
+
+### Player addresses
+
+The game logs a player's address once, when they connect:
+
+```text
+"Name<2><[U:1:123]><>" connected, address "203.0.113.9:27005"
+```
+
+With direct connections, the owner can send the game log to any public
+address with `logaddress_add`, so the plugin takes players' addresses out of
+it. It blocks this line and
+logs a copy in which every IPv4 address in the address field is replaced with
+`0.0.0.0`, so the log file, the console, and every log receiver get the copy.
+Bots and SourceTV log `none` and are left alone. The line as the game wrote it
+goes to `addons/sourcemod/logs/summon_player_addresses.log`, which the Summon
+agent's log archive collects with the other SourceMod logs.
+
+Plugins that read the game log through SourceMod see the line as the game
+wrote it, because the copy goes straight to the engine. The logs.tf uploader
+is one of them, and it removes the last two numbers of every address from its
+own copy before uploading.
 
 ### Map downloader
 

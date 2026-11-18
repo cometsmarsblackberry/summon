@@ -226,6 +226,8 @@ func (f *fakeSequence) ExecuteRCON(context.Context, string) (string, error) {
 	return "ok", nil
 }
 func (f *fakeSequence) ConfigureUploads(context.Context, bool, bool) error { return nil }
+func (f *fakeSequence) StartRCONGateway(context.Context) error             { return nil }
+func (f *fakeSequence) StopRCONGateway()                                   {}
 func (f *fakeSequence) CollectLogs(context.Context) (string, error)        { return "", nil }
 func (f *fakeSequence) UploadCollectedLogs(context.Context, string) error  { return nil }
 

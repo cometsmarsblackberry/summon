@@ -54,6 +54,8 @@ type serverSequence interface {
 	GetConfig() *boot.ReservationConfig
 	ExecuteRCON(context.Context, string) (string, error)
 	ConfigureUploads(context.Context, bool, bool) error
+	StartRCONGateway(context.Context) error
+	StopRCONGateway()
 	CollectLogs(context.Context) (string, error)
 	UploadCollectedLogs(context.Context, string) error
 }
@@ -656,6 +658,7 @@ func (c *Controller) startSlot(slot *slotRuntime, command CommandEnvelope) {
 		return
 	}
 	if err != nil {
+		sequence.StopRCONGateway()
 		if containerID := sequence.GetContainerID(); containerID != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			_ = c.podman.StopContainer(ctx, containerID)
@@ -797,6 +800,10 @@ func (c *Controller) stopSlot(slot *slotRuntime, command CommandEnvelope) {
 	}
 	slot.mu.Unlock()
 
+	if sequence != nil {
+		// Remote tools lose access before players are told the reservation ends.
+		sequence.StopRCONGateway()
+	}
 	if sequence != nil && command.Reason != "expiry" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, rconErr := sequence.ExecuteRCON(ctx, "sm_reservation_ending")
@@ -891,6 +898,7 @@ func (c *Controller) restartSlot(slot *slotRuntime, command CommandEnvelope) {
 	ctx, finishStart := startContextLocked(slot)
 	slot.mu.Unlock()
 	defer finishStart()
+	oldSequence.StopRCONGateway()
 	stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	stopErr := c.podman.StopContainer(stopCtx, snapshot.ContainerID)
 	cancel()
@@ -1242,6 +1250,7 @@ func (c *Controller) sendStatus(messageType string) {
 			"multi_slot": true, "reconciliation": true, "local_lease_expiry": true,
 			"image_digest": true, "self_update": true, "container_stats": true,
 			"rcon": true, "uploads": true, "sdr": true, "sourcetv": true,
+			"rcon_gateway": true,
 		},
 		"sysinfo":      sysinfo.Collect(),
 		"preflight":    preflight,
@@ -1419,6 +1428,11 @@ func (c *Controller) reconcileLocalContainers(ctx context.Context) error {
 		slot.lastReady = ready
 		slot.mu.Unlock()
 		c.scheduleLease(slot, command)
+		gatewayCtx, gatewayCancel := context.WithTimeout(context.Background(), 45*time.Second)
+		if err := sequence.StartRCONGateway(gatewayCtx); err != nil {
+			log.Printf("Slot %d: RCON gateway did not restart: %v", slotIndex, err)
+		}
+		gatewayCancel()
 	}
 	if len(conflicts) > 0 {
 		return fmt.Errorf("%s", strings.Join(conflicts, "; "))
@@ -1768,6 +1782,7 @@ func (r *slotReporter) sendReady(info wsprotocol.ServerReadyInfo) error {
 	event := r.controller.readyEvent(
 		r.command, containerID, info.SDRIP, info.SDRPort, info.SDRTVPort, info.Map,
 	)
+	event["rcon_gateway"] = info.RCONGateway
 	if slot := r.controller.slotForCommand(r.command); slot != nil {
 		slot.mu.Lock()
 		slot.containerID = containerID

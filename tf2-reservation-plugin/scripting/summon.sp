@@ -19,16 +19,27 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.11"
+#define PLUGIN_VERSION "1.6.12"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
 #define END_COUNTDOWN_SECONDS 10
 #define OWNER_COMMAND_COOLDOWN 1.0
 #define OWNER_COMMAND_CONFIG "configs/summon_owner_commands.cfg"
+// Every log receiver gets a copy of each log line, so their number is capped.
+#define MAX_OWNER_LOG_ADDRESSES 4
+#define MAX_OWNER_JOIN_PASSWORD_LENGTH 64
+// The game log goes to every log receiver, so players' addresses are taken
+// out of it. The lines as the game wrote them are kept in this SourceMod log,
+// which only the operator's log archive collects.
+#define PLAYER_ADDRESS_LOG "logs/summon_player_addresses.log"
+#define MASKED_IPV4 "0.0.0.0"
+#define MAX_GAME_LOG_LINE 1024
 #define MAX_OWNER_COMMAND_NAME 64
 #define MAX_OWNER_COMMAND_LINE 512
 #define MAX_OWNER_COMMAND_RESPONSE 4096
+// Longer single-line output goes to the console, like multi-line output.
+#define MAX_CHAT_REPLY_LENGTH 190
 // Owners type "exec <config>" out of habit. It is never forwarded to the
 // native exec: a config is a command script, so that would grant every
 // command in every reachable .cfg. It loads through !config's checks instead.
@@ -62,6 +73,9 @@ ConVar g_cvReservationNumber;
 ConVar g_cvEndsAt;
 ConVar g_cvBackendURL;
 ConVar g_cvAPIKey;
+// 1 when the reservation publishes the server's address. Without it, players
+// connect through Steam's relays and the address stays hidden.
+ConVar g_cvDirectConnect;
 
 // Forward
 GlobalForward g_fwdOnMapChangeRequested;
@@ -76,6 +90,11 @@ bool g_bExpiryKickDone = false;
 float g_fLastOwnerCommand = 0.0;
 StringMap g_mOwnerCommandAllowlist;
 int g_iOwnerCommandCount = 0;
+// Log receivers added through owner commands, keyed by "ip:port".
+StringMap g_mOwnerLogAddresses;
+// Commands whose values the owner-command log leaves out.
+char g_sOwnerSecretCommands[][] = {"sv_password", "sv_logsecret", "tv_password", "rcon_password"};
+char g_sPlayerAddressLogPath[PLATFORM_MAX_PATH];
 // Last config loaded through ExecuteConfig. Real configs need a league
 // prefix, so "none" cannot collide with one.
 char g_sCurrentConfig[64] = "none";
@@ -136,6 +155,11 @@ public void OnPluginStart()
     g_cvEndsAt = CreateConVar("sm_reserve_ends_at", "0", "Unix timestamp when reservation ends", FCVAR_PROTECTED);
     g_cvBackendURL = CreateConVar("sm_reserve_backend_url", "", "Backend API URL", FCVAR_PROTECTED);
     g_cvAPIKey = CreateConVar("sm_reserve_api_key", "", "Internal API key", FCVAR_PROTECTED);
+    g_cvDirectConnect = CreateConVar(
+        "sm_reserve_direct_connect", "0",
+        "1 when the reservation publishes the server's address",
+        FCVAR_PROTECTED, true, 0.0, true, 1.0
+    );
 
     // Register chat commands
     RegConsoleCmd("sm_reservation", Command_Reservation, "Show reservation info");
@@ -156,6 +180,10 @@ public void OnPluginStart()
     );
 
     LoadOwnerCommandAllowlist();
+    g_mOwnerLogAddresses = new StringMap();
+
+    BuildPath(Path_SM, g_sPlayerAddressLogPath, sizeof(g_sPlayerAddressLogPath), PLAYER_ADDRESS_LOG);
+    AddGameLogHook(GameLog_MaskPlayerAddresses);
 
     // tv_delay is not a notify ConVar, so the engine tells nobody when it
     // changes, and players cannot see who watches SourceTV. With the flag,
@@ -261,6 +289,11 @@ public void OnPluginStart()
         "sm_summon_owner_command",
         Command_ServerOwnerCommand,
         "Run one restricted reservation-owner command for the web console"
+    );
+    RegServerCmd(
+        "sm_summon_rcon_command",
+        Command_ServerRconCommand,
+        "Run one restricted reservation-owner command for the agent's RCON gateway, without the cooldown"
     );
 
     // changelevel only runs as a server command: from the console, RCON,
@@ -784,40 +817,344 @@ bool IsAllowedTVDelay(const char[] value)
     return StringToInt(value) <= MAX_OWNER_TV_DELAY;
 }
 
+// Copies the text after the command name, without the one pair of quotes the
+// engine strips from a ConVar value. commandLine is the trimmed raw line.
+void GetOwnerCommandRawValue(const char[] commandLine, char[] value, int valueSize)
+{
+    int index = 0;
+    while (commandLine[index] != '\0' && commandLine[index] != ' ')
+        index++;
+    while (commandLine[index] == ' ')
+        index++;
+
+    strcopy(value, valueSize, commandLine[index]);
+    TrimString(value);
+
+    int length = strlen(value);
+    if (length >= 2 && value[0] == '"' && value[length - 1] == '"')
+    {
+        value[length - 1] = '\0';
+        strcopy(value, valueSize, value[1]);
+        TrimString(value);
+    }
+}
+
+bool IsDecimalNumber(const char[] value, int maxDigits)
+{
+    int length = strlen(value);
+    if (length <= 0 || length > maxDigits)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        if (value[i] < '0' || value[i] > '9')
+            return false;
+    }
+
+    return true;
+}
+
+// Parses "a.b.c.d:port" strictly and writes it back in canonical form. Host
+// names are refused: the engine would resolve them on the game thread.
+bool ParseLogAddress(const char[] value, char[] canonical, int canonicalSize, int octets[4])
+{
+    char halves[2][32];
+    if (ExplodeString(value, ":", halves, sizeof(halves), sizeof(halves[])) != 2)
+        return false;
+
+    char parts[4][8];
+    if (CharCount(value, ':') != 1
+        || CharCount(halves[0], '.') != 3
+        || ExplodeString(halves[0], ".", parts, sizeof(parts), sizeof(parts[])) != 4)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        if (!IsDecimalNumber(parts[i], 3))
+            return false;
+        octets[i] = StringToInt(parts[i]);
+        if (octets[i] > 255)
+            return false;
+    }
+
+    if (!IsDecimalNumber(halves[1], 5))
+        return false;
+    int port = StringToInt(halves[1]);
+    if (port < 1 || port > 65535)
+        return false;
+
+    Format(
+        canonical, canonicalSize, "%d.%d.%d.%d:%d",
+        octets[0], octets[1], octets[2], octets[3], port
+    );
+    return true;
+}
+
+int CharCount(const char[] value, int character)
+{
+    int count = 0;
+    for (int i = 0; value[i] != '\0'; i++)
+    {
+        if (value[i] == character)
+            count++;
+    }
+    return count;
+}
+
+// Logs may only be sent to addresses on the public internet, never to the
+// host, its private networks, or multicast and reserved ranges.
+bool IsPublicIPv4(const int octets[4])
+{
+    int a = octets[0];
+    int b = octets[1];
+
+    if (a == 0 || a == 10 || a == 127 || a >= 224)
+        return false;
+    if (a == 100 && b >= 64 && b <= 127)
+        return false;
+    if (a == 169 && b == 254)
+        return false;
+    if (a == 172 && b >= 16 && b <= 31)
+        return false;
+    if (a == 192 && b == 168)
+        return false;
+    if (a == 192 && b == 0 && octets[2] == 0)
+        return false;
+    if (a == 198 && (b == 18 || b == 19))
+        return false;
+
+    return true;
+}
+
+bool IsPlainIdentifier(const char[] value, int maxLength)
+{
+    int length = strlen(value);
+    if (length <= 0 || length > maxLength)
+        return false;
+
+    for (int i = 0; i < length; i++)
+    {
+        int character = value[i];
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+
+        if (!isLetter && !isDigit && character != '_')
+            return false;
+    }
+
+    return true;
+}
+
+// Argument rules for owner commands, whichever way they arrive. A command
+// with no rule here accepts every native argument form. On refusal, message
+// says what the command accepts. commandLine is the trimmed raw line.
 bool AreOwnerCommandArgumentsAllowed(
     const char[] operation,
     int valueArgumentCount,
-    const char[] firstValue
+    const char[] firstValue,
+    const char[] commandLine,
+    char[] message,
+    int messageSize
 )
 {
     if (StrEqual(operation, "changelevel"))
-        return valueArgumentCount == 1 && IsSafeMapName(firstValue);
+    {
+        if (valueArgumentCount == 1 && IsSafeMapName(firstValue))
+            return true;
+        strcopy(message, messageSize, "Changelevel requires exactly one map name containing only letters, numbers, underscores, or hyphens.");
+        return false;
+    }
 
     // Reading the current delay takes no value argument.
     if (StrEqual(operation, OWNER_TV_DELAY_COMMAND))
-        return valueArgumentCount == 0
-            || (valueArgumentCount == 1 && IsAllowedTVDelay(firstValue));
+    {
+        if (valueArgumentCount == 0
+            || (valueArgumentCount == 1 && IsAllowedTVDelay(firstValue)))
+            return true;
+        strcopy(message, messageSize, "tv_delay takes one whole number of seconds from 0 to 120.");
+        return false;
+    }
 
     if (StrEqual(operation, OWNER_CONFIG_COMMAND))
     {
         char configName[64];
-        return valueArgumentCount == 1
+        if (valueArgumentCount == 1
             && GetOwnerConfigName(firstValue, configName, sizeof(configName))
-            && IsAllowedConfig(configName);
+            && IsAllowedConfig(configName))
+            return true;
+        strcopy(message, messageSize, "Unknown config. Use !config to see available options.");
+        return false;
     }
-
-    if (!StrEqual(operation, "mp_tournament_whitelist"))
-        return true;
 
     // Reading the current value takes no value argument. Setting it takes one
     // path argument; accepting more would make the native parsing ambiguous.
-    if (valueArgumentCount == 0)
-        return true;
-
-    if (valueArgumentCount != 1)
+    if (StrEqual(operation, "mp_tournament_whitelist"))
+    {
+        if (valueArgumentCount == 0
+            || (valueArgumentCount == 1 && IsSafeTournamentWhitelistPath(firstValue)))
+            return true;
+        strcopy(message, messageSize, "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files.");
         return false;
+    }
 
-    return IsSafeTournamentWhitelistPath(firstValue);
+    // These take no arguments: most report state, and logaddress_delall
+    // removes every log receiver.
+    if (StrEqual(operation, "status")
+        || StrEqual(operation, "logaddress_list")
+        || StrEqual(operation, "logaddress_delall")
+        || StrEqual(operation, "tv_port")
+        || StrEqual(operation, "tv_password"))
+    {
+        if (valueArgumentCount == 0)
+            return true;
+        Format(message, messageSize, "%s takes no arguments here.", operation);
+        return false;
+    }
+
+    if (StrEqual(operation, "kickid"))
+    {
+        // By the user ID that status lists, or by SteamID. SourceTV must stay:
+        // it records the demo and carries the broadcast. It has no SteamID,
+        // so only its user ID needs checking.
+        if (valueArgumentCount >= 1)
+        {
+            if (IsDecimalNumber(firstValue, 5))
+            {
+                int target = GetClientOfUserId(StringToInt(firstValue));
+                if (target == 0 || (!IsClientSourceTV(target) && !IsClientReplay(target)))
+                    return true;
+            }
+            else
+            {
+                char rawValue[MAX_OWNER_COMMAND_LINE];
+                GetOwnerCommandRawValue(commandLine, rawValue, sizeof(rawValue));
+                if (StrContains(rawValue, "STEAM_", false) == 0 || StrContains(rawValue, "[U:", false) == 0)
+                    return true;
+            }
+        }
+        strcopy(message, messageSize, "kickid takes a user ID from status or a SteamID, then an optional message. SourceTV cannot be kicked.");
+        return false;
+    }
+
+    if (StrEqual(operation, "say"))
+    {
+        if (valueArgumentCount >= 1)
+            return true;
+        strcopy(message, messageSize, "say needs a message.");
+        return false;
+    }
+
+    if (StrEqual(operation, "sv_password"))
+    {
+        if (valueArgumentCount == 0)
+            return true;
+
+        // An empty password would open the server to everyone.
+        char password[MAX_OWNER_COMMAND_LINE];
+        GetOwnerCommandRawValue(commandLine, password, sizeof(password));
+        int length = strlen(password);
+        if (length > 0 && length <= MAX_OWNER_JOIN_PASSWORD_LENGTH && StrContains(password, "\"") == -1)
+            return true;
+        Format(
+            message, messageSize,
+            "sv_password must be set to 1-%d characters without quotes; the server cannot be left open.",
+            MAX_OWNER_JOIN_PASSWORD_LENGTH
+        );
+        return false;
+    }
+
+    if (StrEqual(operation, "log"))
+    {
+        // Logging feeds logs.tf and the log receivers, so it only goes on.
+        if (valueArgumentCount == 0 || (valueArgumentCount == 1 && StrEqual(firstValue, "on", false)))
+            return true;
+        strcopy(message, messageSize, "Only \"log on\" is allowed.");
+        return false;
+    }
+
+    if (StrEqual(operation, "sm_whitelist_id"))
+    {
+        if (valueArgumentCount == 0 || (valueArgumentCount == 1 && IsPlainIdentifier(firstValue, 64)))
+            return true;
+        strcopy(message, messageSize, "sm_whitelist_id takes one whitelist.tf ID of letters, numbers, and underscores.");
+        return false;
+    }
+
+    bool isLogAdd = StrEqual(operation, "logaddress_add");
+    if (isLogAdd || StrEqual(operation, "logaddress_del"))
+    {
+        // Log packets come from the server's own address, so a receiver would
+        // learn the address that Steam's relays keep hidden.
+        if (isLogAdd && !g_cvDirectConnect.BoolValue)
+        {
+            strcopy(message, messageSize, "Log receivers need a reservation with direct connections enabled.");
+            return false;
+        }
+
+        char rawAddress[MAX_OWNER_COMMAND_LINE];
+        char address[32];
+        int octets[4];
+        GetOwnerCommandRawValue(commandLine, rawAddress, sizeof(rawAddress));
+        if (!ParseLogAddress(rawAddress, address, sizeof(address), octets))
+        {
+            Format(message, messageSize, "%s takes one IPv4 address and port, such as 203.0.113.5:27100.", operation);
+            return false;
+        }
+
+        if (!isLogAdd)
+            return true;
+
+        if (!IsPublicIPv4(octets))
+        {
+            strcopy(message, messageSize, "Logs can only be sent to a public IPv4 address.");
+            return false;
+        }
+
+        int unused;
+        if (!g_mOwnerLogAddresses.GetValue(address, unused)
+            && g_mOwnerLogAddresses.Size >= MAX_OWNER_LOG_ADDRESSES)
+        {
+            Format(
+                message, messageSize,
+                "At most %d log receivers can be added. Remove one with logaddress_del first.",
+                MAX_OWNER_LOG_ADDRESSES
+            );
+            return false;
+        }
+        return true;
+    }
+
+    return true;
+}
+
+// Keeps g_mOwnerLogAddresses in step with the engine's list once a log
+// receiver command has passed its checks and is about to run.
+void TrackOwnerLogAddress(const char[] operation, const char[] commandLine)
+{
+    if (StrEqual(operation, "logaddress_delall"))
+    {
+        g_mOwnerLogAddresses.Clear();
+        return;
+    }
+
+    bool isLogAdd = StrEqual(operation, "logaddress_add");
+    if (!isLogAdd && !StrEqual(operation, "logaddress_del"))
+        return;
+
+    char rawAddress[MAX_OWNER_COMMAND_LINE];
+    char address[32];
+    int octets[4];
+    GetOwnerCommandRawValue(commandLine, rawAddress, sizeof(rawAddress));
+    if (!ParseLogAddress(rawAddress, address, sizeof(address), octets))
+        return;
+
+    if (isLogAdd)
+        g_mOwnerLogAddresses.SetValue(address, 1);
+    else
+        g_mOwnerLogAddresses.Remove(address);
 }
 
 bool TryConsumeOwnerCommandCooldown()
@@ -835,11 +1172,13 @@ bool TryConsumeOwnerCommandCooldown()
 void LogOwnerCommand(
     const char[] actorSteamID,
     const char[] commandLine,
+    bool viaRcon,
     const char[] outcome
 )
 {
     char safeCommand[MAX_OWNER_COMMAND_LINE];
     strcopy(safeCommand, sizeof(safeCommand), commandLine);
+
     for (int i = 0; safeCommand[i] != '\0'; i++)
     {
         int character = safeCommand[i];
@@ -849,13 +1188,167 @@ void LogOwnerCommand(
             safeCommand[i] = '\'';
     }
 
+    // Keep passwords out of the log, including ones the checks refuse.
+    for (int i = 0; i < sizeof(g_sOwnerSecretCommands); i++)
+    {
+        int length = strlen(g_sOwnerSecretCommands[i]);
+        if (strncmp(safeCommand, g_sOwnerSecretCommands[i], length, false) == 0
+            && safeCommand[length] == ' ')
+        {
+            Format(safeCommand, sizeof(safeCommand), "%s <hidden>", g_sOwnerSecretCommands[i]);
+            break;
+        }
+    }
+
     LogMessage(
-        "[summon] Owner command reservation=%d actor=%s command=\"%s\" outcome=%s",
+        "[summon] Owner command reservation=%d actor=%s command=\"%s\" outcome=%s%s",
         g_cvReservationNumber.IntValue,
         actorSteamID,
         safeCommand,
-        outcome
+        outcome,
+        viaRcon ? " via=rcon" : ""
     );
+}
+
+// ============================================================================
+// Player Address Privacy
+// ============================================================================
+
+bool IsAsciiDigit(int character)
+{
+    return character >= '0' && character <= '9';
+}
+
+// Returns the length of the dotted IPv4 address that starts at text[start],
+// or 0 when there is none. previous is the character before it. Longer dotted
+// numbers, such as version strings, are not addresses.
+int IPv4AddressLength(const char[] text, int start, int previous)
+{
+    if (IsAsciiDigit(previous) || previous == '.')
+        return 0;
+
+    int index = start;
+    for (int part = 0; part < 4; part++)
+    {
+        int digits = 0;
+        while (IsAsciiDigit(text[index]) && digits <= 3)
+        {
+            index++;
+            digits++;
+        }
+        if (digits == 0 || digits > 3)
+            return 0;
+        if (part < 3)
+        {
+            if (text[index] != '.')
+                return 0;
+            index++;
+        }
+    }
+
+    if (text[index] == '.' && IsAsciiDigit(text[index + 1]))
+        return 0;
+    return index - start;
+}
+
+// Replaces every IPv4 address in text with MASKED_IPV4 and keeps any port.
+// Returns how many addresses were replaced. It works in place: status output
+// can be 4 KB, and a second buffer that size does not fit on the plugin's
+// heap beside the command's other buffers.
+int MaskIPv4Addresses(char[] text)
+{
+    char masked[] = MASKED_IPV4;
+    int written = 0;
+    int count = 0;
+    // The original character before text[index]; text[index - 1] may have
+    // been overwritten already.
+    int previous = '\0';
+
+    for (int index = 0; text[index] != '\0'; )
+    {
+        int length = IsAsciiDigit(text[index]) ? IPv4AddressLength(text, index, previous) : 0;
+        if (length > 0)
+        {
+            // MASKED_IPV4 is never longer than an address, so writing it
+            // only replaces characters that have been read.
+            for (int i = 0; masked[i] != '\0'; i++)
+                text[written++] = masked[i];
+            index += length;
+            // An address ends with a digit.
+            previous = '0';
+            count++;
+            continue;
+        }
+        previous = text[index];
+        text[written++] = text[index++];
+    }
+
+    text[written] = '\0';
+    return count;
+}
+
+// Appends one line to the private player address log, in the game log's
+// format. LogToFileEx would also echo the line to the server console.
+void WritePlayerAddressLog(const char[] line)
+{
+    File file = OpenFile(g_sPlayerAddressLogPath, "a");
+    if (file == null)
+    {
+        LogError("[summon] Could not open %s", g_sPlayerAddressLogPath);
+        return;
+    }
+
+    char time[32];
+    FormatTime(time, sizeof(time), "%m/%d/%Y - %H:%M:%S");
+    file.WriteLine("L %s: %s", time, line);
+    delete file;
+}
+
+// The game logs each player's address once, when they connect:
+//   "Name<2><[U:1:123]><>" connected, address "203.0.113.9:27005"
+// The game log goes to the log file and to every log receiver, and owners
+// can add receivers. So Summon writes the line as the game sent it to a
+// SourceMod log that only the operator's archive collects, and logs a copy
+// with the address masked in its place. SourceMod hands that copy straight to
+// the engine, so it does not pass through this hook again. Bots and SourceTV
+// log "none" as their address and are left alone.
+public Action GameLog_MaskPlayerAddresses(const char[] message)
+{
+    // Most lines are not connect lines, so they leave here.
+    if (StrContains(message, "connected, address \"") == -1)
+        return Plugin_Continue;
+
+    // The game ends each line with a line break, and LogToGame adds one.
+    char line[MAX_GAME_LOG_LINE];
+    strcopy(line, sizeof(line), message);
+    int length = strlen(line);
+    while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r'))
+        line[--length] = '\0';
+
+    // The address is the last quoted value on the line. Reading it from the
+    // end means a player name that contains the same words cannot move it.
+    if (length < 2 || line[length - 1] != '"')
+        return Plugin_Continue;
+    int valueStart = length - 1;
+    while (valueStart > 0 && line[valueStart - 1] != '"')
+        valueStart--;
+    int markerLength = strlen("connected, address \"");
+    int markerStart = valueStart - markerLength;
+    if (markerStart < 0
+        || strncmp(line[markerStart], "connected, address \"", markerLength) != 0)
+    {
+        return Plugin_Continue;
+    }
+
+    char address[MAX_GAME_LOG_LINE];
+    strcopy(address, length - valueStart, line[valueStart]);
+    if (MaskIPv4Addresses(address) == 0)
+        return Plugin_Continue;
+
+    WritePlayerAddressLog(line);
+    line[valueStart] = '\0';
+    LogToGame("%s%s\"", line, address);
+    return Plugin_Handled;
 }
 
 // ============================================================================
@@ -1002,11 +1495,14 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     if (args >= 2)
         GetCmdArg(2, firstValue, sizeof(firstValue));
 
+    // Running the command can change the reply source, so keep the caller's.
+    ReplySource replySource = GetCmdReplySource();
     char response[MAX_OWNER_COMMAND_RESPONSE];
     char errorCode[64];
     char errorMessage[256];
     bool succeeded = ExecuteOwnerServerCommand(
         actorSteamID,
+        false,
         operation,
         operationLength,
         commandLine,
@@ -1034,7 +1530,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
 
     if (response[0] != '\0')
     {
-        ReplyToCommand(client, "%s", response);
+        ReplyOwnerCommandOutput(client, replySource, response);
     }
     else if (IsClientInGame(client))
     {
@@ -1044,9 +1540,43 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     return Plugin_Handled;
 }
 
+// A chat message holds one short line, so longer output, such as the player
+// list from status, goes to the owner's console line by line instead.
+void ReplyOwnerCommandOutput(int client, ReplySource replySource, const char[] response)
+{
+    bool multiline = StrContains(response, "\n") != -1;
+    if (!multiline
+        && (replySource != SM_REPLY_TO_CHAT || strlen(response) <= MAX_CHAT_REPLY_LENGTH))
+    {
+        ReplySource previous = SetCmdReplySource(replySource);
+        ReplyToCommand(client, "%s", response);
+        SetCmdReplySource(previous);
+        return;
+    }
+
+    char line[MAX_GAME_LOG_LINE];
+    int start = 0;
+    while (response[start] != '\0')
+    {
+        int end = start;
+        while (response[end] != '\0' && response[end] != '\n')
+            end++;
+        int length = end - start;
+        if (length >= sizeof(line))
+            length = sizeof(line) - 1;
+        strcopy(line, length + 1, response[start]);
+        PrintToConsole(client, "%s", line);
+        start = response[end] == '\n' ? end + 1 : end;
+    }
+
+    if (replySource == SM_REPLY_TO_CHAT && IsClientInGame(client))
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] The output is in your console.");
+}
+
 bool OwnerCommandFailure(
     const char[] actorSteamID,
     const char[] commandLine,
+    bool viaRcon,
     const char[] code,
     const char[] message,
     char[] errorCode,
@@ -1057,12 +1587,16 @@ bool OwnerCommandFailure(
 {
     strcopy(errorCode, errorCodeSize, code);
     strcopy(errorMessage, errorMessageSize, message);
-    LogOwnerCommand(actorSteamID, commandLine, code);
+    LogOwnerCommand(actorSteamID, commandLine, viaRcon, code);
     return false;
 }
 
+// viaRcon marks a command the agent's RCON gateway forwarded. Every route
+// shares one allowlist and one set of argument rules; RCON only skips the
+// cooldown, which the gateway replaces with its own rate limit.
 bool ExecuteOwnerServerCommand(
     const char[] actorSteamID,
+    bool viaRcon,
     char[] operation,
     int operationLength,
     const char[] commandLine,
@@ -1083,7 +1617,7 @@ bool ExecuteOwnerServerCommand(
 
     if (!ReservationAllowsOwnerServerCommands())
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "reservation_inactive",
+            actorSteamID, commandLine, viaRcon, "reservation_inactive",
             "The reservation is not active.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
@@ -1093,7 +1627,7 @@ bool ExecuteOwnerServerCommand(
         || !NormalizeOwnerCommandName(operation))
     {
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "invalid_command_name",
+            actorSteamID, commandLine, viaRcon, "invalid_command_name",
             "That server command name is invalid.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
@@ -1101,15 +1635,16 @@ bool ExecuteOwnerServerCommand(
 
     if (g_mOwnerCommandAllowlist == null || g_iOwnerCommandCount <= 0)
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "allowlist_unavailable",
+            actorSteamID, commandLine, viaRcon, "allowlist_unavailable",
             "The server command allowlist is unavailable.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
 
     bool isConfigCommand = StrEqual(operation, OWNER_CONFIG_COMMAND);
-    if (!isConfigCommand && !g_mOwnerCommandAllowlist.ContainsKey(operation))
+    if (!isConfigCommand
+        && !g_mOwnerCommandAllowlist.ContainsKey(operation))
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "command_not_allowed",
+            actorSteamID, commandLine, viaRcon, "command_not_allowed",
             "That server command is not allowed.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
@@ -1118,7 +1653,7 @@ bool ExecuteOwnerServerCommand(
         || (StrEqual(operation, OWNER_CHEATS_COMMAND) && !IsCheatsGuardAvailable()))
     {
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "command_unavailable",
+            actorSteamID, commandLine, viaRcon, "command_unavailable",
             "That server command is unavailable.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
@@ -1129,59 +1664,29 @@ bool ExecuteOwnerServerCommand(
         || !IsSafeOwnerCommandLine(commandLine))
     {
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "unsafe_command",
+            actorSteamID, commandLine, viaRcon, "unsafe_command",
             "That command line is not safe to run.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
     }
 
+    char argumentError[256];
     if (!AreOwnerCommandArgumentsAllowed(
-        operation, valueArgumentCount, firstValue
+        operation, valueArgumentCount, firstValue, commandLine,
+        argumentError, sizeof(argumentError)
     ))
     {
-        if (isConfigCommand)
-            return OwnerCommandFailure(
-                actorSteamID, commandLine, "unknown_config",
-                "Unknown config. Use !config to see available options.",
-                errorCode, errorCodeSize, errorMessage, errorMessageSize
-            );
-
-        char argumentError[256];
-        if (StrEqual(operation, "changelevel"))
-        {
-            strcopy(
-                argumentError,
-                sizeof(argumentError),
-                "Changelevel requires exactly one map name containing only letters, numbers, underscores, or hyphens."
-            );
-        }
-        else if (StrEqual(operation, OWNER_TV_DELAY_COMMAND))
-        {
-            strcopy(
-                argumentError,
-                sizeof(argumentError),
-                "tv_delay takes one whole number of seconds from 0 to 120."
-            );
-        }
-        else
-        {
-            strcopy(
-                argumentError,
-                sizeof(argumentError),
-                "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files."
-            );
-        }
-
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "invalid_arguments",
+            actorSteamID, commandLine, viaRcon,
+            isConfigCommand ? "unknown_config" : "invalid_arguments",
             argumentError,
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
     }
 
-    if (!TryConsumeOwnerCommandCooldown())
+    if (!viaRcon && !TryConsumeOwnerCommandCooldown())
         return OwnerCommandFailure(
-            actorSteamID, commandLine, "cooldown",
+            actorSteamID, commandLine, viaRcon, "cooldown",
             "Please wait before running another server command.",
             errorCode, errorCodeSize, errorMessage, errorMessageSize
         );
@@ -1193,14 +1698,23 @@ bool ExecuteOwnerServerCommand(
         ExecuteConfig(configName);
         PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Loaded config: \x07FFFF00%s", configName);
         Format(response, responseSize, "Loaded config: %s", configName);
-        LogOwnerCommand(actorSteamID, commandLine, "ok");
+        LogOwnerCommand(actorSteamID, commandLine, viaRcon, "ok");
         return true;
     }
+
+    TrackOwnerLogAddress(operation, commandLine);
 
     // Match stock sm_rcon's synchronous execution/output behavior. The fixed
     // format string prevents user input from becoming format directives.
     ServerCommandEx(response, responseSize, "%s", commandLine);
     TrimString(response);
+
+    // status lists every player's address, and the server's own, which is
+    // not shown to owners whose players connect through Steam's relays. Run
+    // over RCON, a command prints its output after this returns, so the
+    // agent's RCON gateway and the web console mask that output themselves.
+    if (StrEqual(operation, "status"))
+        MaskIPv4Addresses(response);
 
     // The engine prints nothing when sv_cheats is set. The output is other
     // plugins' log lines and StAC's error report, so state the result plainly.
@@ -1217,7 +1731,7 @@ bool ExecuteOwnerServerCommand(
         );
     }
 
-    LogOwnerCommand(actorSteamID, commandLine, "ok");
+    LogOwnerCommand(actorSteamID, commandLine, viaRcon, "ok");
     return true;
 }
 
@@ -1258,6 +1772,19 @@ bool ExtractServerOwnerCommandLine(char[] commandLine, int commandLineSize)
 
 public Action Command_ServerOwnerCommand(int args)
 {
+    return RunServerOwnerCommand(args, false);
+}
+
+// Called by the agent's RCON gateway with one command a remote RCON client
+// sent. The gateway forwards one command per call and never a semicolon or
+// line break, which the engine would split before this callback ran.
+public Action Command_ServerRconCommand(int args)
+{
+    return RunServerOwnerCommand(args, true);
+}
+
+Action RunServerOwnerCommand(int args, bool viaRcon)
+{
     char actorSteamID[32];
     if (args >= 1)
         GetCmdArg(1, actorSteamID, sizeof(actorSteamID));
@@ -1269,7 +1796,7 @@ public Action Command_ServerOwnerCommand(int args)
     {
         PrintToServer("%s ERROR invalid_request", OWNER_COMMAND_RESULT_MARKER);
         PrintToServer("The owner command request is invalid.");
-        LogOwnerCommand(actorSteamID, "<invalid>", "invalid_request");
+        LogOwnerCommand(actorSteamID, "<invalid>", viaRcon, "invalid_request");
         return Plugin_Handled;
     }
 
@@ -1284,6 +1811,7 @@ public Action Command_ServerOwnerCommand(int args)
     char errorMessage[256];
     bool succeeded = ExecuteOwnerServerCommand(
         actorSteamID,
+        viaRcon,
         operation,
         operationLength,
         commandLine,

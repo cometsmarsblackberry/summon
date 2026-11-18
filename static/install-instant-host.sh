@@ -186,8 +186,11 @@ echo "The installer did not change your firewall. Required connectivity:"
 echo "  outbound: HTTPS/WSS (TCP 443) to $SUMMON_URL"
 if printf '%s' "$ENROLL_RESPONSE" | jq -e '.slots | length > 0' >/dev/null 2>&1; then
   printf '%s' "$ENROLL_RESPONSE" | jq -r '.slots[] | "  inbound: UDP \(.game_port) and UDP \(.tv_port)  (ufw: sudo ufw allow \(.game_port)/udp; sudo ufw allow \(.tv_port)/udp)"'
+  echo "On a host that offers direct connect, reservation owners' RCON also needs:"
+  printf '%s' "$ENROLL_RESPONSE" | jq -r '.slots[] | "  inbound: TCP \(.game_port)  (ufw: sudo ufw allow \(.game_port)/tcp)"'
 else
   echo "  inbound: each game and SourceTV UDP port shown in the Summon admin panel"
+  echo "  on a host that offers direct connect, for reservation owners' RCON: each game port over TCP"
 fi
 echo
 echo "Check status with: systemctl status summon-host-agent.service"

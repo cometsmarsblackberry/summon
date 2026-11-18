@@ -223,3 +223,24 @@ func TestRetryStopsWaitingWhenContextIsCancelled(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
+
+func TestReservationConVarsTellThePluginAboutDirectConnect(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		s := &Sequence{config: &ReservationConfig{
+			OwnerSteamID:        "76561198000000000",
+			EnableDirectConnect: enabled,
+		}}
+		commands := s.reservationConVarCommands()
+		want := "sm_reserve_direct_connect 0"
+		if enabled {
+			want = "sm_reserve_direct_connect 1"
+		}
+		// Older plugins do not have the ConVar, so it must come last.
+		if got := commands[len(commands)-1]; got != want {
+			t.Fatalf("direct connect %v: last command %q, want %q", enabled, got, want)
+		}
+		if commands[0] != "sm_reserve_owner 76561198000000000" {
+			t.Fatalf("first command %q", commands[0])
+		}
+	}
+}

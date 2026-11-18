@@ -3,9 +3,12 @@ package boot
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -17,6 +20,7 @@ import (
 	"time"
 
 	"github.com/summon/agent/podman"
+	"github.com/summon/agent/rcongateway"
 	"github.com/summon/agent/s3upload"
 	"github.com/summon/agent/sdr"
 	"github.com/summon/agent/websocket"
@@ -67,30 +71,35 @@ func (c *S3Config) Configured() bool {
 
 // ReservationConfig holds the reservation configuration
 type ReservationConfig struct {
-	ReservationID       int            `json:"reservation_id"`
-	ReservationNumber   int            `json:"reservation_number"`
-	Location            string         `json:"location"`
-	LocationCity        string         `json:"location_city"`
-	Password            string         `json:"password"`
-	RCONPassword        string         `json:"rcon_password"`
-	TVPassword          string         `json:"tv_password"`
-	FirstMap            string         `json:"first_map"`
-	ConfigFile          string         `json:"config_file"`
-	LogSecret           string         `json:"logsecret"`
-	OwnerSteamID        string         `json:"owner_steam_id"`
-	OwnerName           string         `json:"owner_name"`
-	EndsAt              int64          `json:"ends_at"`
-	BackendURL          string         `json:"backend_url"`
-	InternalAPIKey      string         `json:"internal_api_key"`
-	ContainerImage      string         `json:"container_image"`
-	DemosTFAPIKey       string         `json:"demos_tf_apikey"`
-	LogsTFAPIKey        string         `json:"logs_tf_apikey"`
-	EnableLogsTFUpload  bool           `json:"enable_logs_tf_upload"`
-	EnableDemosTFUpload bool           `json:"enable_demos_tf_upload"`
-	MOTDURL             string         `json:"motd_url"`
-	EnableDirectConnect bool           `json:"enable_direct_connect"`
-	ServerSettings      ServerSettings `json:"server_settings"`
-	AdminSteamIDs       []string       `json:"admin_steam_ids"`
+	ReservationID       int    `json:"reservation_id"`
+	ReservationNumber   int    `json:"reservation_number"`
+	Location            string `json:"location"`
+	LocationCity        string `json:"location_city"`
+	Password            string `json:"password"`
+	RCONPassword        string `json:"rcon_password"`
+	TVPassword          string `json:"tv_password"`
+	FirstMap            string `json:"first_map"`
+	ConfigFile          string `json:"config_file"`
+	LogSecret           string `json:"logsecret"`
+	OwnerSteamID        string `json:"owner_steam_id"`
+	OwnerName           string `json:"owner_name"`
+	EndsAt              int64  `json:"ends_at"`
+	BackendURL          string `json:"backend_url"`
+	InternalAPIKey      string `json:"internal_api_key"`
+	ContainerImage      string `json:"container_image"`
+	DemosTFAPIKey       string `json:"demos_tf_apikey"`
+	LogsTFAPIKey        string `json:"logs_tf_apikey"`
+	EnableLogsTFUpload  bool   `json:"enable_logs_tf_upload"`
+	EnableDemosTFUpload bool   `json:"enable_demos_tf_upload"`
+	MOTDURL             string `json:"motd_url"`
+	EnableDirectConnect bool   `json:"enable_direct_connect"`
+	// EnableRCON starts the RCON gateway for the reservation owner's remote
+	// tools. OwnerRCONPassword is what they authenticate with; the server's
+	// own RCONPassword never leaves the agent.
+	EnableRCON        bool           `json:"enable_rcon"`
+	OwnerRCONPassword string         `json:"owner_rcon_password,omitempty"`
+	ServerSettings    ServerSettings `json:"server_settings"`
+	AdminSteamIDs     []string       `json:"admin_steam_ids"`
 	// S3 storage for server log uploads (optional)
 	S3Config S3Config `json:"s3_config"`
 	// Persist credentials so the agent can reconnect after warm pool reconfigure.
@@ -157,6 +166,9 @@ type Sequence struct {
 	started     bool
 	finished    bool
 	done        chan struct{}
+
+	gatewayMu sync.Mutex
+	gateway   *rcongateway.Gateway
 }
 
 var (
@@ -502,6 +514,7 @@ func (s *Sequence) Run() error {
 			GamePort:          s.config.ExternalGamePort,
 			TVPort:            s.config.ExternalTVPort,
 			Labels:            s.config.Labels,
+			RCONGateway:       s.config.EnableRCON,
 		})
 		return startErr
 	})
@@ -549,20 +562,15 @@ func (s *Sequence) Run() error {
 	if s.config.TVPassword != "" {
 		rconCommands = append(rconCommands, formatRCONSetString("tv_password", s.config.TVPassword))
 	}
-	rconCommands = append(rconCommands,
-		fmt.Sprintf("sm_reserve_owner %s", s.config.OwnerSteamID),
-		formatRCONSetString("sm_reserve_owner_name", s.config.OwnerName),
-		fmt.Sprintf("sm_reserve_number %d", s.config.ReservationNumber),
-		fmt.Sprintf("sm_reserve_ends_at %d", s.config.EndsAt),
-		formatRCONSetString("sm_reserve_backend_url", s.config.BackendURL),
-		formatRCONSetString("sm_reserve_api_key", s.config.InternalAPIKey),
-	)
+	rconCommands = append(rconCommands, s.reservationConVarCommands()...)
 
 	if err := s.execRCONCommands(ctx, rconCommands); err != nil {
 		log.Printf("RCON config failed: %v", err)
 	} else {
 		log.Printf("Server configured successfully (%d commands)", len(rconCommands))
 	}
+	// After the owner is set, which the plugin checks for every command.
+	s.startRCONGatewayDuringBoot(ctx)
 
 	// Stage 8: Detect SDR FakeIP and report server ready
 	log.Println("Boot stage: detecting SDR FakeIP")
@@ -580,13 +588,14 @@ func (s *Sequence) Run() error {
 	} else {
 		// Send full server info including SDR FakeIP
 		readyInfo := websocket.ServerReadyInfo{
-			RealIP:     serverInfo.RealIP,
-			RealPort:   serverInfo.RealPort,
-			RealTVPort: serverInfo.RealTVPort,
-			SDRIP:      serverInfo.SDRIP,
-			SDRPort:    serverInfo.SDRPort,
-			SDRTVPort:  serverInfo.SDRTVPort,
-			Map:        serverInfo.Map,
+			RealIP:      serverInfo.RealIP,
+			RealPort:    serverInfo.RealPort,
+			RealTVPort:  serverInfo.RealTVPort,
+			SDRIP:       serverInfo.SDRIP,
+			SDRPort:     serverInfo.SDRPort,
+			SDRTVPort:   serverInfo.SDRTVPort,
+			Map:         serverInfo.Map,
+			RCONGateway: s.RCONGatewayRunning(),
 		}
 
 		// Fill in defaults if parsing failed
@@ -666,6 +675,7 @@ func (s *Sequence) RunReconfigureContext(ctx context.Context) error {
 			GamePort:          s.config.ExternalGamePort,
 			TVPort:            s.config.ExternalTVPort,
 			Labels:            s.config.Labels,
+			RCONGateway:       s.config.EnableRCON,
 		})
 		return startErr
 	})
@@ -710,20 +720,15 @@ func (s *Sequence) RunReconfigureContext(ctx context.Context) error {
 	if s.config.TVPassword != "" {
 		rconCommands = append(rconCommands, formatRCONSetString("tv_password", s.config.TVPassword))
 	}
-	rconCommands = append(rconCommands,
-		fmt.Sprintf("sm_reserve_owner %s", s.config.OwnerSteamID),
-		formatRCONSetString("sm_reserve_owner_name", s.config.OwnerName),
-		fmt.Sprintf("sm_reserve_number %d", s.config.ReservationNumber),
-		fmt.Sprintf("sm_reserve_ends_at %d", s.config.EndsAt),
-		formatRCONSetString("sm_reserve_backend_url", s.config.BackendURL),
-		formatRCONSetString("sm_reserve_api_key", s.config.InternalAPIKey),
-	)
+	rconCommands = append(rconCommands, s.reservationConVarCommands()...)
 
 	if err := s.execRCONCommands(ctx, rconCommands); err != nil {
 		log.Printf("RCON config failed (reconfigure): %v", err)
 	} else {
 		log.Printf("Server configured successfully (%d commands, reconfigure)", len(rconCommands))
 	}
+	// After the owner is set, which the plugin checks for every command.
+	s.startRCONGatewayDuringBoot(ctx)
 
 	// Stage 7: Detect SDR FakeIP and report server ready
 	log.Println("Boot stage: detecting SDR FakeIP (reconfigure)")
@@ -739,13 +744,14 @@ func (s *Sequence) RunReconfigureContext(ctx context.Context) error {
 		s.ws.SendServerReady(ip, 27015, 27020)
 	} else {
 		readyInfo := websocket.ServerReadyInfo{
-			RealIP:     serverInfo.RealIP,
-			RealPort:   serverInfo.RealPort,
-			RealTVPort: serverInfo.RealTVPort,
-			SDRIP:      serverInfo.SDRIP,
-			SDRPort:    serverInfo.SDRPort,
-			SDRTVPort:  serverInfo.SDRTVPort,
-			Map:        serverInfo.Map,
+			RealIP:      serverInfo.RealIP,
+			RealPort:    serverInfo.RealPort,
+			RealTVPort:  serverInfo.RealTVPort,
+			SDRIP:       serverInfo.SDRIP,
+			SDRPort:     serverInfo.SDRPort,
+			SDRTVPort:   serverInfo.SDRTVPort,
+			Map:         serverInfo.Map,
+			RCONGateway: s.RCONGatewayRunning(),
 		}
 
 		if readyInfo.RealIP == "" {
@@ -781,22 +787,149 @@ func enabledAPIKey(enabled bool, apiKey string) string {
 }
 
 // ConfigureUploads updates logs.tf and demos.tf without restarting the server.
+//
+// The API keys go into a config file that is executed, not onto an RCON
+// command line: SRCDS writes every RCON command to its log, and a log
+// receiver that a remote tool added would get a copy.
 func (s *Sequence) ConfigureUploads(ctx context.Context, logsTF, demosTF bool) error {
 	if s.config == nil || s.containerID == "" {
 		return fmt.Errorf("container or reservation config not available")
 	}
 
-	commands := []string{
-		formatRCONSetString("logstf_apikey", enabledAPIKey(logsTF, s.config.LogsTFAPIKey)),
-		formatRCONSetString("sm_demostf_apikey", enabledAPIKey(demosTF, s.config.DemosTFAPIKey)),
+	settings := formatRCONSetString("logstf_apikey", enabledAPIKey(logsTF, s.config.LogsTFAPIKey)) + "\n" +
+		formatRCONSetString("sm_demostf_apikey", enabledAPIKey(demosTF, s.config.DemosTFAPIKey)) + "\n"
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Errorf("name upload settings file: %w", err)
 	}
-	if err := s.execRCONCommands(ctx, commands); err != nil {
+	name := "summon_uploads_" + hex.EncodeToString(suffix)
+	path := serverConfigDirectory + "/" + name + ".cfg"
+	if err := s.podman.ExecInContainerWithInput(ctx, s.containerID, []string{
+		"sh", "-c", `umask 077 && cat > "$1"`, "sh", path,
+	}, settings); err != nil {
+		return fmt.Errorf("write upload settings: %w", err)
+	}
+	defer func() {
+		removeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.podman.ExecInContainer(removeCtx, s.containerID, []string{"rm", "-f", path}); err != nil {
+			log.Printf("Warning: failed to remove upload settings file: %v", err)
+		}
+	}()
+	if err := s.execRCONCommands(ctx, []string{"exec " + name}); err != nil {
 		return err
 	}
 
 	s.config.EnableLogsTFUpload = logsTF
 	s.config.EnableDemosTFUpload = demosTF
 	return nil
+}
+
+// serverConfigDirectory is where SRCDS looks for configs to exec.
+const serverConfigDirectory = "/home/tf2/server/tf/cfg"
+
+// rconPipeCommand connects its standard input and output to the game
+// server's RCON port inside the container. It exits when either side closes,
+// which closes the stream on the agent's side. A background job's standard
+// input is /dev/null unless it is redirected explicitly, hence fd 4.
+var rconPipeCommand = []string{"bash", "-c", `exec 3<>/dev/tcp/127.0.0.1/27015 || exit 1
+exec 4<&0
+cat <&3 &
+cat <&4 >&3 &
+wait -n
+kill $(jobs -p) 2>/dev/null
+exit 0`}
+
+// rconGatewayStartTimeout bounds connecting the gateway to the game server.
+const rconGatewayStartTimeout = 30 * time.Second
+
+func (s *Sequence) startRCONGatewayDuringBoot(ctx context.Context) {
+	if err := s.StartRCONGateway(ctx); err != nil {
+		log.Printf("Warning: RCON gateway did not start: %v", err)
+	}
+}
+
+// StartRCONGateway starts the reservation owner's RCON gateway on the game
+// port, if the reservation asked for one. A gateway that an earlier sequence
+// left on the same port is closed first. The gateway closes by itself once
+// this sequence's container is gone.
+func (s *Sequence) StartRCONGateway(ctx context.Context) error {
+	config := s.GetConfig()
+	if config == nil || !config.EnableRCON || s.Superseded() {
+		return nil
+	}
+	containerID := s.GetContainerID()
+	if containerID == "" {
+		return errors.New("container is not running")
+	}
+	port := config.ExternalGamePort
+	if port == 0 {
+		port = 27015
+	}
+
+	upstream := rcongateway.NewUpstream(func(context.Context) (io.ReadWriteCloser, error) {
+		return s.podman.ExecPipe(containerID, rconPipeCommand)
+	}, config.RCONPassword)
+	connectCtx, cancel := context.WithTimeout(ctx, rconGatewayStartTimeout)
+	err := upstream.Connect(connectCtx)
+	cancel()
+	if err != nil {
+		upstream.Close()
+		return err
+	}
+	gateway, err := rcongateway.Replace(rcongateway.Config{
+		Addr:         fmt.Sprintf(":%d", port),
+		Password:     config.OwnerRCONPassword,
+		ActorSteamID: config.OwnerSteamID,
+		Upstream:     upstream,
+		Label:        fmt.Sprintf("#%d", config.ReservationNumber),
+	})
+	if err != nil {
+		upstream.Close()
+		return err
+	}
+	gateway.Follow(upstream, func(ctx context.Context) bool {
+		goneCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		return s.podman.ContainerGone(goneCtx, containerID)
+	})
+
+	s.gatewayMu.Lock()
+	previous := s.gateway
+	s.gateway = gateway
+	s.gatewayMu.Unlock()
+	if previous != nil && previous != gateway {
+		previous.Close()
+	}
+	log.Printf("RCON gateway for reservation #%d listening on TCP %d", config.ReservationNumber, port)
+	return nil
+}
+
+// StopRCONGateway closes this sequence's RCON gateway, if it has one.
+func (s *Sequence) StopRCONGateway() {
+	s.gatewayMu.Lock()
+	gateway := s.gateway
+	s.gateway = nil
+	s.gatewayMu.Unlock()
+	if gateway != nil {
+		gateway.Close()
+	}
+}
+
+// RCONGatewayRunning reports whether this sequence's RCON gateway is open.
+func (s *Sequence) RCONGatewayRunning() bool {
+	s.gatewayMu.Lock()
+	gateway := s.gateway
+	s.gatewayMu.Unlock()
+	if gateway == nil {
+		return false
+	}
+	select {
+	case <-gateway.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *Sequence) maybeReportCompetitiveConfigsAsync() {
@@ -963,6 +1096,26 @@ func (s *Sequence) execRCONCommand(ctx context.Context, command string) error {
 		"-P", s.config.RCONPassword,
 		command,
 	})
+}
+
+// reservationConVarCommands sets the Summon plugin's reservation ConVars.
+func (s *Sequence) reservationConVarCommands() []string {
+	// The plugin refuses owner log receivers unless the server's address is
+	// published: log packets would reveal it. Older plugins ignore the ConVar,
+	// so it comes last.
+	directConnect := 0
+	if s.config.EnableDirectConnect {
+		directConnect = 1
+	}
+	return []string{
+		fmt.Sprintf("sm_reserve_owner %s", s.config.OwnerSteamID),
+		formatRCONSetString("sm_reserve_owner_name", s.config.OwnerName),
+		fmt.Sprintf("sm_reserve_number %d", s.config.ReservationNumber),
+		fmt.Sprintf("sm_reserve_ends_at %d", s.config.EndsAt),
+		formatRCONSetString("sm_reserve_backend_url", s.config.BackendURL),
+		formatRCONSetString("sm_reserve_api_key", s.config.InternalAPIKey),
+		fmt.Sprintf("sm_reserve_direct_connect %d", directConnect),
+	}
 }
 
 // execRCONCommands executes commands one at a time so untrusted values never

@@ -273,6 +273,11 @@ def build_reservation_config(
         "backend_url": settings.base_url,
         "internal_api_key": reservation.plugin_api_key,
         "enable_direct_connect": reservation.enable_direct_connect,
+        "enable_rcon": bool(
+            getattr(reservation, "enable_rcon", False)
+            and getattr(reservation, "owner_rcon_password", None)
+        ),
+        "owner_rcon_password": getattr(reservation, "owner_rcon_password", None) or "",
         "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
         "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
         "container_image": container_image,
@@ -434,8 +439,13 @@ async def provision_instance_for_reservation(
         )
         provider_record = provider_result.scalar_one_or_none()
 
-        # Check warm pool for this specific provider
-        warm_instance = await get_warm_instance(reservation.location, db, provider_code=provider_code)
+        # Check warm pool for this specific provider. A warm or booting
+        # agent was downloaded when its server was created, so it may be too
+        # old to run the RCON gateway.
+        require_rcon = bool(getattr(reservation, "enable_rcon", False))
+        warm_instance = await get_warm_instance(
+            reservation.location, db, provider_code=provider_code, require_rcon=require_rcon,
+        )
         if warm_instance:
             result = await _reuse_warm_instance(
                 warm_instance, reservation, client, loc_provider,
@@ -448,13 +458,16 @@ async def provision_instance_for_reservation(
 
         # Then a server still booting for a reservation cancelled before it
         # was ready: it is further along than a new one would be.
-        booting_instance = await get_booting_instance(reservation.location, db, provider_code=provider_code)
+        booting_instance = await get_booting_instance(
+            reservation.location, db, provider_code=provider_code, require_rcon=require_rcon,
+        )
         if booting_instance:
             result = None
             async with cloud_instance_lock(booting_instance.id):
                 # Recheck under the lock: it may have become ready or failed meanwhile.
                 booting_instance = await get_booting_instance(
-                    reservation.location, db, provider_code=provider_code, cloud_id=booting_instance.id,
+                    reservation.location, db, provider_code=provider_code,
+                    cloud_id=booting_instance.id, require_rcon=require_rcon,
                 )
                 if booting_instance:
                     logger.info(
@@ -584,8 +597,8 @@ async def _reuse_warm_instance(
     await db.commit()
     await db.refresh(warm_instance)
 
-    # Manage Gcore security group for direct connect
-    from app.services.gcore import GcoreClient, DIRECT_CONNECT_SG_NAME
+    # Manage Gcore security groups for direct connect and RCON
+    from app.services.gcore import GcoreClient, DIRECT_CONNECT_SG_NAME, RCON_SG_NAME
     if isinstance(client, GcoreClient):
         region_id = int(loc_provider.provider_region)
         if reservation.enable_direct_connect:
@@ -596,6 +609,15 @@ async def _reuse_warm_instance(
         else:
             await client.remove_security_group_from_instance(
                 warm_instance.id, region_id, DIRECT_CONNECT_SG_NAME
+            )
+        if getattr(reservation, "enable_rcon", False):
+            await client.ensure_rcon_security_group(region_id)
+            await client.add_security_group_to_instance(
+                warm_instance.id, region_id, RCON_SG_NAME
+            )
+        else:
+            await client.remove_security_group_from_instance(
+                warm_instance.id, region_id, RCON_SG_NAME
             )
 
     reconfigure_data = build_reservation_config(
@@ -665,8 +687,11 @@ async def _create_new_instance(
 
     from app.services.gcore import GcoreClient
     if isinstance(client, GcoreClient) and reservation.enable_direct_connect:
-        sg_id = await client.ensure_direct_connect_security_group(int(loc_provider.provider_region))
-        create_kwargs["security_groups"] = [sg_id]
+        region_id = int(loc_provider.provider_region)
+        security_groups = [await client.ensure_direct_connect_security_group(region_id)]
+        if getattr(reservation, "enable_rcon", False):
+            security_groups.append(await client.ensure_rcon_security_group(region_id))
+        create_kwargs["security_groups"] = security_groups
 
     if loc_provider.provider_code == "vultr":
         attempt = CloudCreationAttempt(
@@ -963,6 +988,7 @@ async def get_booting_instance(
     db: AsyncSession,
     provider_code: Optional[str] = None,
     cloud_id: Optional[str] = None,
+    require_rcon: bool = False,
 ) -> Optional[CloudInstance]:
     """Get a server still booting for a reservation cancelled before it was ready.
 
@@ -975,11 +1001,12 @@ async def get_booting_instance(
         db: Database session
         provider_code: If set, only return instances from this provider
         cloud_id: If set, only consider this instance
+        require_rcon: Only return an instance whose agent runs the RCON gateway
 
     Returns:
         Booting CloudInstance or None
     """
-    from app.routers.internal import boot_handover_ready
+    from app.routers.internal import RCON_GATEWAY_FEATURE, agent_has_feature, boot_handover_ready
 
     query = (
         select(CloudInstance)
@@ -998,6 +1025,8 @@ async def get_booting_instance(
         query = query.where(CloudInstance.id == cloud_id)
 
     for instance in (await db.execute(query)).scalars():
+        if require_rcon and not agent_has_feature(instance.instance_id, RCON_GATEWAY_FEATURE):
+            continue
         if boot_handover_ready(instance.instance_id):
             return instance
     return None
@@ -1007,6 +1036,7 @@ async def get_warm_instance(
     location: str,
     db: AsyncSession,
     provider_code: Optional[str] = None,
+    require_rcon: bool = False,
 ) -> Optional[CloudInstance]:
     """Get an available warm instance in the specified location.
 
@@ -1014,6 +1044,7 @@ async def get_warm_instance(
         location: Location code
         db: Database session
         provider_code: If set, only return instances from this provider
+        require_rcon: Only return an instance whose agent runs the RCON gateway
 
     Returns:
         Available CloudInstance or None
@@ -1030,9 +1061,16 @@ async def get_warm_instance(
     if provider_code:
         query = query.where(CloudInstance.provider_code == provider_code)
 
-    query = query.order_by(CloudInstance.billing_hour_ends_at.desc()).limit(1)
-    result = await db.execute(query)
-    return result.scalar_one_or_none()
+    query = query.order_by(CloudInstance.billing_hour_ends_at.desc())
+    if not require_rcon:
+        result = await db.execute(query.limit(1))
+        return result.scalar_one_or_none()
+
+    from app.routers.internal import RCON_GATEWAY_FEATURE, agent_has_feature
+    for instance in (await db.execute(query)).scalars():
+        if agent_has_feature(instance.instance_id, RCON_GATEWAY_FEATURE):
+            return instance
+    return None
 
 
 async def cleanup_expired_instances() -> int:

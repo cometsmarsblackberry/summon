@@ -48,6 +48,8 @@ async def create_reservation(
         first_map: Initial map to load
         db: Database session
         starts_at: Optional scheduled start time (default: now)
+        enable_direct_connect: Publish the server's address, and give the
+            owner restricted RCON on it
 
     Returns:
         Created reservation
@@ -81,6 +83,10 @@ async def create_reservation(
         config_file=config_file,
         auto_end=True,
         enable_direct_connect=enable_direct_connect,
+        enable_rcon=enable_direct_connect,
+        # Lobby sites ask for the password once, so it survives restarts. It
+        # is long because anyone who can reach the server can try it.
+        owner_rcon_password=generate_password(20) if enable_direct_connect else None,
         enable_logs_tf_upload=enable_logs_tf_upload,
         enable_demos_tf_upload=enable_demos_tf_upload,
         motd_token=generate_motd_token(),

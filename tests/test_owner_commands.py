@@ -29,9 +29,12 @@ from app.services.owner_commands import (
     get_owner_commands,
     parse_owner_command_allowlist,
     parse_plugin_command_result,
+    redact_owner_command,
     truncate_command_output,
     validate_owner_command_line,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 VALID_CONFIG = '''
@@ -207,9 +210,36 @@ class OwnerCommandPolicyTests(unittest.TestCase):
     def test_checked_in_allowlist_includes_changelevel(self):
         self.assertIn("changelevel", get_owner_commands())
 
-    def test_checked_in_allowlist_includes_only_tv_delay_from_sourcetv(self):
-        sourcetv = [name for name in get_owner_commands() if name.startswith("tv_")]
-        self.assertEqual(["tv_delay"], sourcetv)
+    def test_checked_in_allowlist_limits_sourcetv_to_delay_and_connection_details(self):
+        # The plugin lets tv_port and tv_password only be read.
+        sourcetv = {name for name in get_owner_commands() if name.startswith("tv_")}
+        self.assertEqual({"tv_delay", "tv_port", "tv_password"}, sourcetv)
+
+    def test_image_and_plugin_copies_of_the_allowlist_match(self):
+        image_copy = (
+            PROJECT_ROOT.parent / "tf2-summon" / "sourcemod" / "configs"
+            / "summon_owner_commands.cfg"
+        )
+        if not image_copy.exists():
+            self.skipTest("tf2-summon checkout not found next to this repository")
+        plugin_copy = (
+            PROJECT_ROOT / "tf2-reservation-plugin" / "configs" / "summon_owner_commands.cfg"
+        )
+        self.assertEqual(plugin_copy.read_text(), image_copy.read_text())
+
+    def test_password_values_are_left_out_of_logged_commands(self):
+        for command, logged in (
+            ("sv_password hunter2", "sv_password <hidden>"),
+            ("SV_PASSWORD   \"two words\"", "SV_PASSWORD <hidden>"),
+            ('"sv_logsecret" 12345', '"sv_logsecret" <hidden>'),
+            ("tv_password spectate", "tv_password <hidden>"),
+            ("rcon_password guess", "rcon_password <hidden>"),
+            ("sv_password", "sv_password"),
+            ("mp_timelimit 30", "mp_timelimit 30"),
+            ("say sv_password hunter2", "say sv_password hunter2"),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(logged, redact_owner_command(command))
 
     def test_checked_in_allowlist_keeps_map_server_commands_gated(self):
         # The plugin holds this setting while sv_cheats is on. An owner who
@@ -224,6 +254,29 @@ class OwnerCommandPolicyTests(unittest.TestCase):
             "script", "script_execute", "sm", "sm_rcon",
         }
         self.assertEqual(set(), forwarding & set(get_owner_commands()))
+
+    def test_plugin_result_parser_masks_addresses_in_status(self):
+        # A command run over RCON prints its output after the plugin's marker,
+        # so the plugin cannot mask it.
+        result = parse_plugin_command_result(
+            "SUMMON_OWNER_COMMAND_RESULT OK\n"
+            "hostname: Test 1.2.3\n"
+            "udp/ip  : ?.?.?.?:?  (public IP from Steam: 198.51.100.5)\n"
+            "sourcetv:  ?.?.?.?:?, delay 90.0s  (local: 10.0.0.2:27020)\n"
+            "# userid name                uniqueid            connected ping loss state  adr\n"
+            '#      3 "player"            [U:1:12345]         01:02       40    0 active 203.0.113.9:27005'
+        )
+        self.assertTrue(result.ok)
+        for leaked in ("198.51.100.5", "10.0.0.2", "203.0.113.9"):
+            self.assertNotIn(leaked, result.output)
+        self.assertIn("(public IP from Steam: 0.0.0.0)", result.output)
+        self.assertIn("active 0.0.0.0:27005", result.output)
+        self.assertIn("hostname: Test 1.2.3", result.output)
+
+        receivers = parse_plugin_command_result(
+            "SUMMON_OWNER_COMMAND_RESULT OK\nlogaddress_list: 1 entry\n203.0.113.5:27500"
+        )
+        self.assertIn("203.0.113.5:27500", receivers.output)
 
     def test_plugin_result_parser_requires_marker_and_caps_utf8_output(self):
         self.assertIsNone(parse_plugin_command_result("Unknown command"))

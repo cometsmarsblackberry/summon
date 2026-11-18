@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -528,6 +529,9 @@ type ContainerConfig struct {
 	GamePort int
 	TVPort   int
 	Labels   map[string]string
+	// RCONGateway is set when the agent's RCON gateway will listen on the
+	// game port over TCP, which the container must then leave free.
+	RCONGateway bool
 }
 
 var safeStartupMapRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -548,8 +552,9 @@ func mapDownloadBase(fastDLURL string) string {
 	return base + "/"
 }
 
-// BuildRunArgs builds deterministic rootless Podman arguments. RCON remains
-// reachable only inside the container; only game and SourceTV ports are bound.
+// BuildRunArgs builds deterministic rootless Podman arguments. On Instant
+// hosts, and wherever the agent's RCON gateway runs, RCON remains reachable
+// only inside the container; only game and SourceTV ports are bound.
 func BuildRunArgs(cfg ContainerConfig) []string {
 	// Build hostname from format string (e.g., "My Server #{number} | {location}")
 	hostname := cfg.HostnameFormat
@@ -584,9 +589,13 @@ func BuildRunArgs(cfg ContainerConfig) []string {
 	}
 	// Instant hosts deliberately publish UDP only. Source RCON listens on the
 	// game server's TCP port, so a TCP mapping would make it public. Preserve
-	// the legacy cloud mapping exactly for disposable single-server VMs.
+	// the legacy cloud mapping exactly for disposable single-server VMs,
+	// except where the RCON gateway takes the port: remote clients must then
+	// reach the gateway, never the game server's own RCON.
 	if !instantRuntime {
-		args = append(args, "-p", fmt.Sprintf("%d:27015/tcp", gamePort))
+		if !cfg.RCONGateway {
+			args = append(args, "-p", fmt.Sprintf("%d:27015/tcp", gamePort))
+		}
 		// Nothing reads the image HEALTHCHECK, but every 30-second probe
 		// starts podman, an exec session, and an RCON client. On a small
 		// cloud VM that work competes with SRCDS for CPU.
@@ -847,4 +856,93 @@ func (c *Client) ExecInContainerWithOutput(ctx context.Context, containerID stri
 	}
 
 	return outputStr, nil
+}
+
+// ContainerGone reports whether the container has definitely stopped or been
+// removed. A Podman failure that says nothing about the container, such as a
+// storage lock timeout, reports false.
+func (c *Client) ContainerGone(ctx context.Context, containerID string) bool {
+	cmd := buildPodmanCmd(ctx, "inspect", "--format", "{{.State.Running}}", containerID)
+	output, err := runPodmanCommand(cmd)
+	if err != nil {
+		message := strings.ToLower(string(output))
+		return strings.Contains(message, "no such container") || strings.Contains(message, "no such object")
+	}
+	return strings.TrimSpace(string(output)) == "false"
+}
+
+// ExecInContainerWithInput runs a command inside a running container with
+// input on its standard input. Unlike an argument, the input does not show up
+// in process listings.
+func (c *Client) ExecInContainerWithInput(ctx context.Context, containerID string, cmd []string, input string) error {
+	args := append([]string{"exec", "-i", containerID}, cmd...)
+	execCmd := buildPodmanCmd(ctx, args...)
+	execCmd.Stdin = strings.NewReader(input)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman exec failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+// execPipe is a command running inside a container, with its standard input
+// and output as one byte stream.
+type execPipe struct {
+	cmd    *exec.Cmd
+	cancel context.CancelFunc
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+
+	closeOnce sync.Once
+}
+
+func (p *execPipe) Read(buffer []byte) (int, error)  { return p.stdout.Read(buffer) }
+func (p *execPipe) Write(buffer []byte) (int, error) { return p.stdin.Write(buffer) }
+
+// Close ends the command. Closing its input lets it exit by itself; it is
+// killed if it has not done so shortly afterwards.
+func (p *execPipe) Close() error {
+	p.closeOnce.Do(func() {
+		_ = p.stdin.Close()
+		exited := make(chan struct{})
+		go func() {
+			_ = p.cmd.Wait()
+			close(exited)
+		}()
+		select {
+		case <-exited:
+		case <-time.After(execPipeExitGrace):
+			p.cancel()
+			<-exited
+		}
+		p.cancel()
+	})
+	return nil
+}
+
+// execPipeExitGrace is how long a piped command gets to exit after its input
+// is closed.
+const execPipeExitGrace = 2 * time.Second
+
+// ExecPipe starts a command inside a running container and returns its
+// standard input and output as a stream. The caller must close the stream.
+func (c *Client) ExecPipe(containerID string, cmd []string) (io.ReadWriteCloser, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	args := append([]string{"exec", "-i", containerID}, cmd...)
+	execCmd := buildPodmanCmd(ctx, args...)
+	stdin, err := execCmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("podman exec stdin: %w", err)
+	}
+	stdout, err := execCmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("podman exec stdout: %w", err)
+	}
+	if err := execCmd.Start(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("podman exec: %w", err)
+	}
+	return &execPipe{cmd: execCmd, cancel: cancel, stdin: stdin, stdout: stdout}, nil
 }
