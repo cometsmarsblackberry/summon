@@ -122,6 +122,30 @@
             return this.hasRcon() ? this.connection.direct_ip + ':' + this.connection.direct_port : '';
         },
 
+        // Commands for the Connect and SourceTV tabs: the direct address
+        // first when the owner enabled it (known while the server starts),
+        // then the Steam relay address once the server is up.
+        connectionRows(kind) {
+            const c = this.connection;
+            if (!c) return [];
+            const stv = kind === 'stv';
+            const password = stv ? c.tv_password : c.password;
+            const rows = [];
+            if (c.direct_ip) {
+                rows.push({
+                    route: 'direct',
+                    command: this.connectCommand(c.direct_ip, stv ? c.direct_tv_port : c.direct_port, password),
+                });
+            }
+            if (this.status === 'active' && c.sdr_ip) {
+                rows.push({
+                    route: 'sdr',
+                    command: this.connectCommand(c.sdr_ip, stv ? c.sdr_tv_port : c.sdr_port, password),
+                });
+            }
+            return rows;
+        },
+
         init() {
             this.initReadyNotice();
 
@@ -1406,92 +1430,56 @@
         {% if is_owner %}
         <div x-show="status === 'active' || (status === 'provisioning' && connection && connection.direct_ip)" x-cloak
             class="{{ 'mt-6 pt-6 border-t border-slate-200' if uses_legacy_layout else 'border-t border-slate-200 pt-5' }}"
-            x-data="{ connType: 'connect', connTypeInit: false }"
-            x-effect="if (!connTypeInit && connection && connection.direct_ip) { connTypeInit = true; $nextTick(() => { connType = 'direct'; }); }">
-            <div class="flex items-center justify-between mb-3">
+            x-data="{
+                connTab: 'connect',
+                // RCON only exists while the server runs; fall back to Connect.
+                currentConnTab() { return this.connTab === 'rcon' && !this.hasRcon() ? 'connect' : this.connTab; },
+            }">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 class="text-sm font-medium text-slate-500">{{ _('status.connection_details') }}</h2>
-                <select x-model="connType"
-                    class="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-600">
-                    <template x-if="status === 'active'">
-                        <option value="connect">{{ _('status.connect') }}</option>
-                    </template>
-                    <template x-if="connection && connection.direct_ip">
-                        <option value="direct">{{ _('status.direct_connect') }}</option>
-                    </template>
-                    <template x-if="status === 'active'">
-                        <option value="stv">{{ _('status.source_tv') }}</option>
-                    </template>
-                    <template x-if="connection && connection.direct_ip">
-                        <option value="direct_stv">{{ _('status.direct_source_tv') }}</option>
-                    </template>
-                    <template x-if="hasRcon()">
-                        <option value="rcon">{{ _('status.rcon') }}</option>
-                    </template>
-                </select>
-            </div>
-
-            <!-- Connect (SDR) -->
-            <div x-show="connType === 'connect' && connection && connection.sdr_ip" x-data="{ copied: false }">
-                <div class="flex items-center gap-2">
-                    <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? connectCommand(connection.sdr_ip, connection.sdr_port, connection.password) : ''"></code>
-                    <button
-                        @click="navigator.clipboard.writeText(connectCommand(connection.sdr_ip, connection.sdr_port, connection.password)); copied = true; setTimeout(() => copied = false, 2000)"
-                        class="px-2 py-2 rounded text-xs transition-colors"
-                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
-                        <span x-show="!copied">{{ _('status.copy') }}</span>
-                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
-                    </button>
+                <div role="group" aria-label="{{ _('status.connection_details') }}"
+                    class="inline-flex rounded border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                    <button type="button" @click="connTab = 'connect'"
+                        :aria-pressed="currentConnTab() === 'connect'"
+                        :class="currentConnTab() === 'connect' ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:text-slate-700'"
+                        class="rounded px-2.5 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">{{ _('status.connect') }}</button>
+                    <button type="button" @click="connTab = 'stv'"
+                        :aria-pressed="currentConnTab() === 'stv'"
+                        :class="currentConnTab() === 'stv' ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:text-slate-700'"
+                        class="rounded px-2.5 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">{{ _('status.source_tv') }}</button>
+                    <button type="button" x-show="hasRcon()" x-cloak @click="connTab = 'rcon'"
+                        :aria-pressed="currentConnTab() === 'rcon'"
+                        :class="currentConnTab() === 'rcon' ? 'bg-brand-50 text-brand-700' : 'text-slate-500 hover:text-slate-700'"
+                        class="rounded px-2.5 py-1 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">{{ _('status.rcon') }}</button>
                 </div>
             </div>
 
-            <!-- SourceTV (SDR) -->
-            <div x-show="connType === 'stv' && connection && connection.sdr_ip" x-data="{ copied: false }">
-                <div class="flex items-center gap-2">
-                    <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? connectCommand(connection.sdr_ip, connection.sdr_tv_port, connection.tv_password) : ''"></code>
-                    <button
-                        @click="navigator.clipboard.writeText(connectCommand(connection.sdr_ip, connection.sdr_tv_port, connection.tv_password)); copied = true; setTimeout(() => copied = false, 2000)"
-                        class="px-2 py-2 rounded text-xs transition-colors"
-                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
-                        <span x-show="!copied">{{ _('status.copy') }}</span>
-                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Direct Connect -->
-            <div x-show="connType === 'direct' && connection && connection.direct_ip" x-data="{ copied: false }">
-                <div class="flex items-center gap-2">
-                    <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? connectCommand(connection.direct_ip, connection.direct_port, connection.password) : ''"></code>
-                    <button
-                        @click="navigator.clipboard.writeText(connectCommand(connection.direct_ip, connection.direct_port, connection.password)); copied = true; setTimeout(() => copied = false, 2000)"
-                        class="px-2 py-2 rounded text-xs transition-colors"
-                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
-                        <span x-show="!copied">{{ _('status.copy') }}</span>
-                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Direct SourceTV -->
-            <div x-show="connType === 'direct_stv' && connection && connection.direct_ip" x-data="{ copied: false }">
-                <div class="flex items-center gap-2">
-                    <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
-                        x-text="connection ? connectCommand(connection.direct_ip, connection.direct_tv_port, connection.tv_password) : ''"></code>
-                    <button
-                        @click="navigator.clipboard.writeText(connectCommand(connection.direct_ip, connection.direct_tv_port, connection.tv_password)); copied = true; setTimeout(() => copied = false, 2000)"
-                        class="px-2 py-2 rounded text-xs transition-colors"
-                        :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
-                        <span x-show="!copied">{{ _('status.copy') }}</span>
-                        <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
-                    </button>
-                </div>
+            <!-- Connect and SourceTV: direct first, then the Steam relay. The
+                 route labels only appear when direct connections are on. -->
+            <div x-show="currentConnTab() !== 'rcon'" class="space-y-3">
+                <template x-for="row in connectionRows(currentConnTab())" :key="currentConnTab() + '-' + row.route">
+                    <div x-data="{ copied: false }">
+                        <p x-show="connection && connection.direct_ip" class="mb-1 text-xs text-slate-500">
+                            <span x-show="row.route === 'direct'">{{ _('status.route_direct') }}</span>
+                            <span x-show="row.route === 'sdr'">{{ _('status.route_sdr') }}</span>
+                        </p>
+                        <div class="flex items-center gap-2">
+                            <code class="min-w-0 flex-1 whitespace-normal break-words px-3 py-2 bg-slate-50 rounded text-sm font-mono"
+                                x-text="row.command"></code>
+                            <button
+                                @click="navigator.clipboard.writeText(row.command); copied = true; setTimeout(() => copied = false, 2000)"
+                                class="px-2 py-2 rounded text-xs transition-colors"
+                                :class="copied ? 'bg-green-100 text-green-800' : 'bg-slate-100 hover:bg-slate-200'">
+                                <span x-show="!copied">{{ _('status.copy') }}</span>
+                                <span x-show="copied" x-cloak>{{ _('status.copied') }}</span>
+                            </button>
+                        </div>
+                    </div>
+                </template>
             </div>
 
             <!-- RCON for the owner's remote tools -->
-            <div x-show="connType === 'rcon' && hasRcon()" class="space-y-3">
+            <div x-show="currentConnTab() === 'rcon'" class="space-y-3">
                 <div x-data="{ copied: false }">
                     <p class="mb-1 text-xs text-slate-500">{{ _('status.rcon_address') }}</p>
                     <div class="flex items-center gap-2">

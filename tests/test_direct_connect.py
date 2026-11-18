@@ -26,7 +26,10 @@ class StatusPageConnectCommandTests(unittest.TestCase):
 
         self.assertIn("Number(port) === 27015 ? ip : ip + ':' + port", template)
         self.assertNotIn("'connect ' + connection.", template)
-        self.assertEqual(8, template.count("connectCommand(connection."))
+        # Every displayed and copied command comes from connectionRows().
+        self.assertIn("this.connectCommand(c.direct_ip,", template)
+        self.assertIn("this.connectCommand(c.sdr_ip,", template)
+        self.assertNotIn("connectCommand(connection.", template)
 
     def test_direct_details_show_while_provisioning(self):
         template = (
