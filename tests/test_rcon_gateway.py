@@ -275,7 +275,8 @@ class SharedAllowlistTests(unittest.TestCase):
 
         commands = set(get_owner_commands())
         for needed in (
-            "status", "kickid", "kickall", "say", "sv_password", "sv_tags",
+            "hostname", "status", "users", "kickid", "kickall", "say",
+            "sv_password", "sv_tags",
             "log", "sv_logsecret", "logaddress_add", "logaddress_del",
             "logaddress_delall", "logaddress_list", "tv_port", "tv_password",
             "sm_whitelist_id", "mp_tournament", "changelevel",
@@ -290,7 +291,7 @@ class SharedAllowlistTests(unittest.TestCase):
             "rcon_password", "exec", "sm", "sm_rcon", "quit", "alias",
             "sv_allow_point_servercommand", "plugin_load", "meta",
             "sv_downloadurl", "logstf_apikey", "sm_demostf_apikey", "kick",
-            "banid", "addip", "writeip", "listip", "users",
+            "banid", "addip", "writeip", "listip",
         ):
             self.assertNotIn(dangerous, commands)
 

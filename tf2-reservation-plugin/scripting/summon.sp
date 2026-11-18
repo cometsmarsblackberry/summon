@@ -1001,8 +1001,11 @@ bool AreOwnerCommandArgumentsAllowed(
     }
 
     // These take no arguments: most report state, and logaddress_delall
-    // removes every log receiver.
+    // removes every log receiver. hostname and the tv_ entries can be read
+    // but not changed.
     if (StrEqual(operation, "status")
+        || StrEqual(operation, "users")
+        || StrEqual(operation, "hostname")
         || StrEqual(operation, "logaddress_list")
         || StrEqual(operation, "logaddress_delall")
         || StrEqual(operation, "tv_port")
