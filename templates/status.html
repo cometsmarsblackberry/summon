@@ -113,7 +113,7 @@
         // port, over TCP, while the server runs.
         hasRcon() {
             const c = this.connection;
-            return this.status === 'active' && Boolean(
+            return ['provisioning', 'active'].includes(this.status) && Boolean(
                 c && c.enable_rcon && c.owner_rcon_password && c.direct_ip && c.direct_port
             );
         },
@@ -1432,7 +1432,7 @@
             class="{{ 'mt-6 pt-6 border-t border-slate-200' if uses_legacy_layout else 'border-t border-slate-200 pt-5' }}"
             x-data="{
                 connTab: 'connect',
-                // RCON only exists while the server runs; fall back to Connect.
+                // A startup retry can clear the RCON details.
                 currentConnTab() { return this.connTab === 'rcon' && !this.hasRcon() ? 'connect' : this.connTab; },
             }">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
