@@ -127,8 +127,8 @@ in chat and names the config for the map's mode in the same league and format,
 if one exists:
 
 ```
-[Reserve] Config mismatch: koth_product_final is KOTH, but the config is etf2l_6v6_5cp.
-[Reserve] The reservation owner can load !config etf2l_6v6_koth instead.
+[Summon] Config mismatch: koth_product_final is KOTH, but the config is etf2l_6v6_5cp.
+[Summon] The reservation owner can load !config etf2l_6v6_koth instead.
 ```
 
 The warning appears 30 seconds after the first player joins a map, a second

@@ -875,7 +875,7 @@ public Action Command_OwnerServerCommand(int client, int args)
 
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can run server commands.");
         return Plugin_Stop;
     }
 
@@ -910,7 +910,7 @@ public Action Listener_OwnerRcon(int client, const char[] command, int args)
 
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can run server commands.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can run server commands.");
         return Plugin_Stop;
     }
 
@@ -935,7 +935,7 @@ public Action Listener_OwnerAdmin(int client, const char[] command, int args)
 
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can open the Summon menu.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can open the Summon menu.");
         return Plugin_Stop;
     }
 
@@ -984,7 +984,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     {
         PrintToChat(
             client,
-            "\x01[\x07FF6600Reserve\x01] Usage: \x0799FF99!%s <command> [arguments...]\x01. Available commands are configured by the server.",
+            "\x01[\x07FF6600Summon\x01] Usage: \x0799FF99!%s <command> [arguments...]\x01. Available commands are configured by the server.",
             trigger
         );
         return Plugin_Handled;
@@ -1024,7 +1024,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     if (!succeeded)
     {
         if (IsClientConnected(client))
-            PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666%s", errorMessage);
+            PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666%s", errorMessage);
         return Plugin_Handled;
     }
 
@@ -1038,7 +1038,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     }
     else if (IsClientInGame(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Command \x0799FF99%s\x01 dispatched.", operation);
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] Command \x0799FF99%s\x01 dispatched.", operation);
     }
 
     return Plugin_Handled;
@@ -1191,7 +1191,7 @@ bool ExecuteOwnerServerCommand(
         char configName[64];
         GetOwnerConfigName(firstValue, configName, sizeof(configName));
         ExecuteConfig(configName);
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", configName);
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Loaded config: \x07FFFF00%s", configName);
         Format(response, responseSize, "Loaded config: %s", configName);
         LogOwnerCommand(actorSteamID, commandLine, "ok");
         return true;
@@ -1328,28 +1328,28 @@ public Action Timer_ExpiryCheck(Handle timer)
     // Show warnings at specific thresholds
     switch (remaining)
     {
-        case 10800: PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 3 hours.");
-        case 7200:  PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 2 hours.");
-        case 3600:  PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 1 hour.");
-        case 1800:  PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 30 minutes.");
-        case 900:   PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 15 minutes.");
-        case 300:   PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in 5 minutes.");
-        case 60:    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 1 minute!");
-        case 30:    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 30 seconds!");
-        case 20:    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 20 seconds!");
-        case 10:    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 10 seconds!");
-        case 5:     PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 5 seconds!");
-        case 4:     PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 4 seconds!");
-        case 3:     PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 3 seconds!");
-        case 2:     PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 2 seconds!");
-        case 1:     PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 1 second!");
+        case 10800: PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 3 hours.");
+        case 7200:  PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 2 hours.");
+        case 3600:  PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 1 hour.");
+        case 1800:  PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 30 minutes.");
+        case 900:   PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 15 minutes.");
+        case 300:   PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in 5 minutes.");
+        case 60:    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 1 minute!");
+        case 30:    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 30 seconds!");
+        case 20:    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 20 seconds!");
+        case 10:    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 10 seconds!");
+        case 5:     PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 5 seconds!");
+        case 4:     PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 4 seconds!");
+        case 3:     PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 3 seconds!");
+        case 2:     PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 2 seconds!");
+        case 1:     PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 1 second!");
     }
 
     // Kick all players when time expires
     if (remaining <= 0 && !g_bExpiryKickDone)
     {
         g_bExpiryKickDone = true;
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Reservation has expired. Thanks for playing!");
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Reservation has expired. Thanks for playing!");
 
         for (int i = 1; i <= MaxClients; i++)
         {
@@ -1421,9 +1421,9 @@ public Action Command_Reservation(int client, int args)
 
     FormatTimeRemaining(remaining, timeRemaining, sizeof(timeRemaining));
 
-    PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x0799FF99Reservation #%d", reservationNumber);
-    PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Reserved by: \x0799FF99%s", ownerName);
-    PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Time remaining: \x0799FF99%s", timeRemaining);
+    PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x0799FF99Reservation #%d", reservationNumber);
+    PrintToChat(client, "\x01[\x07FF6600Summon\x01] Reserved by: \x0799FF99%s", ownerName);
+    PrintToChat(client, "\x01[\x07FF6600Summon\x01] Time remaining: \x0799FF99%s", timeRemaining);
 
     return Plugin_Handled;
 }
@@ -1456,7 +1456,7 @@ public int OwnerAdminMenuHandler(Menu menu, MenuAction action, int param1, int p
         // ownership again before exposing or executing an owner function.
         if (!IsOwner(param1))
         {
-            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can use this menu.");
+            PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can use this menu.");
             return 0;
         }
 
@@ -1487,13 +1487,13 @@ public Action Command_End(int client, int args)
 {
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can end the reservation.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the reservation owner can end the reservation.");
         return Plugin_Handled;
     }
 
     if (g_bEndCountdownActive)
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] End countdown already in progress. Use \x0799FF99!cancel\x01 to abort.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] End countdown already in progress. Use \x0799FF99!cancel\x01 to abort.");
         return Plugin_Handled;
     }
 
@@ -1501,8 +1501,8 @@ public Action Command_End(int client, int args)
     g_bEndCountdownActive = true;
     g_iEndCountdown = END_COUNTDOWN_SECONDS;
 
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00Reservation ending in %d seconds!", END_COUNTDOWN_SECONDS);
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] Type \x0799FF99!cancel\x01 to abort.");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00Reservation ending in %d seconds!", END_COUNTDOWN_SECONDS);
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] Type \x0799FF99!cancel\x01 to abort.");
 
     g_hEndTimer = CreateTimer(1.0, Timer_EndCountdown, _, TIMER_REPEAT);
 
@@ -1533,7 +1533,7 @@ public Action Timer_EndCountdown(Handle timer)
     // Show countdown at 5, 4, 3, 2, 1
     if (g_iEndCountdown <= 5)
     {
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00Reservation ending in %d seconds...", g_iEndCountdown);
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00Reservation ending in %d seconds...", g_iEndCountdown);
     }
 
     return Plugin_Continue;
@@ -1566,7 +1566,7 @@ void ExecuteReservationEnd()
     }
 
     // Show final message
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Thanks for playing!");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Thanks for playing!");
 
     // Kick all players after 5 seconds
     CreateTimer(5.0, Timer_KickAll);
@@ -1602,13 +1602,13 @@ public Action Command_Cancel(int client, int args)
 {
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can cancel.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the reservation owner can cancel.");
         return Plugin_Handled;
     }
 
     if (!g_bEndCountdownActive)
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] No end countdown active.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] No end countdown active.");
         return Plugin_Handled;
     }
 
@@ -1620,7 +1620,7 @@ public Action Command_Cancel(int client, int args)
         g_hEndTimer = INVALID_HANDLE;
     }
 
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Reservation end cancelled.");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Reservation end cancelled.");
 
     return Plugin_Handled;
 }
@@ -1644,13 +1644,13 @@ Action HandleOwnerMapCommand(int client, int args, const char[] trigger)
 {
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can change the map.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the reservation owner can change the map.");
         return Plugin_Handled;
     }
 
     if (args < 1)
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Usage: !%s <mapname>", trigger);
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] Usage: !%s <mapname>", trigger);
         return Plugin_Handled;
     }
 
@@ -1685,7 +1685,7 @@ void ShowOwnerMapMenu(int client)
     {
         if (mapList != INVALID_HANDLE)
             delete mapList;
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666No local map list is available. Use \x0799FF99!map <mapname>\x01 instead.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666No local map list is available. Use \x0799FF99!map <mapname>\x01 instead.");
         return;
     }
 
@@ -1713,7 +1713,7 @@ public int OwnerMapMenuHandler(Menu menu, MenuAction action, int param1, int par
     {
         if (!IsOwner(param1))
         {
-            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can change the map.");
+            PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can change the map.");
             return 0;
         }
 
@@ -1888,11 +1888,11 @@ public void Frame_StartSTVWait()
     }
 
     PrintToChatAll(
-        "\x01[\x07FF6600Reserve\x01] Changing map to \x0799FF99%s\x01 in %d seconds so SourceTV viewers can catch up.",
+        "\x01[\x07FF6600Summon\x01] Changing map to \x0799FF99%s\x01 in %d seconds so SourceTV viewers can catch up.",
         g_sSTVWaitMap,
         g_iSTVWaitRemaining
     );
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] Change the map again to skip the wait.");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] Change the map again to skip the wait.");
     PrintToServer("[summon] To cancel the map change, run stopchangelevel.");
     g_hSTVWaitTimer = CreateTimer(1.0, Timer_STVWait, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 }
@@ -1918,7 +1918,7 @@ public Action Timer_STVWait(Handle timer)
     {
         g_hSTVWaitTimer = INVALID_HANDLE;
         LogMessage("[summon] SourceTV viewers left; changing level to %s", g_sSTVWaitMap);
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] Nobody is watching SourceTV any more. Changing map now.");
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] Nobody is watching SourceTV any more. Changing map now.");
         ForceChangeLevel(g_sSTVWaitMap, "Summon: SourceTV viewers left");
         return Plugin_Stop;
     }
@@ -1930,7 +1930,7 @@ public Action Timer_STVWait(Handle timer)
     if (reminder && g_iSTVWaitStart - g_iSTVWaitRemaining >= 5)
     {
         PrintToChatAll(
-            "\x01[\x07FF6600Reserve\x01] Changing map to \x0799FF99%s\x01 in %d seconds...",
+            "\x01[\x07FF6600Summon\x01] Changing map to \x0799FF99%s\x01 in %d seconds...",
             g_sSTVWaitMap,
             g_iSTVWaitRemaining
         );
@@ -1965,7 +1965,7 @@ public Action Command_StopChangelevel(int args)
 
     LogMessage("[summon] Changelevel to %s cancelled", g_sSTVWaitMap);
     PrintToServer("[summon] Map change cancelled.");
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Map change cancelled.");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Map change cancelled.");
     return Plugin_Handled;
 }
 
@@ -2050,7 +2050,7 @@ public Action Command_Restart(int client, int args)
 
     if (!IsOwner(client))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can restart.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the reservation owner can restart.");
         return Plugin_Handled;
     }
 
@@ -2075,7 +2075,7 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
     {
         if (!IsOwner(param1))
         {
-            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can restart.");
+            PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can restart.");
             return 0;
         }
 
@@ -2085,17 +2085,17 @@ public int RestartMenuHandler(Menu menu, MenuAction action, int param1, int para
         if (StrEqual(info, "tournament"))
         {
             ServerCommand("mp_tournament_restart");
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Tournament restarted.");
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Tournament restarted.");
         }
         else if (StrEqual(info, "game"))
         {
             ServerCommand("mp_restartgame 5");
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Game restarting in 5 seconds...");
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Game restarting in 5 seconds...");
         }
         else if (StrEqual(info, "round"))
         {
             ServerCommand("mp_restartround 5");
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Round restarting in 5 seconds...");
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Round restarting in 5 seconds...");
         }
     }
     else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
@@ -2430,7 +2430,7 @@ void ExecuteConfig(const char[] cfgFile)
 
 void PrintCurrentConfig(int client)
 {
-    PrintToChat(client, "\x01[\x07FF6600Reserve\x01] Current config: \x07FFFF00%s", g_sCurrentConfig);
+    PrintToChat(client, "\x01[\x07FF6600Summon\x01] Current config: \x07FFFF00%s", g_sCurrentConfig);
 }
 
 bool IsAllowedConfig(const char[] cfgFile)
@@ -2492,12 +2492,12 @@ public Action Command_Config(int client, int args)
         {
             ExecuteConfig(cfgFile);
             PrintToServer("[summon] Loaded config: %s", cfgFile);
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
         }
         else
         {
             PrintToServer("[summon] Unknown config: %s", cfgFile);
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666Config not found: \x07FFFF00%s", cfgFile);
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666Config not found: \x07FFFF00%s", cfgFile);
         }
         return Plugin_Handled;
     }
@@ -2505,7 +2505,7 @@ public Action Command_Config(int client, int args)
     if (!IsOwner(client))
     {
         PrintCurrentConfig(client);
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the reservation owner can load configs.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the reservation owner can load configs.");
         return Plugin_Handled;
     }
 
@@ -2522,12 +2522,12 @@ public Action Command_Config(int client, int args)
 
     if (!IsAllowedConfig(cfgFile))
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Unknown config. Use \x0799FF99!config\x01 to see available options.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Unknown config. Use \x0799FF99!config\x01 to see available options.");
         return Plugin_Handled;
     }
 
     ExecuteConfig(cfgFile);
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
 
     return Plugin_Handled;
 }
@@ -2608,7 +2608,7 @@ public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param
     {
         if (!IsOwner(param1))
         {
-            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can load configs.");
+            PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can load configs.");
             return 0;
         }
 
@@ -2618,7 +2618,7 @@ public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param
         if (StrEqual(info, "summon_reset"))
         {
             ExecuteConfig("summon_reset");
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Config reset to Valve defaults.");
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Config reset to Valve defaults.");
         }
         else
         {
@@ -2647,7 +2647,7 @@ void ShowConfigMenu(int client, const char[] league)
     DirectoryListing dir = OpenDirectory("cfg");
     if (dir == null)
     {
-        PrintToChat(client, "\x01[\x07FF6600Reserve\x01] \x07FF6666Could not read cfg directory.");
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Could not read cfg directory.");
         delete menu;
         return;
     }
@@ -2697,7 +2697,7 @@ public int ConfigMenuHandler(Menu menu, MenuAction action, int param1, int param
     {
         if (!IsOwner(param1))
         {
-            PrintToChat(param1, "\x01[\x07FF6600Reserve\x01] \x07FF6666Only the active reservation owner can load configs.");
+            PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Only the active reservation owner can load configs.");
             return 0;
         }
 
@@ -2707,7 +2707,7 @@ public int ConfigMenuHandler(Menu menu, MenuAction action, int param1, int param
         if (IsAllowedConfig(cfgFile))
         {
             ExecuteConfig(cfgFile);
-            PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
+            PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Loaded config: \x07FFFF00%s", cfgFile);
         }
     }
     else if (action == MenuAction_Cancel && param2 == MenuCancel_ExitBack)
@@ -2939,7 +2939,7 @@ bool CheckConfigMismatch()
         strcopy(mapName, sizeof(mapName), map);
 
     PrintToChatAll(
-        "\x01[\x07FF6600Reserve\x01] \x07FF6666Config mismatch: \x07FFFF00%s\x01 is %s, but the config is \x07FFFF00%s\x01.",
+        "\x01[\x07FF6600Summon\x01] \x07FF6666Config mismatch: \x07FFFF00%s\x01 is %s, but the config is \x07FFFF00%s\x01.",
         mapName,
         mapModeName,
         g_sCurrentConfig
@@ -2949,13 +2949,13 @@ bool CheckConfigMismatch()
     if (FindConfigForMode(g_sCurrentConfig, start, end, mapMode, suggestion, sizeof(suggestion)))
     {
         PrintToChatAll(
-            "\x01[\x07FF6600Reserve\x01] The reservation owner can load \x0799FF99!config %s\x01 instead.",
+            "\x01[\x07FF6600Summon\x01] The reservation owner can load \x0799FF99!config %s\x01 instead.",
             suggestion
         );
     }
     else
     {
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] The reservation owner can load another with \x0799FF99!config\x01.");
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] The reservation owner can load another with \x0799FF99!config\x01.");
     }
     return true;
 }
@@ -3013,11 +3013,11 @@ public Action Command_ReservationWarning(int args)
 
     if (minutes == 1)
     {
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FF6666This reservation ends in 1 minute!");
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FF6666This reservation ends in 1 minute!");
     }
     else
     {
-        PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x07FFFF00This reservation ends in %d minutes.", minutes);
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] \x07FFFF00This reservation ends in %d minutes.", minutes);
     }
 
     return Plugin_Handled;
@@ -3025,7 +3025,7 @@ public Action Command_ReservationWarning(int args)
 
 public Action Command_ReservationEnding(int args)
 {
-    PrintToChatAll("\x01[\x07FF6600Reserve\x01] \x0799FF99Reservation ending now. Thanks for playing!");
+    PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Reservation ending now. Thanks for playing!");
     CreateTimer(5.0, Timer_KickAll);
 
     return Plugin_Handled;
