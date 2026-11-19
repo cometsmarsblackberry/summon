@@ -84,9 +84,10 @@ async def create_reservation(
         auto_end=True,
         enable_direct_connect=enable_direct_connect,
         enable_rcon=enable_direct_connect,
-        # Lobby sites ask for the password once, so it survives restarts. It
-        # is long because anyone who can reach the server can try it.
-        owner_rcon_password=generate_password(20) if enable_direct_connect else None,
+        # Lobby sites ask for the password once, so it survives restarts.
+        # Anyone who can reach the server can try it, but the gateway locks
+        # out repeated failures, so its 12-character minimum is plenty.
+        owner_rcon_password=generate_password(12) if enable_direct_connect else None,
         enable_logs_tf_upload=enable_logs_tf_upload,
         enable_demos_tf_upload=enable_demos_tf_upload,
         motd_token=generate_motd_token(),

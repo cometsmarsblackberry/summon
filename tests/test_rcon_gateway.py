@@ -55,11 +55,11 @@ async def create(enable_direct_connect: bool) -> Reservation:
 
 
 class OwnerRconPasswordTests(unittest.IsolatedAsyncioTestCase):
-    async def test_direct_connect_reservation_gets_its_own_long_rcon_password(self):
+    async def test_direct_connect_reservation_gets_its_own_rcon_password(self):
         reservation = await create(enable_direct_connect=True)
 
         self.assertTrue(reservation.enable_rcon)
-        self.assertEqual(20, len(reservation.owner_rcon_password))
+        self.assertEqual(12, len(reservation.owner_rcon_password))
         self.assertTrue(reservation.owner_rcon_password.isalnum())
         self.assertNotEqual(reservation.rcon_password, reservation.owner_rcon_password)
 
