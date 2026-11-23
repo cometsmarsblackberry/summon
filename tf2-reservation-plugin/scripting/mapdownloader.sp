@@ -41,7 +41,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.2.1"
+#define PLUGIN_VERSION "1.2.2"
 
 #define MAP_DOWNLOAD_CONNECT_TIMEOUT 5
 #define MAP_DOWNLOAD_ATTEMPT_TIMEOUT 180
@@ -256,10 +256,15 @@ void StartMapDownloadAttempt(const char[] mapName, int attempt, int startedAt)
     char url[512];
     int urlLength = Format(url, sizeof(url), "%s/%s.bsp", baseURL, mapName);
 
+    // RIP writes the response into this file as it arrives and only closes
+    // it just before calling OnMapDownloaded. Under the map's own name, a
+    // changelevel that came in meanwhile would find a valid-looking map and
+    // load the half-written file, which can hang the server. The download
+    // gets a name that is not a map until it is complete.
     char savePath[PLATFORM_MAX_PATH];
-    int savePathLength = Format(savePath, sizeof(savePath), "maps/%s.bsp", mapName);
+    int savePathLength = Format(savePath, sizeof(savePath), "maps/%s.bsp.part", mapName);
 
-    // A truncated path would drop the .bsp extension and name another file.
+    // A truncated path would name another file.
     if (urlLength >= sizeof(url) - 1 || savePathLength >= sizeof(savePath) - 1)
     {
         g_bMapDownloading = false;
@@ -393,6 +398,17 @@ public void OnMapDownloaded(HTTPStatus status, DataPack pack, const char[] error
         g_bMapDownloading = false;
         PrintToChatAll("\x01[\x07FF6600Map\x01] \x07FF6666Downloaded file for %s is too small. Discarding.", mapName);
         LogError("[mapdownloader] Downloaded file for %s was too small after %d attempt(s)", mapName, attempt);
+        return;
+    }
+
+    char mapPath[PLATFORM_MAX_PATH];
+    Format(mapPath, sizeof(mapPath), "maps/%s.bsp", mapName);
+    if (!RenameFile(mapPath, savePath))
+    {
+        DeleteFile(savePath);
+        g_bMapDownloading = false;
+        PrintToChatAll("\x01[\x07FF6600Map\x01] \x07FF6666Failed to save %s after downloading it.", mapName);
+        LogError("[mapdownloader] Could not rename %s to %s", savePath, mapPath);
         return;
     }
 
