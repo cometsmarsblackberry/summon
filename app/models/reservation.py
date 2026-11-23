@@ -32,6 +32,7 @@ class EndReason:
     ADMIN = "admin"                      # Ended on the website by an admin
     EXPIRED = "expired"                  # Reached its scheduled end time
     EMPTY = "empty"                      # Server stayed empty too long
+    UNRESPONSIVE = "unresponsive"        # Server stopped responding too long
     SERVER_REMOVED = "server_removed"    # Its server was destroyed under it
     ACCOUNT_DELETED = "account_deleted"  # Owner deleted their account
 

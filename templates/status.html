@@ -38,6 +38,9 @@
         playersUpdatedAt: 0,
         playerSnapshotStaleSeconds: 25,
         emptySince: null,
+        // When the game server last reported, while the backend has it
+        // marked as not responding.
+        unresponsiveSince: null,
         playerPollInterval: null,
         autoEndSeconds: {{ reservation_settings.auto_end_minutes }} * 60,
         countdownInterval: null,
@@ -469,6 +472,7 @@
                     this.playerCount = data.player_count || 0;
                     this.playersUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : 0;
                     this.emptySince = data.empty_since || null;
+                    this.unresponsiveSince = data.unresponsive_since || null;
                 }
             } catch (e) {
                 console.error('Failed to fetch players:', e);
@@ -1116,6 +1120,11 @@
         <div x-show="runtimeKind === 'instant' && controlDegraded" x-cloak
             class="mb-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             {{ _('status.control_degraded') }}
+        </div>
+
+        <div x-show="status === 'active' && unresponsiveSince" x-cloak
+            class="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            {{ _('status.server_unresponsive') }}
         </div>
 
         <!-- Progress bar during provisioning -->

@@ -19,6 +19,7 @@ from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.models.instance import CloudInstance
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.utils.upload_links import is_allowed_upload_url
+from app.services import server_liveness
 
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -229,8 +230,9 @@ def get_player_data(reservation_number: int) -> Optional[dict]:
 
 
 def clear_player_data(reservation_number: int) -> None:
-    """Clear player data when a reservation ends."""
+    """Clear player data when a reservation ends or its server restarts."""
     player_data.pop(reservation_number, None)
+    server_liveness.forget(reservation_number)
 
 
 def reassign_agent_instance_id(old_instance_id: str, new_instance_id: str) -> bool:
@@ -2074,11 +2076,14 @@ async def update_players(
         if reservation.status != ReservationStatus.ACTIVE:
             return PlayerUpdateResponse(success=True)
 
+        now = datetime.now(timezone.utc)
         changed = _update_persisted_player_state(
             reservation,
             body.player_count,
-            datetime.now(timezone.utc),
+            now,
         )
+        if server_liveness.record_report(reservation, body.player_count, now):
+            changed = True
         server_state_changed = _update_persisted_server_state(
             reservation,
             body.map,

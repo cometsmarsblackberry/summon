@@ -12,6 +12,7 @@ _MESSAGE_KEYS = {
     EndReason.ADMIN: "status.end_reason_admin",
     EndReason.EXPIRED: "status.end_reason_expired",
     EndReason.SERVER_REMOVED: "status.end_reason_server_removed",
+    EndReason.UNRESPONSIVE: "status.end_reason_unresponsive",
 }
 
 

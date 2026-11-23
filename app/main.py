@@ -178,6 +178,7 @@ async def lifespan(app: FastAPI):
         from app.services.orchestrator import cleanup_expired_instances, sync_cloud_instances
         from app.models.reservation import EndReason, Reservation, ReservationStatus
         from app.routers.internal import clear_player_data
+        from app.services import server_liveness
         from app.services.runtime import end_reservation_runtime
         from sqlalchemy import select
         from datetime import datetime, timedelta, timezone
@@ -190,6 +191,13 @@ async def lifespan(app: FastAPI):
                 destroyed = await cleanup_expired_instances()
                 if destroyed > 0:
                     logger.info(f"Cleanup: destroyed {destroyed} expired instances")
+
+                # Start the empty timer for game servers that stopped
+                # responding, so the auto-end below covers them too.
+                try:
+                    await server_liveness.check_active_servers()
+                except Exception:
+                    logger.exception("Game server liveness check failed")
 
                 # Auto-end empty reservations
                 try:
@@ -208,13 +216,21 @@ async def lifespan(app: FastAPI):
                         empty_reservations = list(result.scalars().all())
 
                         for reservation in empty_reservations:
+                            end_reason = server_liveness.auto_end_reason(
+                                reservation.reservation_number
+                            )
                             logger.info(
                                 f"Auto-ending reservation #{reservation.reservation_number} "
-                                f"(empty for {auto_end_minutes}+ minutes)"
+                                + (
+                                    "(game server not responding; empty timer of "
+                                    f"{auto_end_minutes} minutes ran out)"
+                                    if end_reason == EndReason.UNRESPONSIVE
+                                    else f"(empty for {auto_end_minutes}+ minutes)"
+                                )
                             )
                             reservation.status = ReservationStatus.ENDED
                             reservation.ended_at = datetime.now(timezone.utc)
-                            reservation.end_reason = EndReason.EMPTY
+                            reservation.end_reason = end_reason
                             clear_player_data(reservation.reservation_number)
                             from app.services.timer import cancel_expiry_timer
                             cancel_expiry_timer(reservation.id)

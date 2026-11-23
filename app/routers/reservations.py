@@ -595,13 +595,21 @@ async def get_reservation_players(
     _require_reservation_access_or_404(user, reservation)
 
     from app.routers.internal import get_player_data
+    from app.services.server_liveness import unresponsive_since
     data = get_player_data(reservation.reservation_number)
+    stopped_at = (
+        unresponsive_since(reservation.reservation_number)
+        if reservation.status == ReservationStatus.ACTIVE
+        else None
+    )
 
     return {
         "players": data["players"] if data else [],
         "player_count": data["player_count"] if data else 0,
         "updated_at": data["updated_at"] if data else None,
         "empty_since": reservation.empty_since.isoformat() if reservation.empty_since else None,
+        # Set while the game server has stopped responding: when it last reported.
+        "unresponsive_since": stopped_at.isoformat() if stopped_at else None,
     }
 
 
