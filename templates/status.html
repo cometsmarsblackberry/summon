@@ -231,6 +231,7 @@
                         this.currentMap = data.current_map || data.first_map;
                         this.mapDownloadUrl = data.map_download_url || null;
                         this.initialConfig = data.config_file || '';
+                        this.autoConfig = !!data.auto_config;
                     }
                     // Show failure reason from polling (fallback if SSE missed it)
                     if (data.status === 'failed' && data.failure_reason && !this.error) {
@@ -488,7 +489,10 @@
         selectedFormat: '',
         selectedConfig: '',
         initialConfig: {{ (reservation.config_file or '') | tojson | forceescape }},
+        // The server picks configs itself. initialConfig is the one it loaded last.
+        autoConfig: {{ (reservation.auto_config or false) | tojson }},
         configResetLabel: {{ _('status.reset') | tojson | forceescape }},
+        autoConfigLabel: {{ (_('status.auto_config_league', league=auto_league_name) if auto_league_name else _('status.auto_config')) | tojson | forceescape }},
         configLoading: false,
         configChangeOpen: false,
         configMenuOpen: false,
@@ -588,8 +592,14 @@
             return !query || this.configResetLabel.toLowerCase().includes(query);
         },
 
+        get autoMatchesConfigSearch() {
+            const query = this.configSearch.trim().toLowerCase();
+            return !query || this.autoConfigLabel.toLowerCase().includes(query);
+        },
+
         get selectedConfigLabel() {
             if (this.selectedConfig === 'summon_reset') return this.configResetLabel;
+            if (this.selectedConfig === 'auto') return this.autoConfigLabel;
             const config = this.flatConfigs.find(c => c.cfg_file === this.selectedConfig);
             return config ? (config.name || config.cfg_file) : '';
         },
@@ -636,14 +646,14 @@
             this.configChangeOpen = true;
             this.configMenuOpen = false;
             this.configSearch = '';
-            this.selectedConfig = this.initialConfig || 'summon_reset';
+            this.selectedConfig = this.autoConfig ? 'auto' : (this.initialConfig || 'summon_reset');
         },
 
         cancelConfigChange() {
             this.configChangeOpen = false;
             this.configMenuOpen = false;
             this.configSearch = '';
-            this.selectedConfig = this.initialConfig || 'summon_reset';
+            this.selectedConfig = this.autoConfig ? 'auto' : (this.initialConfig || 'summon_reset');
         },
 
         async execConfig(cfgFile) {
@@ -659,12 +669,16 @@
                 const data = await resp.json();
                 if (resp.ok) {
                     this.configMessage = data.message;
-                    this.initialConfig = cfgFile === 'summon_reset' ? '' : cfgFile;
+                    this.autoConfig = cfgFile === 'auto';
+                    // With Auto, the server reports the config it picks.
+                    if (cfgFile !== 'auto') {
+                        this.initialConfig = cfgFile === 'summon_reset' ? '' : cfgFile;
+                    }
                     this.serverStateVersion++;
                     this.configChangeOpen = false;
                     this.configMenuOpen = false;
                     this.configSearch = '';
-                    if (cfgFile === 'summon_reset') {
+                    if (cfgFile === 'summon_reset' || cfgFile === 'auto') {
                         this.selectedLeague = '';
                         this.selectedFormat = '';
                         this.selectedConfig = '';
@@ -1211,7 +1225,7 @@
             </div>
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500">{{ _('status.config_short') }}</span>
-                <span class="text-slate-800">{{ reservation.config_file or '—' }}</span>
+                <span class="text-slate-800">{{ reservation.config_file or '—' }}{% if reservation.auto_config %} ({{ _('status.auto_config') }}){% endif %}</span>
             </div>
             <div class="flex justify-between text-sm">
                 {% if is_ended %}
@@ -1332,6 +1346,9 @@
                     <span class="text-sm font-medium text-slate-400 shrink-0">{{ _('status.config_short') }}</span>
                     <span class="flex min-w-0 items-center justify-end gap-1 text-sm text-slate-800">
                         <span class="truncate" x-text="currentConfigLabel || '—'"></span>
+                        <span x-show="autoConfig" x-cloak
+                            title="{{ _('status.auto_config_tooltip') }}"
+                            class="shrink-0 rounded bg-brand-50 px-1.5 py-0.5 text-xs text-brand-800">{{ _('status.auto_config') }}</span>
                     <button @click="openConfigChange()"
                         :disabled="!configsAvailable || configLoading"
                         title="{{ _('status.change_config') }}"
@@ -1380,6 +1397,14 @@
                                         <span>{{ _('status.reset') }}</span>
                                         <span x-show="selectedConfig === 'summon_reset'" class="text-brand-600" aria-hidden="true">✓</span>
                                     </button>
+                                    <button x-show="autoMatchesConfigSearch" type="button" role="option"
+                                        :aria-selected="selectedConfig === 'auto'"
+                                        @click="selectPendingConfig({ cfg_file: 'auto' })"
+                                        :class="selectedConfig === 'auto' ? 'bg-brand-50 text-brand-800' : 'text-slate-700 hover:bg-slate-50'"
+                                        class="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm">
+                                        <span x-text="autoConfigLabel" class="truncate"></span>
+                                        <span x-show="selectedConfig === 'auto'" class="text-brand-600" aria-hidden="true">✓</span>
+                                    </button>
                                     <template x-for="group in filteredConfigGroups" :key="group.league">
                                         <div class="mt-1">
                                             <div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400"
@@ -1399,7 +1424,7 @@
                                             </template>
                                         </div>
                                     </template>
-                                    <p x-show="filteredConfigGroups.length === 0 && !resetMatchesConfigSearch" x-cloak
+                                    <p x-show="filteredConfigGroups.length === 0 && !resetMatchesConfigSearch && !autoMatchesConfigSearch" x-cloak
                                         class="px-2 py-3 text-center text-xs text-slate-400">{{ _('home.no_matching_configs') }}</p>
                                 </div>
                             </div>
@@ -1415,6 +1440,9 @@
                             {{ _('home.cancel') }}
                         </button>
                     </div>
+                    <p x-show="selectedConfig === 'auto'" x-cloak class="mt-1 text-xs text-slate-400">{{ _('home.auto_config_hint') }}</p>
+                    <p x-show="autoConfig && selectedConfig && selectedConfig !== 'auto'" x-cloak
+                        class="mt-1 text-xs text-slate-500">{{ _('status.auto_config_disable_warning') }}</p>
                 </div>
             </div>
             {% endif %}

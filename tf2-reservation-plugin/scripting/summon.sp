@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.12"
+#define PLUGIN_VERSION "1.6.13"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -60,11 +60,16 @@
 // for the "Loaded config" chat line that follows a config load.
 #define CONFIG_MISMATCH_JOIN_DELAY 30.0
 #define CONFIG_MISMATCH_LOAD_DELAY 1.0
+// Auto config switches from 6v6 to Highlander once both teams have this many
+// players. In 6v6 one team often has 7 or more for a while, with subs or
+// before teams are picked, but both teams rarely do.
+#define AUTO_HIGHLANDER_TEAM_SIZE 7
 // CTFGameRules m_nGameType values. KOTH maps are control point maps too.
 #define TF_GAMETYPE_CTF 1
 #define TF_GAMETYPE_CP 2
 #define TF_GAMETYPE_ESCORT 3
 #define TF_TEAM_RED 2
+#define TF_TEAM_BLUE 3
 
 // ConVars - set by agent RCON at boot
 ConVar g_cvOwnerSteamID;
@@ -98,6 +103,16 @@ char g_sPlayerAddressLogPath[PLATFORM_MAX_PATH];
 // Last config loaded through ExecuteConfig. Real configs need a league
 // prefix, so "none" cannot collide with one.
 char g_sCurrentConfig[64] = "none";
+
+// Auto config: while g_bAutoConfig is set, Summon loads the league's config
+// for each map's game mode itself, as 6v6 until g_bAutoHighlander is set.
+// g_sAutoLeague is a league key of g_sAutoConfigs ("etf2l"), or empty until
+// sm_config auto_<league> or the backend gives one. Any other config load
+// turns Auto off; g_bAutoExecuting marks Auto's own.
+bool g_bAutoConfig = false;
+bool g_bAutoHighlander = false;
+bool g_bAutoExecuting = false;
+char g_sAutoLeague[16];
 
 // Config mismatch warning. Both flags are cleared when the map or the config
 // changes.
@@ -385,6 +400,14 @@ public void OnMapStart()
     SendPlayerUpdate();
 }
 
+public void OnConfigsExecuted()
+{
+    // After the map's own configs, which an RGL config's servercfgfile adds
+    // to, so Auto's config is the one that stays.
+    if (g_bAutoConfig)
+        ApplyAutoConfig(false);
+}
+
 public void OnClientPostAdminCheck(int client)
 {
     if (IsFakeClient(client))
@@ -499,6 +522,7 @@ void SendPlayerUpdate()
         body.SetString("config_file", "");
     else
         body.SetString("config_file", g_sCurrentConfig);
+    body.SetBool("auto_config", g_bAutoConfig);
 
     // Send HTTP POST
     char url[512];
@@ -522,7 +546,19 @@ public void OnPlayerUpdateResponse(HTTPResponse response, any data, const char[]
     if (response.Status != HTTPStatus_OK)
     {
         LogError("[summon] Backend returned HTTP %d for player update", response.Status);
+        return;
     }
+
+    // The backend names the league of the server's region, so owners can
+    // turn Auto on in game. A league from sm_config auto_<league> stays.
+    // The response frees its JSON.
+    JSONObject reply = view_as<JSONObject>(response.Data);
+    if (reply == null || g_sAutoLeague[0] != '\0' || !reply.HasKey("auto_league"))
+        return;
+
+    char league[sizeof(g_sAutoLeague)];
+    if (reply.GetString("auto_league", league, sizeof(league)) && IsAutoConfigLeague(league))
+        strcopy(g_sAutoLeague, sizeof(g_sAutoLeague), league);
 }
 
 // ============================================================================
@@ -2297,6 +2333,8 @@ public Action Timer_MatchState(Handle timer)
 {
     if (IsTournamentMatchLive())
         g_fMatchLastLiveTime = GetEngineTime();
+    else
+        CheckAutoHighlander();
     return Plugin_Continue;
 }
 
@@ -2898,6 +2936,12 @@ void ExecuteConfig(const char[] cfgFile)
 {
     bool restartGame = false;
 
+    if (g_bAutoConfig && !g_bAutoExecuting)
+    {
+        g_bAutoConfig = false;
+        PrintToChatAll("\x01[\x07FF6600Summon\x01] Auto config is off. Use \x0799FF99!config auto\x01 to turn it back on.");
+    }
+
     if (StrEqual(cfgFile, "summon_reset", false))
     {
         DisableRGLPlugins();
@@ -2961,7 +3005,10 @@ void ExecuteConfig(const char[] cfgFile)
 
 void PrintCurrentConfig(int client)
 {
-    PrintToChat(client, "\x01[\x07FF6600Summon\x01] Current config: \x07FFFF00%s", g_sCurrentConfig);
+    if (g_bAutoConfig)
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] Current config: \x07FFFF00%s\x01 (Auto)", g_sCurrentConfig);
+    else
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] Current config: \x07FFFF00%s", g_sCurrentConfig);
 }
 
 bool IsAllowedConfig(const char[] cfgFile)
@@ -3019,7 +3066,14 @@ public Action Command_Config(int client, int args)
         }
         char cfgFile[64];
         GetCmdArg(1, cfgFile, sizeof(cfgFile));
-        if (IsAllowedConfig(cfgFile))
+        if (IsAutoConfigArgument(cfgFile))
+        {
+            if (EnableAutoConfig(cfgFile))
+                PrintToServer("[summon] Auto config on (%s): %s", g_sAutoLeague, g_sCurrentConfig);
+            else
+                PrintToServer("[summon] Auto config needs a league: sm_config auto_<league>");
+        }
+        else if (IsAllowedConfig(cfgFile))
         {
             ExecuteConfig(cfgFile);
             PrintToServer("[summon] Loaded config: %s", cfgFile);
@@ -3050,6 +3104,14 @@ public Action Command_Config(int client, int args)
 
     char cfgFile[64];
     GetCmdArg(1, cfgFile, sizeof(cfgFile));
+
+    // Owners turn Auto on with the region's league only.
+    if (StrEqual(cfgFile, "auto", false))
+    {
+        if (!EnableAutoConfig(cfgFile))
+            PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666Auto config is not available on this server yet.");
+        return Plugin_Handled;
+    }
 
     if (!IsAllowedConfig(cfgFile))
     {
@@ -3094,8 +3156,15 @@ void ShowLeagueMenu(int client)
 
     leagues.SortCustom(SortLeagueStrings);
 
-    // Listed first so it stays on the first page as leagues are added
+    // Listed first so they stay on the first page as leagues are added
     menu.AddItem("summon_reset", "Reset to Defaults");
+    char autoLabel[64];
+    char leagueName[32];
+    if (GetAutoConfigLeagueName(leagueName, sizeof(leagueName)))
+    {
+        Format(autoLabel, sizeof(autoLabel), "Auto (%s)%s", leagueName, g_bAutoConfig ? " - on" : "");
+        menu.AddItem("auto", autoLabel);
+    }
 
     for (int i = 0; i < leagues.Length; i++)
     {
@@ -3150,6 +3219,11 @@ public int LeagueMenuHandler(Menu menu, MenuAction action, int param1, int param
         {
             ExecuteConfig("summon_reset");
             PrintToChatAll("\x01[\x07FF6600Summon\x01] \x0799FF99Config reset to Valve defaults.");
+        }
+        else if (StrEqual(info, "auto"))
+        {
+            if (!EnableAutoConfig(info))
+                PrintToChat(param1, "\x01[\x07FF6600Summon\x01] \x07FF6666Auto config is not available on this server yet.");
         }
         else
         {
@@ -3525,6 +3599,267 @@ public void Event_TournamentStateUpdate(Event event, const char[] name, bool don
     g_bConfigMismatchReadyChecked = true;
     g_bConfigMismatchChecked = true;
     CheckConfigMismatch();
+}
+
+// ============================================================================
+// Auto Config
+// ============================================================================
+
+// With Auto on, Summon picks the config: the league's config for the map's
+// game mode, as 6v6 until both teams have AUTO_HIGHLANDER_TEAM_SIZE players
+// and as Highlander from then on. It loads a new one at each map start, and
+// once when the teams grow, but never during a live match, since league
+// configs restart the tournament. The league comes from the server's region;
+// the backend sends "sm_config auto_<league>" or names it in its reply to
+// player updates.
+
+// League keys, as the backend sends them, and their names in the menus.
+static const char g_sAutoLeagueNames[][][] = {
+    { "etf2l", "ETF2L" },
+    { "rgl", "RGL" },
+    { "ozfortress", "ozfortress" }
+};
+
+// The config Auto loads for each league and kind of map. Kinds are the format
+// and the mode ("6v6_koth", "hl_stopwatch"), or a map's own format
+// ("ultiduo"). RGL's 6s 5CP and KOTH configs come in scrim and match
+// versions; a reservation is for scrims. A kind a league has no config for
+// keeps the loaded config, and the mismatch warning says so.
+static const char g_sAutoConfigs[][][] = {
+    { "etf2l", "6v6_cp", "etf2l_6v6_5cp" },
+    { "etf2l", "6v6_koth", "etf2l_6v6_koth" },
+    { "etf2l", "6v6_stopwatch", "etf2l_6v6_stopwatch" },
+    { "etf2l", "6v6_ctf", "etf2l_6v6_ctf" },
+    { "etf2l", "hl_cp", "etf2l_9v9_5cp" },
+    { "etf2l", "hl_koth", "etf2l_9v9_koth" },
+    { "etf2l", "hl_stopwatch", "etf2l_9v9_stopwatch" },
+    { "etf2l", "hl_ctf", "etf2l_9v9_ctf" },
+    { "etf2l", "ultiduo", "etf2l_ultiduo" },
+    { "etf2l", "bball", "etf2l_bball" },
+    { "rgl", "6v6_cp", "rgl_6s_5cp_scrim" },
+    { "rgl", "6v6_koth", "rgl_6s_koth_scrim" },
+    { "rgl", "6v6_stopwatch", "rgl_6s_stopwatch" },
+    { "rgl", "hl_cp", "rgl_HL_5cp_scrim" },
+    { "rgl", "hl_koth", "rgl_HL_koth" },
+    { "rgl", "hl_stopwatch", "rgl_HL_stopwatch" },
+    { "rgl", "ultiduo", "rgl_ud_ultiduo" },
+    { "ozfortress", "6v6_cp", "ozfortress_6v6_5cp" },
+    { "ozfortress", "6v6_koth", "ozfortress_6v6_koth" },
+    { "ozfortress", "hl_cp", "ozfortress_hl_5cp" },
+    { "ozfortress", "hl_koth", "ozfortress_hl_koth" },
+    { "ozfortress", "hl_stopwatch", "ozfortress_hl_stopwatch" },
+    { "ozfortress", "ultiduo", "ozfortress_ultiduo" },
+    { "ozfortress", "bball", "ozfortress_bball" }
+};
+
+bool IsAutoConfigLeague(const char[] league)
+{
+    for (int i = 0; i < sizeof(g_sAutoLeagueNames); i++)
+    {
+        if (StrEqual(league, g_sAutoLeagueNames[i][0]))
+            return true;
+    }
+    return false;
+}
+
+// Gets the menu name of Auto's league. Returns false while it is unknown.
+bool GetAutoConfigLeagueName(char[] name, int nameSize)
+{
+    for (int i = 0; i < sizeof(g_sAutoLeagueNames); i++)
+    {
+        if (StrEqual(g_sAutoLeague, g_sAutoLeagueNames[i][0]))
+        {
+            strcopy(name, nameSize, g_sAutoLeagueNames[i][1]);
+            return true;
+        }
+    }
+    return false;
+}
+
+// "auto" or "auto_<league>". No config file is named like this: configs need
+// a league prefix.
+bool IsAutoConfigArgument(const char[] arg)
+{
+    return StrEqual(arg, "auto", false) || strncmp(arg, "auto_", 5, false) == 0;
+}
+
+// Gets the kind of the current map for g_sAutoConfigs, and its mode as shown
+// to players. formatBased is false for maps with their own format, which
+// Highlander does not change. Returns false for maps Auto has no kind for.
+bool GetAutoConfigKind(char[] kind, int kindSize, char[] modeName, int modeNameSize, bool &formatBased)
+{
+    char map[PLATFORM_MAX_PATH];
+    GetCurrentMap(map, sizeof(map));
+
+    formatBased = false;
+    if (StrContains(map, "ultiduo", false) != -1)
+    {
+        strcopy(kind, kindSize, "ultiduo");
+        strcopy(modeName, modeNameSize, "Ultiduo");
+        return true;
+    }
+    if (StrContains(map, "bball", false) != -1 || StrContains(map, "ballin", false) != -1)
+    {
+        strcopy(kind, kindSize, "bball");
+        strcopy(modeName, modeNameSize, "BBall");
+        return true;
+    }
+
+    // GetMapMode leaves the other maps with their own format, such as
+    // Ultitrio and KOTF, as unknown.
+    ConfigMode mode = GetMapMode(modeName, modeNameSize);
+    char modeToken[16];
+    switch (mode)
+    {
+        case ConfigMode_CP: strcopy(modeToken, sizeof(modeToken), "cp");
+        case ConfigMode_KOTH: strcopy(modeToken, sizeof(modeToken), "koth");
+        case ConfigMode_Stopwatch: strcopy(modeToken, sizeof(modeToken), "stopwatch");
+        case ConfigMode_CTF: strcopy(modeToken, sizeof(modeToken), "ctf");
+        default: return false;
+    }
+
+    formatBased = true;
+    Format(kind, kindSize, "%s_%s", g_bAutoHighlander ? "hl" : "6v6", modeToken);
+    return true;
+}
+
+// Finds Auto's config for a kind of map. Returns false if the league has none
+// or the server lacks the file.
+bool FindAutoConfig(const char[] kind, char[] cfgFile, int cfgFileSize)
+{
+    for (int i = 0; i < sizeof(g_sAutoConfigs); i++)
+    {
+        if (StrEqual(g_sAutoConfigs[i][0], g_sAutoLeague) && StrEqual(g_sAutoConfigs[i][1], kind))
+        {
+            if (!IsAllowedConfig(g_sAutoConfigs[i][2]))
+                break;
+            strcopy(cfgFile, cfgFileSize, g_sAutoConfigs[i][2]);
+            return true;
+        }
+    }
+    cfgFile[0] = '\0';
+    return false;
+}
+
+// Loads Auto's config for the current map unless it is loaded already.
+// Returns true if it loaded one. With announce, says what Auto did even if it
+// changed nothing, for when it is turned on.
+bool ApplyAutoConfig(bool announce)
+{
+    char kind[32];
+    char modeName[32];
+    char cfgFile[64];
+    bool formatBased;
+    bool found = GetAutoConfigKind(kind, sizeof(kind), modeName, sizeof(modeName), formatBased)
+        && FindAutoConfig(kind, cfgFile, sizeof(cfgFile));
+
+    if (!found)
+    {
+        char leagueName[32];
+        GetAutoConfigLeagueName(leagueName, sizeof(leagueName));
+        LogMessage("[summon] Auto config: no %s config for this map; keeping %s", leagueName, g_sCurrentConfig);
+        if (announce)
+        {
+            PrintToChatAll(
+                "\x01[\x07FF6600Summon\x01] \x0799FF99Auto config is on.\x01 No %s config suits this map, so \x07FFFF00%s\x01 stays loaded.",
+                leagueName,
+                g_sCurrentConfig
+            );
+        }
+        return false;
+    }
+
+    if (StrEqual(cfgFile, g_sCurrentConfig))
+    {
+        if (announce)
+        {
+            PrintToChatAll(
+                "\x01[\x07FF6600Summon\x01] \x0799FF99Auto config is on:\x01 \x07FFFF00%s\x01 suits this map.",
+                cfgFile
+            );
+        }
+        return false;
+    }
+
+    g_bAutoExecuting = true;
+    ExecuteConfig(cfgFile);
+    g_bAutoExecuting = false;
+    LogMessage("[summon] Auto config: loaded %s (%s)", cfgFile, kind);
+
+    if (announce)
+    {
+        PrintToChatAll(
+            "\x01[\x07FF6600Summon\x01] \x0799FF99Auto config is on:\x01 loaded \x07FFFF00%s\x01 for %s.",
+            cfgFile,
+            modeName
+        );
+    }
+    else
+    {
+        PrintToChatAll(
+            "\x01[\x07FF6600Summon\x01] \x0799FF99Auto config:\x01 loaded \x07FFFF00%s\x01 for %s.",
+            cfgFile,
+            modeName
+        );
+    }
+    return true;
+}
+
+bool BothTeamsAtHighlanderSize()
+{
+    return GetTeamClientCount(TF_TEAM_RED) >= AUTO_HIGHLANDER_TEAM_SIZE
+        && GetTeamClientCount(TF_TEAM_BLUE) >= AUTO_HIGHLANDER_TEAM_SIZE;
+}
+
+// Turns Auto on. arg is "auto", which needs the league to be known, or
+// "auto_<league>". Returns false if the league is unknown.
+bool EnableAutoConfig(const char[] arg)
+{
+    if (strncmp(arg, "auto_", 5, false) == 0)
+    {
+        char league[sizeof(g_sAutoLeague)];
+        strcopy(league, sizeof(league), arg[5]);
+        if (!IsAutoConfigLeague(league))
+            return false;
+        strcopy(g_sAutoLeague, sizeof(g_sAutoLeague), league);
+    }
+    else if (!IsAutoConfigLeague(g_sAutoLeague))
+    {
+        return false;
+    }
+
+    // Turning Auto on again starts over from the teams as they are now.
+    g_bAutoConfig = true;
+    g_bAutoHighlander = BothTeamsAtHighlanderSize();
+    if (!ApplyAutoConfig(true))
+        SendPlayerUpdate();
+
+    PrintToChatAll(
+        "\x01[\x07FF6600Summon\x01] Auto config follows the map, and switches to Highlander once both teams have %d or more players.",
+        AUTO_HIGHLANDER_TEAM_SIZE
+    );
+    return true;
+}
+
+// Switches Auto to Highlander once both teams are big enough. Called every
+// second outside live matches.
+void CheckAutoHighlander()
+{
+    if (!g_bAutoConfig || g_bAutoHighlander || !BothTeamsAtHighlanderSize())
+        return;
+
+    char kind[32];
+    char modeName[32];
+    bool formatBased;
+    if (GetAutoConfigKind(kind, sizeof(kind), modeName, sizeof(modeName), formatBased) && !formatBased)
+        return;
+
+    g_bAutoHighlander = true;
+    PrintToChatAll(
+        "\x01[\x07FF6600Summon\x01] \x0799FF99Both teams have %d or more players,\x01 so Auto config switches to Highlander.",
+        AUTO_HIGHLANDER_TEAM_SIZE
+    );
+    ApplyAutoConfig(false);
 }
 
 // ============================================================================

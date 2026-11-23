@@ -74,7 +74,7 @@
             </div>
             <div class="info-row">
                 <span class="info-label">{{ _('motd.config') }}</span>
-                <span class="info-value">{{ reservation.config_file or '—' }}</span>
+                <span class="info-value">{{ reservation.config_file or '—' }}{% if reservation.auto_config %} ({{ _('status.auto_config') }}){% endif %}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">{{ _('motd.ends_at') }}</span>

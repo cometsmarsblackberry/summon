@@ -27,6 +27,13 @@ from app.services.reservation import (
 from app.services.orchestrator import (
     get_enabled_locations,
 )
+from app.services.competitive_configs import (
+    AUTO_CONFIG,
+    auto_config_command,
+    auto_config_league,
+    reservation_auto_config_league,
+    startup_config_file,
+)
 from app.services.runtime import (
     LocationCapacityError,
     awaited_rcon_reservation_runtime,
@@ -83,7 +90,13 @@ class CreateReservationRequest(BaseModel):
     """Request body for creating a reservation."""
     location: str = Field(..., description="Location code (e.g., 'santiago', 'seoul')")
     first_map: str = Field("cp_badlands", description="Initial map")
-    config_file: str | None = Field(None, description="Competitive config to load on startup")
+    config_file: str | None = Field(
+        None,
+        description=(
+            "Competitive config to load on startup, or 'auto' to let the server "
+            "follow the map and team sizes"
+        ),
+    )
     enable_direct_connect: bool = Field(
         False,
         description="Allow direct IP connections and the owner's restricted RCON",
@@ -111,6 +124,8 @@ class ReservationResponse(BaseModel):
     # Only set by the single reservation endpoint while the server is active.
     map_download_url: Optional[str] = None
     config_file: Optional[str] = None
+    # The server picks the config: config_file is the one it loaded last.
+    auto_config: bool = False
     created_at: datetime
     # Connection details (only for owner when active)
     password: Optional[str] = None
@@ -167,6 +182,7 @@ def reservation_to_response(
         first_map=reservation.first_map,
         current_map=reservation.current_map,
         config_file=reservation.config_file,
+        auto_config=bool(getattr(reservation, "auto_config", False)),
         created_at=reservation.created_at,
         enable_direct_connect=reservation.enable_direct_connect,
         enable_rcon=bool(getattr(reservation, "enable_rcon", False)),
@@ -359,7 +375,12 @@ async def create_reservation_endpoint(
             detail=t("errors.invalid_map", map=request.first_map)
         )
 
+    location_record = next(loc for loc in locations if loc.code == request.location)
+    config_league = auto_config_league(location_record.country, location_record.continent)
     config_file = (request.config_file or "").strip() or None
+    auto_config = config_file == AUTO_CONFIG
+    if auto_config:
+        config_file = None
     if config_file:
         if not _CFG_FILE_RE.fullmatch(config_file):
             raise HTTPException(status_code=400, detail=t("errors.invalid_config"))
@@ -459,6 +480,8 @@ async def create_reservation_endpoint(
             first_map=request.first_map,
             enable_direct_connect=request.enable_direct_connect,
             config_file=config_file,
+            auto_config=auto_config,
+            auto_config_league=config_league,
             enable_logs_tf_upload=request.enable_logs_tf_upload,
             enable_demos_tf_upload=request.enable_demos_tf_upload,
             db=db,
@@ -956,7 +979,7 @@ async def restart_reservation_endpoint(
         "rcon_password": rcon_password,
         "tv_password": tv_password,
         "motd_url": reservation_motd_url(motd_token),
-        "config_file": reservation.config_file or "",
+        "config_file": startup_config_file(reservation),
         "enable_logs_tf_upload": reservation.enable_logs_tf_upload,
         "enable_demos_tf_upload": reservation.enable_demos_tf_upload,
     }):
@@ -1005,6 +1028,8 @@ async def exec_competitive_config(
         raise HTTPException(status_code=400, detail=t("errors.server_not_active"))
 
     cfg_file = (body.cfg_file or "").strip()
+    if cfg_file == AUTO_CONFIG:
+        return await _enable_auto_config(reservation, db)
     if not _CFG_FILE_RE.fullmatch(cfg_file):
         raise HTTPException(status_code=400, detail=t("errors.invalid_config"))
     from app.services.competitive_configs import ALLOWED_PREFIXES
@@ -1029,6 +1054,8 @@ async def exec_competitive_config(
         raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
 
     reservation.config_file = None if cfg_file == "summon_reset" else cfg_file
+    # The plugin turns Auto off for any other config too, and reports it.
+    reservation.auto_config = False
     await db.commit()
 
     logger.info(
@@ -1037,6 +1064,24 @@ async def exec_competitive_config(
     return {
         "message": t("status.config_loaded", config=cfg_file),
         "cfg_file": cfg_file,
+    }
+
+
+async def _enable_auto_config(reservation: Reservation, db: AsyncSession) -> dict:
+    league = await reservation_auto_config_league(reservation, db)
+    if not await rcon_reservation_runtime(
+        reservation, db, f"sm_config {auto_config_command(league)}"
+    ):
+        raise HTTPException(status_code=503, detail=t("errors.agent_not_connected"))
+
+    # config_file follows once the plugin reports the config Auto loaded.
+    reservation.auto_config = True
+    await db.commit()
+
+    logger.info(f"Turned on Auto config on reservation #{reservation.reservation_number}")
+    return {
+        "message": t("status.auto_config_loaded"),
+        "cfg_file": AUTO_CONFIG,
     }
 
 

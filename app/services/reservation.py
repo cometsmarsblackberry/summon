@@ -35,6 +35,8 @@ async def create_reservation(
     starts_at: Optional[datetime] = None,
     enable_direct_connect: bool = False,
     config_file: str | None = None,
+    auto_config: bool = False,
+    auto_config_league: str | None = None,
     enable_logs_tf_upload: bool = True,
     enable_demos_tf_upload: bool = True,
     commit: bool = True,
@@ -50,6 +52,8 @@ async def create_reservation(
         starts_at: Optional scheduled start time (default: now)
         enable_direct_connect: Publish the server's address, and give the
             owner restricted RCON on it
+        auto_config: Let the plugin pick the config; config_file is ignored
+        auto_config_league: The region's league for Auto, an AUTO_LEAGUES key
 
     Returns:
         Created reservation
@@ -80,7 +84,9 @@ async def create_reservation(
         rcon_password=generate_password(12),
         tv_password=generate_password(8),
         first_map=first_map,
-        config_file=config_file,
+        config_file=None if auto_config else config_file,
+        auto_config=auto_config,
+        auto_config_league=auto_config_league,
         auto_end=True,
         enable_direct_connect=enable_direct_connect,
         enable_rcon=enable_direct_connect,

@@ -21,6 +21,7 @@ from app.models.instance import CloudCreationAttempt, CloudInstance, EnabledLoca
 from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.services.cloud_provider import get_cloud_client, CloudProviderError, CloudCreationUncertain
 from app.services.cloud_creation import reconcile_creation_attempt, record_created_instance
+from app.services.competitive_configs import startup_config_file
 from app.services.failure_messages import public_failure_reason
 from app.services.provider_priority import (
     get_providers_for_location,
@@ -265,7 +266,7 @@ def build_reservation_config(
         "rcon_password": reservation.rcon_password,
         "tv_password": reservation.tv_password,
         "first_map": reservation.first_map,
-        "config_file": reservation.config_file or "",
+        "config_file": startup_config_file(reservation),
         "logsecret": reservation.logsecret,
         "owner_steam_id": owner_steam_id,
         "owner_name": owner_name,

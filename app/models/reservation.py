@@ -97,7 +97,15 @@ class Reservation(Base):
     first_map: Mapped[str] = mapped_column(String(64), nullable=False, default="cp_badlands")
     server_config_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     whitelist_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The config the server last reported loading, or the one to load at
+    # startup.
     config_file: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # With Auto, the plugin picks and loads configs itself, and reports
+    # whether Auto is still on. auto_config_league is the region's league,
+    # an AUTO_LEAGUES key, kept for every reservation so Auto can be turned
+    # on later.
+    auto_config: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_config_league: Mapped[str | None] = mapped_column(String(16), nullable=True)
     auto_end: Mapped[bool] = mapped_column(Boolean, default=True)
     enable_direct_connect: Mapped[bool] = mapped_column(Boolean, default=False)
     # Restricted RCON for the owner's remote tools, such as lobby sites. Every

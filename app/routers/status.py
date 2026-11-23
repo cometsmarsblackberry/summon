@@ -19,6 +19,7 @@ from app.models.reservation import Reservation, ReservationStatus
 from app.models.instance import EnabledLocation, CloudInstance, Provider, LocationProvider
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.services.cloud_provider import get_cloud_client
+from app.services.competitive_configs import AUTO_LEAGUES, auto_config_league
 from app.services.failure_messages import public_failure_reason
 from app.services.orchestrator import get_enabled_locations
 from app.services.runtime import host_supports_rcon_gateway
@@ -377,6 +378,10 @@ async def _build_status(db: AsyncSession) -> dict:
             "city": location.city,
             "country": location.country,
             "continent": location.continent,
+            # Shown with the Auto config option, which uses this league.
+            "auto_league_name": AUTO_LEAGUES[
+                auto_config_league(location.country, location.continent)
+            ],
             "flag": build_location_flag(
                 country=location.country,
                 city=location.city,

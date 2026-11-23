@@ -19,6 +19,7 @@ from app.routers.auth import (
     require_user,
     require_user_allow_banned,
 )
+from app.services.competitive_configs import AUTO_LEAGUES
 from app.services.end_reasons import public_end_reason
 from app.services.orchestrator import get_enabled_locations
 from app.services.reservation import (
@@ -315,6 +316,7 @@ async def reservation_status_page(
             "owner_name": owner_name,
             "location_display": location_display,
             "map_download_url": map_download_url,
+            "auto_league_name": AUTO_LEAGUES.get(getattr(reservation, "auto_config_league", None) or ""),
             "reservation_settings": reservation_settings,
             "start_wait_seconds": start_wait_seconds,
             "end_reason_message": public_end_reason(

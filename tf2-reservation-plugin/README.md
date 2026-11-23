@@ -18,6 +18,8 @@ image. Operators do not install the plugins or their dependencies separately.
   ends.
 - Lets the reservation owner change maps, load approved competitive configs,
   restart the match, and end the reservation.
+- Can pick the competitive config itself (Auto): the league of the server's
+  region, the map's game mode, and 6v6 or Highlander from the team sizes.
 - Gives the owner restricted access to an operator-maintained allowlist of
   server commands without granting unrestricted RCON access.
 - Runs the same allowlisted commands for the owner's remote tools, such as
@@ -63,6 +65,7 @@ countdown. Both commands also support SourceMod's silent `/pause` and
 | `!cancel` | Cancel an active `!end` countdown. |
 | `!changemap <map>`, `!map <map>` | Change to a local map or download a missing map through `mapdownloader.smx`. |
 | `!config [name]`, `!cfg [name]` | Load an approved competitive config. With no name, show the current config and open the league/config menu. |
+| `!config auto` | Turn on [Auto config](#auto-config). The league menu lists it too. |
 | `!restart` | Open a menu to restart the tournament, game, or round. |
 | `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. `exec <config>` is accepted too and loads the config like `!config`. |
 
@@ -138,12 +141,43 @@ if one exists:
 The warning appears 30 seconds after the first player joins a map, a second
 after a config loads, and when a team first readies up. Each map and config
 pair is reported at most once after joining or loading and once at ready-up.
-Summon never changes the config itself. The map's mode comes from the game
+Summon changes the config only with [Auto config](#auto-config) on. The map's mode comes from the game
 rules: Payload and Attack/Defend maps, where RED starts with every control
 point, count as `stopwatch`, and other control point maps as `5cp` or `3cp`.
 Nothing is reported for configs named for no mode, such as `etf2l_ultiduo`,
 for Payload Race and other modes without a config of their own, or for BBall,
 Ultiduo, Ultitrio, and King of the Flag maps.
+
+### Auto config
+
+With Auto on, Summon loads the config itself. The league is the main one of
+the server's region, which the backend sends; the game mode comes from the
+map, as for the mismatch warning; and the format starts as 6v6 and becomes
+Highlander once both teams have 7 or more players. In 6v6 one team often has
+7 or more for a while, with subs or before teams are picked, but both teams
+rarely do. Auto loads a config:
+
+- when it is turned on, for the current map and teams,
+- at each map start, after the map's own configs, if the map needs another
+  one,
+- once, when the teams first reach Highlander size. It never does this during
+  a live match, because league configs restart the tournament; the switch
+  then waits until the match is over.
+
+| Map | ETF2L | RGL | ozfortress |
+| --- | --- | --- | --- |
+| 5CP and 3CP | `etf2l_6v6_5cp`, `etf2l_9v9_5cp` | `rgl_6s_5cp_scrim`, `rgl_HL_5cp_scrim` | `ozfortress_6v6_5cp`, `ozfortress_hl_5cp` |
+| KOTH | `etf2l_6v6_koth`, `etf2l_9v9_koth` | `rgl_6s_koth_scrim`, `rgl_HL_koth` | `ozfortress_6v6_koth`, `ozfortress_hl_koth` |
+| Attack/Defend and Payload | `etf2l_6v6_stopwatch`, `etf2l_9v9_stopwatch` | `rgl_6s_stopwatch`, `rgl_HL_stopwatch` | Highlander only: `ozfortress_hl_stopwatch` |
+| CTF | `etf2l_6v6_ctf`, `etf2l_9v9_ctf` | none | none |
+| Ultiduo | `etf2l_ultiduo` | `rgl_ud_ultiduo` | `ozfortress_ultiduo` |
+| BBall | `etf2l_bball` | none | `ozfortress_bball` |
+
+Ultiduo and BBall maps are recognized by name, as for the mismatch warning.
+On a map Auto has no config for, such as Payload Race or a 6v6 Attack/Defend
+map under ozfortress, the loaded config stays and the mismatch warning
+reports it. Loading any other config, through any of the ways listed above,
+turns Auto off. Turning it on again starts over from the teams as they are.
 
 ### Administrators and server console
 
@@ -151,6 +185,7 @@ Ultiduo, Ultitrio, and King of the Flag maps.
 | --- | --- |
 | `sm_summon_reload_owner_commands` | Reload the owner-command allowlist. Requires the SourceMod config admin flag. |
 | `sm_config <name>` | Load an approved competitive config from the server console. |
+| `sm_config auto_<league>` | Turn on Auto config with a league: `etf2l`, `rgl`, or `ozfortress`. `sm_config auto` uses the league the backend sent. Intended for the Summon agent and backend. |
 | `stopchangelevel` | Cancel a map change that is waiting for SourceTV viewers. |
 | `sm_reservation_warning <minutes>` | Broadcast a remaining-time warning. Intended for the Summon agent. |
 | `sm_reservation_ending` | Broadcast the final message and remove players after five seconds. Intended for the Summon agent. |
@@ -366,7 +401,7 @@ sends authenticated JSON requests to:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /internal/reservations/<number>/players` | Current human-player snapshot, map, and config. |
+| `POST /internal/reservations/<number>/players` | Current human-player snapshot, map, config, and whether Auto config is on. The reply's `auto_league` names Auto's league for the server's region. |
 | `POST /internal/reservations/<number>/end` | Owner-confirmed early end. |
 | `POST /internal/reservations/<number>/uploads` | logs.tf or demos.tf upload metadata. |
 

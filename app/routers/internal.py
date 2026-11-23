@@ -19,6 +19,7 @@ from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.models.instance import CloudInstance
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.utils.upload_links import is_allowed_upload_url
+from app.services.competitive_configs import reservation_auto_config_league
 from app.services import server_liveness
 
 
@@ -1983,11 +1984,16 @@ class PlayerUpdateRequest(BaseModel):
     # Older plugins leave these out. An empty config_file means none is loaded.
     map: str | None = None
     config_file: str | None = None
+    # Whether the plugin is picking configs itself (Auto).
+    auto_config: bool | None = None
 
 
 class PlayerUpdateResponse(BaseModel):
     """Response for player update endpoint."""
     success: bool
+    # The league the plugin's Auto config uses, an AUTO_LEAGUES key. Sent so
+    # owners can turn Auto on in game when the reservation started without it.
+    auto_league: str | None = None
 
 
 def _update_persisted_player_state(
@@ -2020,6 +2026,7 @@ def _update_persisted_server_state(
     reservation: Reservation,
     current_map: str | None,
     config_file: str | None,
+    auto_config: bool | None = None,
 ) -> bool:
     """Apply the plugin's map and config and report whether a database write is needed.
 
@@ -2039,6 +2046,10 @@ def _update_persisted_server_state(
         if reservation.config_file != config_file:
             reservation.config_file = config_file
             changed = True
+
+    if auto_config is not None and bool(reservation.auto_config) != auto_config:
+        reservation.auto_config = auto_config
+        changed = True
 
     return changed
 
@@ -2088,11 +2099,14 @@ async def update_players(
             reservation,
             body.map,
             body.config_file,
+            body.auto_config,
         )
+        stored_league = reservation.auto_config_league
+        auto_league = await reservation_auto_config_league(reservation, db)
 
         # Periodic updates arrive every ten seconds. Avoid an unnecessary
         # transaction commit when none of the persisted state changed.
-        if changed or server_state_changed:
+        if changed or server_state_changed or auto_league != stored_league:
             await db.commit()
 
-    return PlayerUpdateResponse(success=True)
+    return PlayerUpdateResponse(success=True, auto_league=auto_league)

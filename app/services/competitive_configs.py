@@ -63,6 +63,67 @@ _BASE_STEMS = {prefix.rstrip("_") for prefix, _, _ in _FORMAT_MAP if prefix.ends
 LEAGUE_PRIORITY = ("ETF2L", "RGL", "ozfortress", "AsiaFortress", "FBTF")
 
 
+# "Auto" is not a cfg file. The plugin picks the config itself: the league from
+# the server's region, the game mode from the map, and 6v6 or Highlander from
+# how many players join each team. The plugin is told the league as
+# "auto_<league>", where <league> is a key of AUTO_LEAGUES.
+AUTO_CONFIG = "auto"
+AUTO_LEAGUES = {
+    "etf2l": "ETF2L",
+    "rgl": "RGL",
+    "ozfortress": "ozfortress",
+}
+_RGL_COUNTRIES = {"United States", "Canada", "Mexico"}
+_OZFORTRESS_COUNTRIES = {"Australia", "New Zealand"}
+
+
+def auto_config_league(country: str | None, continent: str | None) -> str:
+    """Return the AUTO_LEAGUES key of the main league where a server is.
+
+    The country comes first, since Honolulu's continent is Oceania. Players
+    in Europe and next to it, including Turkey and Central Asia, play ETF2L,
+    which is also the default for regions with no main league of their own.
+    """
+    if country in _RGL_COUNTRIES or continent in ("North America", "South America"):
+        return "rgl"
+    if country in _OZFORTRESS_COUNTRIES or continent == "Australia":
+        return "ozfortress"
+    return "etf2l"
+
+
+def auto_config_command(league: str | None) -> str:
+    """Return the sm_config argument that turns Auto on with a league."""
+    return f"{AUTO_CONFIG}_{league if league in AUTO_LEAGUES else 'etf2l'}"
+
+
+def startup_config_file(reservation) -> str:
+    """Return the sm_config argument a reservation's server runs at startup."""
+    if getattr(reservation, "auto_config", False):
+        return auto_config_command(getattr(reservation, "auto_config_league", None))
+    return reservation.config_file or ""
+
+
+async def reservation_auto_config_league(reservation, db) -> str:
+    """Return the league Auto uses on a reservation's server.
+
+    Reservations made before Auto have none stored, so it comes from their
+    location and is stored. The caller commits.
+    """
+    league = getattr(reservation, "auto_config_league", None)
+    if league in AUTO_LEAGUES:
+        return league
+
+    from app.models.instance import EnabledLocation
+
+    location = await db.get(EnabledLocation, reservation.location)
+    league = auto_config_league(
+        location.country if location else None,
+        location.continent if location else None,
+    )
+    reservation.auto_config_league = league
+    return league
+
+
 @dataclass(frozen=True)
 class CompetitiveConfig:
     cfg_file: str
