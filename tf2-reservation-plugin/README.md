@@ -237,10 +237,10 @@ Its `SummonOwnerCommands` sections are exact command or ConVar names:
 The supplied file contains the default gameplay-oriented allowlist, which
 includes bots, player votes, and `sv_cheats` for practice. It also has what
 lobby and pickup sites use to check a server, set up a match, and follow it:
-`hostname`, `status`, `users`, `kickid`, `kickall`, `say`, `sv_password`,
-`sv_tags`, `log`, `sv_logsecret`,
+`hostname`, `maxplayers`, `status`, `users`, `kickid`, `kickall`, `say`,
+`sv_password`, `sv_tags`, `log`, `sv_logsecret`,
 `logaddress_add`, `logaddress_del`, `logaddress_delall`, `logaddress_list`,
-`tv_port`, `tv_password`, and `sm_whitelist_id`. Commands
+`tv_port`, `tv_password`, `tv_status`, and `sm_whitelist_id`. Commands
 provided by optional image plugins remain safe to list but are reported as
 unavailable while their plugin is not loaded. The web and in-game checks must
 agree before a command can run.
@@ -268,9 +268,10 @@ Owner-command execution has the following safeguards:
 - `logaddress_add` is refused unless the reservation has direct connections.
   Log packets come from the server's own address, which stays hidden when
   players connect through Steam's relays.
-- `hostname`, `status`, `users`, `logaddress_list`, `logaddress_delall`,
-  `tv_port`, and `tv_password` take no arguments, so the server's name and
-  SourceTV details can be read but not changed. `users` lists slots, user
+- `hostname`, `maxplayers`, `status`, `users`, `logaddress_list`,
+  `logaddress_delall`, `tv_port`, `tv_password`, and `tv_status` take no
+  arguments, so the server's name, player limit, and SourceTV details can be
+  read but not changed. `users` lists slots, user
   IDs, and names, without addresses. `status` output has every IPv4 address
   replaced with `0.0.0.0`, including the server's own, which owners do not
   otherwise see when players connect through Steam's relays. In game, the

@@ -210,10 +210,10 @@ class OwnerCommandPolicyTests(unittest.TestCase):
     def test_checked_in_allowlist_includes_changelevel(self):
         self.assertIn("changelevel", get_owner_commands())
 
-    def test_checked_in_allowlist_limits_sourcetv_to_delay_and_connection_details(self):
-        # The plugin lets tv_port and tv_password only be read.
+    def test_checked_in_allowlist_limits_sourcetv_to_delay_and_read_only_details(self):
+        # The plugin lets tv_port, tv_password, and tv_status only be read.
         sourcetv = {name for name in get_owner_commands() if name.startswith("tv_")}
-        self.assertEqual({"tv_delay", "tv_port", "tv_password"}, sourcetv)
+        self.assertEqual({"tv_delay", "tv_port", "tv_password", "tv_status"}, sourcetv)
 
     def test_image_and_plugin_copies_of_the_allowlist_match(self):
         image_copy = (

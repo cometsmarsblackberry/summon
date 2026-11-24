@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.13"
+#define PLUGIN_VERSION "1.6.14"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -1037,15 +1037,17 @@ bool AreOwnerCommandArgumentsAllowed(
     }
 
     // These take no arguments: most report state, and logaddress_delall
-    // removes every log receiver. hostname and the tv_ entries can be read
-    // but not changed.
+    // removes every log receiver. hostname, maxplayers, and the tv_ entries
+    // can be read but not changed.
     if (StrEqual(operation, "status")
         || StrEqual(operation, "users")
         || StrEqual(operation, "hostname")
+        || StrEqual(operation, "maxplayers")
         || StrEqual(operation, "logaddress_list")
         || StrEqual(operation, "logaddress_delall")
         || StrEqual(operation, "tv_port")
-        || StrEqual(operation, "tv_password"))
+        || StrEqual(operation, "tv_password")
+        || StrEqual(operation, "tv_status"))
     {
         if (valueArgumentCount == 0)
             return true;
