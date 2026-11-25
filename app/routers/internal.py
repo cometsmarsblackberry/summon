@@ -19,6 +19,7 @@ from app.models.reservation import EndReason, Reservation, ReservationStatus
 from app.models.instance import CloudInstance
 from app.models.instant import InstantAssignment, InstantHost, InstantSlot
 from app.utils.upload_links import is_allowed_upload_url
+from app.utils.maps import is_valid_map_name
 from app.services.competitive_configs import reservation_auto_config_league
 from app.services import server_liveness
 
@@ -2110,3 +2111,33 @@ async def update_players(
             await db.commit()
 
     return PlayerUpdateResponse(success=True, auto_league=auto_league)
+
+
+class MapCatalogResponse(BaseModel):
+    """Response for the map catalog endpoint."""
+    maps: list[str]
+
+
+@router.get("/reservations/{reservation_number}/maps", response_model=MapCatalogResponse)
+async def get_map_catalog(
+    reservation_number: int,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+):
+    """
+    Return the maps the reservation form offers.
+    Called by the SourceMod plugin, which lists them in an owner's "maps"
+    reply. Lobby sites check a server with "maps *" before they use it, and
+    the server only holds the maps it has already loaded, but it downloads
+    any of these from FastDL when it changes to one.
+    """
+    if not await validate_reservation_api_key(reservation_number, x_api_key):
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    from app.services.maps import get_selectable_maps
+
+    async with async_session_maker() as db:
+        maps = await get_selectable_maps(db)
+    # The plugin checks every name as well; only plain ones are sent.
+    return MapCatalogResponse(
+        maps=[m["name"] for m in maps if is_valid_map_name(m["name"])]
+    )

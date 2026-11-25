@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.14"
+#define PLUGIN_VERSION "1.6.15"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -50,6 +50,13 @@
 #define MAX_OWNER_TV_DELAY 120
 #define OWNER_COMMAND_RESULT_MARKER "SUMMON_OWNER_COMMAND_RESULT"
 #define OWNER_CHEATS_COMMAND "sv_cheats"
+// Summon answers "maps <substring>" itself, from the maps on disk and the map
+// catalog. See ReplyOwnerMapList.
+#define OWNER_MAPS_COMMAND "maps"
+// IsSafeMapName's 64 characters and the terminator.
+#define MAX_MAP_NAME_LENGTH 65
+#define MAX_MAP_CATALOG_SIZE 2048
+#define MAP_CATALOG_RETRY_DELAY 60.0
 // The sv_allow_point_servercommand value that lets no map entity or script
 // run server commands.
 #define POINT_SERVERCOMMAND_DISALLOW "disallow"
@@ -139,6 +146,14 @@ ConVar g_cvCheats;
 ConVar g_cvPointServerCommand;
 bool g_bCheatsGuardActive = false;
 char g_sPointServerCommandRestore[32];
+
+// The maps the reservation form offers, from the backend. Null until the
+// first answer; a failed refresh keeps the previous list.
+ArrayList g_aMapCatalog;
+bool g_bMapCatalogRequestPending = false;
+// Set once the catalog has been fetched, or found missing, since the map started.
+bool g_bMapCatalogCurrent = false;
+float g_fMapCatalogRetryAt = 0.0;
 
 public Plugin myinfo = {
     name = PLUGIN_NAME,
@@ -398,6 +413,10 @@ public void OnMapStart()
     // Report the new map before players finish loading it, so the MOTD they
     // are shown already has it.
     SendPlayerUpdate();
+
+    // Admins may have changed the catalog since the last map.
+    g_bMapCatalogCurrent = false;
+    RequestMapCatalog();
 }
 
 public void OnConfigsExecuted()
@@ -440,6 +459,9 @@ public Action Timer_SendPlayerUpdate(Handle timer)
 public Action Timer_PeriodicPlayerUpdate(Handle timer)
 {
     SendPlayerUpdate();
+    // The agent sets the backend ConVars after the first map has started, so
+    // the first request is usually made from here.
+    RequestMapCatalog();
     return Plugin_Continue;
 }
 
@@ -559,6 +581,197 @@ public void OnPlayerUpdateResponse(HTTPResponse response, any data, const char[]
     char league[sizeof(g_sAutoLeague)];
     if (reply.GetString("auto_league", league, sizeof(league)) && IsAutoConfigLeague(league))
         strcopy(g_sAutoLeague, sizeof(g_sAutoLeague), league);
+}
+
+// ============================================================================
+// Map Catalog
+// ============================================================================
+
+// The request runs in the background, so it never delays the server.
+void RequestMapCatalog()
+{
+    if (g_bMapCatalogRequestPending
+        || g_bMapCatalogCurrent
+        || GetEngineTime() < g_fMapCatalogRetryAt)
+        return;
+
+    char backendURL[256];
+    char apiKey[64];
+    g_cvBackendURL.GetString(backendURL, sizeof(backendURL));
+    g_cvAPIKey.GetString(apiKey, sizeof(apiKey));
+    int reservationNumber = g_cvReservationNumber.IntValue;
+    if (strlen(backendURL) == 0 || strlen(apiKey) == 0 || reservationNumber == 0)
+        return;
+
+    char url[512];
+    Format(url, sizeof(url), "%s/internal/reservations/%d/maps", backendURL, reservationNumber);
+
+    HTTPRequest request = new HTTPRequest(url);
+    request.SetHeader("X-API-Key", apiKey);
+    request.Get(OnMapCatalogResponse);
+    g_bMapCatalogRequestPending = true;
+}
+
+public void OnMapCatalogResponse(HTTPResponse response, any data, const char[] error)
+{
+    g_bMapCatalogRequestPending = false;
+    // Set first, so a response that cannot be read is also retried later.
+    g_fMapCatalogRetryAt = GetEngineTime() + MAP_CATALOG_RETRY_DELAY;
+
+    if (strlen(error) > 0)
+    {
+        LogError("[summon] Failed to fetch the map catalog: %s", error);
+        return;
+    }
+
+    // A backend older than the catalog. Try again after the next map change.
+    if (response.Status == HTTPStatus_NotFound)
+    {
+        g_bMapCatalogCurrent = true;
+        return;
+    }
+
+    if (response.Status != HTTPStatus_OK)
+    {
+        LogError("[summon] Backend returned HTTP %d for the map catalog", response.Status);
+        return;
+    }
+
+    // The response frees its JSON; values taken from it must be freed here.
+    JSONObject reply = view_as<JSONObject>(response.Data);
+    if (reply == null || !reply.HasKey("maps"))
+    {
+        LogError("[summon] The map catalog response has no map list");
+        return;
+    }
+
+    JSONArray maps = view_as<JSONArray>(reply.Get("maps"));
+    ArrayList catalog = new ArrayList(ByteCountToCells(MAX_MAP_NAME_LENGTH));
+    // Read into a larger buffer, so a longer name fails IsSafeMapName instead
+    // of being cut to a valid one.
+    char name[PLATFORM_MAX_PATH];
+    int count = maps.Length;
+    for (int i = 0; i < count && catalog.Length < MAX_MAP_CATALOG_SIZE; i++)
+    {
+        if (maps.GetString(i, name, sizeof(name)) && IsSafeMapName(name))
+            catalog.PushString(name);
+    }
+    delete maps;
+
+    delete g_aMapCatalog;
+    g_aMapCatalog = catalog;
+    g_bMapCatalogCurrent = true;
+}
+
+// The engine's maps command lists only the maps on disk, and this server
+// keeps few: it downloads a map from FastDL when it changes to one. Lobby
+// sites check a server with "maps *" before they use it, so the reply adds
+// the maps the reservation form offers, every one of which the server can
+// download. Every line is in the engine's format, even for a map that is not
+// on disk yet, because that is what the sites read. Client 0 is the server
+// console, which RCON reads.
+void ReplyOwnerMapList(int client, const char[] substring)
+{
+    // The engine prints nothing for an empty substring.
+    if (substring[0] == '\0')
+        return;
+
+    ArrayList names = CollectOwnerMapNames(substring);
+    if (names.Length > 0)
+        PrintOwnerOutputLine(client, "-------------");
+
+    char name[MAX_MAP_NAME_LENGTH];
+    char line[MAX_MAP_NAME_LENGTH + 32];
+    for (int i = 0; i < names.Length; i++)
+    {
+        names.GetString(i, name, sizeof(name));
+        Format(line, sizeof(line), "PENDING:   (fs) %s", name);
+        PrintOwnerOutputLine(client, line);
+    }
+    delete names;
+}
+
+void PrintOwnerOutputLine(int client, const char[] line)
+{
+    if (client == 0)
+        PrintToServer("%s", line);
+    else if (IsClientInGame(client))
+        PrintToConsole(client, "%s", line);
+}
+
+// The maps on disk and in the catalog whose names contain the substring,
+// ignoring case, or every one for "*" as in the engine. Sorted, without
+// duplicates.
+ArrayList CollectOwnerMapNames(const char[] substring)
+{
+    ArrayList names = new ArrayList(ByteCountToCells(MAX_MAP_NAME_LENGTH));
+    StringMap seen = new StringMap();
+    bool everyMap = substring[0] == '*';
+
+    // Through the game's file system, so maps in every search path count, as
+    // they do for the engine.
+    DirectoryListing directory = OpenDirectory("maps", true);
+    if (directory != null)
+    {
+        char entry[PLATFORM_MAX_PATH];
+        FileType type;
+        while (directory.GetNext(entry, sizeof(entry), type))
+        {
+            int length = strlen(entry);
+            if (type != FileType_File || length <= 4 || !StrEqual(entry[length - 4], ".bsp"))
+                continue;
+            entry[length - 4] = '\0';
+            AddOwnerMapName(names, seen, entry, substring, everyMap);
+        }
+        delete directory;
+    }
+
+    if (g_aMapCatalog != null)
+    {
+        char name[MAX_MAP_NAME_LENGTH];
+        for (int i = 0; i < g_aMapCatalog.Length; i++)
+        {
+            g_aMapCatalog.GetString(i, name, sizeof(name));
+            AddOwnerMapName(names, seen, name, substring, everyMap);
+        }
+    }
+
+    delete seen;
+    names.SortCustom(SortMapNames);
+    return names;
+}
+
+void AddOwnerMapName(
+    ArrayList names,
+    StringMap seen,
+    const char[] name,
+    const char[] substring,
+    bool everyMap
+)
+{
+    if (!IsSafeMapName(name))
+        return;
+    if (!everyMap && StrContains(name, substring, false) == -1)
+        return;
+    // SetValue refuses a name that is already there.
+    if (seen.SetValue(name, true, false))
+        names.PushString(name);
+}
+
+public int SortMapNames(int index1, int index2, Handle array, Handle hndl)
+{
+    ArrayList names = view_as<ArrayList>(array);
+    char first[MAX_MAP_NAME_LENGTH];
+    char second[MAX_MAP_NAME_LENGTH];
+    names.GetString(index1, first, sizeof(first));
+    names.GetString(index2, second, sizeof(second));
+    return strcmp(first, second, false);
+}
+
+bool IsOwnerMapListing(const char[] operation, int valueArgumentCount)
+{
+    // Without a substring, the engine prints its usage.
+    return valueArgumentCount == 1 && StrEqual(operation, OWNER_MAPS_COMMAND);
 }
 
 // ============================================================================
@@ -1033,6 +1246,16 @@ bool AreOwnerCommandArgumentsAllowed(
             || (valueArgumentCount == 1 && IsSafeTournamentWhitelistPath(firstValue)))
             return true;
         strcopy(message, messageSize, "That command's arguments are not allowed. Tournament whitelists must be existing cfg/*.txt files.");
+        return false;
+    }
+
+    // maps lists map names and changes nothing. The engine reads only its
+    // first argument, so a second one is refused rather than ignored.
+    if (StrEqual(operation, OWNER_MAPS_COMMAND))
+    {
+        if (valueArgumentCount <= 1)
+            return true;
+        strcopy(message, messageSize, "maps takes one part of a map name, or * for every map.");
         return false;
     }
 
@@ -1569,6 +1792,14 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     if (!IsClientConnected(client) || StrEqual(operation, OWNER_CONFIG_COMMAND))
         return Plugin_Handled;
 
+    if (IsOwnerMapListing(operation, args - 1))
+    {
+        ReplyOwnerMapList(client, firstValue);
+        if (replySource == SM_REPLY_TO_CHAT && IsClientInGame(client))
+            PrintToChat(client, "\x01[\x07FF6600Summon\x01] The output is in your console.");
+        return Plugin_Handled;
+    }
+
     if (response[0] != '\0')
     {
         ReplyOwnerCommandOutput(client, replySource, response);
@@ -1743,6 +1974,13 @@ bool ExecuteOwnerServerCommand(
         return true;
     }
 
+    // The caller prints the list, because it can be longer than response.
+    if (IsOwnerMapListing(operation, valueArgumentCount))
+    {
+        LogOwnerCommand(actorSteamID, commandLine, viaRcon, "ok");
+        return true;
+    }
+
     TrackOwnerLogAddress(operation, commandLine);
 
     // Match stock sm_rcon's synchronous execution/output behavior. The fixed
@@ -1875,7 +2113,9 @@ Action RunServerOwnerCommand(int args, bool viaRcon)
     }
 
     PrintToServer("%s OK", OWNER_COMMAND_RESULT_MARKER);
-    if (response[0] != '\0')
+    if (IsOwnerMapListing(operation, args - 2))
+        ReplyOwnerMapList(0, firstValue);
+    else if (response[0] != '\0')
         PrintToServer("%s", response);
     return Plugin_Handled;
 }

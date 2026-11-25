@@ -237,8 +237,8 @@ Its `SummonOwnerCommands` sections are exact command or ConVar names:
 The supplied file contains the default gameplay-oriented allowlist, which
 includes bots, player votes, and `sv_cheats` for practice. It also has what
 lobby and pickup sites use to check a server, set up a match, and follow it:
-`hostname`, `maxplayers`, `status`, `users`, `kickid`, `kickall`, `say`,
-`sv_password`, `sv_tags`, `log`, `sv_logsecret`,
+`hostname`, `maxplayers`, `maps`, `status`, `users`, `kickid`, `kickall`,
+`say`, `sv_password`, `sv_tags`, `log`, `sv_logsecret`,
 `logaddress_add`, `logaddress_del`, `logaddress_delall`, `logaddress_list`,
 `tv_port`, `tv_password`, `tv_status`, and `sm_whitelist_id`. Commands
 provided by optional image plugins remain safe to list but are reported as
@@ -279,6 +279,13 @@ Owner-command execution has the following safeguards:
   plugin has returned, so for the web console and the RCON gateway, the
   backend and the agent mask any output that looks like `status`, whatever
   the command was called.
+- `maps` takes at most one argument, part of a map name or `*` for every map.
+  With one, Summon answers instead of the engine: it lists the maps on disk
+  and the maps the reservation form offers, sorted, in the engine's
+  `PENDING:   (fs) <map>` format. The image keeps one map besides the
+  startup map and the maps the server has changed to, and the server
+  downloads any other map from FastDL when it changes to one, but lobby sites
+  look for their map in `maps *` before they use a server. Without an argument, the engine prints its usage.
 - `tv_delay` may only read the current delay or set one whole number of
   seconds from 0 to 120, the range TF2 allows. The plugin makes `tv_delay` a
   notify ConVar, so the engine announces every change in chat, including
@@ -405,6 +412,7 @@ sends authenticated JSON requests to:
 | `POST /internal/reservations/<number>/players` | Current human-player snapshot, map, config, and whether Auto config is on. The reply's `auto_league` names Auto's league for the server's region. |
 | `POST /internal/reservations/<number>/end` | Owner-confirmed early end. |
 | `POST /internal/reservations/<number>/uploads` | logs.tf or demos.tf upload metadata. |
+| `GET /internal/reservations/<number>/maps` | The maps the reservation form offers, for the `maps` owner command. Fetched in the background at every map start, and retried every minute after a failure; a 404 from an older backend waits for the next map. |
 
 Upload reporting listens for the optional `LogUploaded` and `DemoUploaded`
 forwards. URLs beginning with `http://` are normalized to HTTPS before they are
