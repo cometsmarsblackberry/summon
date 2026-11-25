@@ -69,6 +69,10 @@ countdown. Both commands also support SourceMod's silent `/pause` and
 | `!restart` | Open a menu to restart the tournament, game, or round. |
 | `!command <command> [arguments...]`, `!cmd ...`, `!rcon ...` | Run a command from the reservation-owner allowlist. `exec <config>` is accepted too and loads the config like `!config`. |
 
+In the owner's `!admin` menu, **Change Map** lists installed maps and maps
+offered on the reservation form, in the same order as `maps *`. Selecting
+a missing map downloads it before changing level, just like `!map <map>`.
+
 `!admin`, `!who`, `!map`, and `!rcon` overlap standard SourceMod commands.
 Summon listens for these commands without registering duplicate callbacks. A
 caller who has access to the corresponding SourceMod command retains its stock
@@ -412,7 +416,7 @@ sends authenticated JSON requests to:
 | `POST /internal/reservations/<number>/players` | Current human-player snapshot, map, config, and whether Auto config is on. The reply's `auto_league` names Auto's league for the server's region. |
 | `POST /internal/reservations/<number>/end` | Owner-confirmed early end. |
 | `POST /internal/reservations/<number>/uploads` | logs.tf or demos.tf upload metadata. |
-| `GET /internal/reservations/<number>/maps` | The maps the reservation form offers, for the `maps` owner command. Fetched in the background at every map start, and retried every minute after a failure; a 404 from an older backend waits for the next map. |
+| `GET /internal/reservations/<number>/maps` | The maps the reservation form offers, for the owner's Change Map menu and `maps` command. Fetched in the background at every map start and retried every minute after a failure. A 404 from an older backend waits for the next map. |
 
 Upload reporting listens for the optional `LogUploaded` and `DemoUploaded`
 forwards. URLs beginning with `http://` are normalized to HTTPS before they are

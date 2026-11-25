@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.15"
+#define PLUGIN_VERSION "1.6.16"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -2482,19 +2482,11 @@ void RequestOwnerMapChange(int client, const char[] mapName)
 
 void ShowOwnerMapMenu(int client)
 {
-    int serial = -1;
-    Handle mapList = ReadMapList(
-        INVALID_HANDLE,
-        serial,
-        "sm_map menu",
-        MAPLIST_FLAG_CLEARARRAY | MAPLIST_FLAG_MAPSFOLDER
-    );
-
-    if (mapList == INVALID_HANDLE || GetArraySize(mapList) == 0)
+    ArrayList names = CollectOwnerMapNames("*");
+    if (names.Length == 0)
     {
-        if (mapList != INVALID_HANDLE)
-            delete mapList;
-        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666No local map list is available. Use \x0799FF99!map <mapname>\x01 instead.");
+        delete names;
+        PrintToChat(client, "\x01[\x07FF6600Summon\x01] \x07FF6666No maps to display. Use \x0799FF99!map <mapname>\x01 instead.");
         return;
     }
 
@@ -2502,17 +2494,14 @@ void ShowOwnerMapMenu(int client)
     menu.SetTitle("Change Map");
     menu.ExitBackButton = true;
 
-    char mapName[PLATFORM_MAX_PATH];
-    char displayName[PLATFORM_MAX_PATH];
-    int mapCount = GetArraySize(mapList);
-    for (int i = 0; i < mapCount; i++)
+    char mapName[MAX_MAP_NAME_LENGTH];
+    for (int i = 0; i < names.Length; i++)
     {
-        GetArrayString(mapList, i, mapName, sizeof(mapName));
-        GetMapDisplayName(mapName, displayName, sizeof(displayName));
-        menu.AddItem(mapName, displayName);
+        names.GetString(i, mapName, sizeof(mapName));
+        menu.AddItem(mapName, mapName);
     }
 
-    delete mapList;
+    delete names;
     menu.Display(client, 30);
 }
 
