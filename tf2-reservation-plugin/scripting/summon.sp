@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.17"
+#define PLUGIN_VERSION "1.6.18"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -113,6 +113,11 @@ Handle g_hExpiryTimer = INVALID_HANDLE;
 int g_iEndCountdown = 0;
 bool g_bExpiryKickDone = false;
 float g_fLastOwnerCommand = 0.0;
+// Engine time of the last command the agent's RCON gateway forwarded, or
+// -1.0 before the first. Player updates report its age: the backend restarts
+// the empty-server timer from it, as lobby sites poll the server over RCON
+// while their lobby fills.
+float g_fLastRconCommand = -1.0;
 StringMap g_mOwnerCommandAllowlist;
 int g_iOwnerCommandCount = 0;
 // Log receivers added through owner commands, keyed by "ip:port".
@@ -591,6 +596,8 @@ void SendPlayerUpdate()
     else
         body.SetString("config_file", g_sCurrentConfig);
     body.SetBool("auto_config", g_bAutoConfig);
+    if (g_fLastRconCommand >= 0.0)
+        body.SetInt("rcon_idle_seconds", RoundToFloor(GetEngineTime() - g_fLastRconCommand));
 
     // Send HTTP POST
     char url[512];
@@ -2607,6 +2614,9 @@ public Action Command_ServerOwnerCommand(int args)
 // line break, which the engine would split before this callback ran.
 public Action Command_ServerRconCommand(int args)
 {
+    // The gateway only forwards commands from callers that gave the owner's
+    // RCON password.
+    g_fLastRconCommand = GetEngineTime();
     return RunServerOwnerCommand(args, true);
 }
 

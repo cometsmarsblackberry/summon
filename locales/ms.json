@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Tempahan ini tamat secara automatik kerana pelayannya berhenti bertindak balas dan tidak pulih.",
         "auto_end_when_empty": "Tamat automatik apabila kosong",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "ditetapkan semula oleh RCON",
         "connection_details": "Butiran Sambungan",
         "connect": "Sambung",
         "source_tv": "SourceTV",

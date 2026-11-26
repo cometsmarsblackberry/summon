@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "การจองนี้สิ้นสุดโดยอัตโนมัติเพราะเซิร์ฟเวอร์หยุดตอบสนองและไม่กลับมาทำงาน",
         "auto_end_when_empty": "สิ้นสุดอัตโนมัติเมื่อว่างเปล่า",
         "auto_end_default": "{minutes} นาที",
+        "auto_end_reset_by_rcon": "รีเซ็ตโดย RCON",
         "connection_details": "รายละเอียดการเชื่อมต่อ",
         "connect": "เชื่อมต่อ",
         "source_tv": "SourceTV",

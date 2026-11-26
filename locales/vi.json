@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Lượt đặt chỗ này đã tự động kết thúc vì máy chủ của nó ngừng phản hồi và không phục hồi.",
         "auto_end_when_empty": "Tự kết thúc khi trống",
         "auto_end_default": "{minutes} phút",
+        "auto_end_reset_by_rcon": "đã đặt lại qua RCON",
         "connection_details": "Chi tiết kết nối",
         "connect": "Kết nối",
         "source_tv": "SourceTV",

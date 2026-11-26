@@ -1987,6 +1987,9 @@ class PlayerUpdateRequest(BaseModel):
     config_file: str | None = None
     # Whether the plugin is picking configs itself (Auto).
     auto_config: bool | None = None
+    # Seconds since the agent's RCON gateway last forwarded a command. Left
+    # out before the first one, and by older plugins.
+    rcon_idle_seconds: int | None = None
 
 
 class PlayerUpdateResponse(BaseModel):
@@ -1997,12 +2000,42 @@ class PlayerUpdateResponse(BaseModel):
     auto_league: str | None = None
 
 
+# The time of the last RCON command is worked out from its age in whole
+# seconds, so it varies a little between reports.
+RCON_COMMAND_TIME_TOLERANCE = timedelta(seconds=5)
+
+
+def _last_rcon_command_at(idle_seconds: int | None, now: datetime) -> datetime | None:
+    if idle_seconds is None:
+        return None
+    return now - timedelta(seconds=max(0, idle_seconds))
+
+
+def _empty_timer_reset_by_rcon(
+    reservation: Reservation, last_rcon_command_at: datetime | None
+) -> bool:
+    """Whether the empty-server timer counts from the last RCON command."""
+    empty_since = server_liveness.aware(reservation.empty_since)
+    return (
+        empty_since is not None
+        and last_rcon_command_at is not None
+        and last_rcon_command_at >= empty_since - RCON_COMMAND_TIME_TOLERANCE
+    )
+
+
 def _update_persisted_player_state(
     reservation: Reservation,
     player_count: int,
     now: datetime,
+    last_rcon_command_at: datetime | None = None,
 ) -> bool:
-    """Apply player-derived fields and report whether a database write is needed."""
+    """Apply player-derived fields and report whether a database write is needed.
+
+    The empty-server timer counts from when the last player left, or from the
+    last command the owner's RCON tools sent, whichever is later. Lobby sites
+    poll the server over RCON while their lobby fills, which can take longer
+    than the timer, and stop when the match is over.
+    """
     changed = False
 
     if player_count > 0 and not reservation.player_joined:
@@ -2018,6 +2051,15 @@ def _update_persisted_player_state(
         changed = True
     elif player_count > 0 and reservation.empty_since is not None:
         reservation.empty_since = None
+        changed = True
+
+    if (
+        player_count == 0
+        and last_rcon_command_at is not None
+        and last_rcon_command_at
+        > server_liveness.aware(reservation.empty_since) + RCON_COMMAND_TIME_TOLERANCE
+    ):
+        reservation.empty_since = last_rcon_command_at
         changed = True
 
     return changed
@@ -2073,6 +2115,7 @@ async def update_players(
         "players": [p.model_dump() for p in body.players],
         "player_count": body.player_count,
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "empty_timer_reset_by_rcon": False,
     }
 
     # Update reservation DB fields
@@ -2089,13 +2132,18 @@ async def update_players(
             return PlayerUpdateResponse(success=True)
 
         now = datetime.now(timezone.utc)
+        last_rcon_command_at = _last_rcon_command_at(body.rcon_idle_seconds, now)
         changed = _update_persisted_player_state(
             reservation,
             body.player_count,
             now,
+            last_rcon_command_at,
         )
         if server_liveness.record_report(reservation, body.player_count, now):
             changed = True
+        player_data[reservation_number]["empty_timer_reset_by_rcon"] = (
+            _empty_timer_reset_by_rcon(reservation, last_rcon_command_at)
+        )
         server_state_changed = _update_persisted_server_state(
             reservation,
             body.map,

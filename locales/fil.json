@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Awtomatikong natapos ang reservation na ito dahil huminto sa pagtugon ang server nito at hindi na bumalik.",
         "auto_end_when_empty": "Awtomatikong magtatapos kapag walang laman",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "na-reset ng RCON",
         "connection_details": "Mga Detalye ng Koneksyon",
         "connect": "Kumonekta",
         "source_tv": "SourceTV",

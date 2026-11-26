@@ -124,6 +124,7 @@
         "end_reason_unresponsive": "This reservation ended automatically because its server stopped responding and did not recover.",
         "auto_end_when_empty": "Auto-end when empty",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "reset by RCON",
         "auto_end_explanation": "Auto-ends after {minutes} min empty",
         "auto_ends_in": "Auto-ends in",
         "connection_details": "Connection Details",

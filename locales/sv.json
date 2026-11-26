@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Den här reservationen avslutades automatiskt eftersom dess server slutade svara och inte återhämtade sig.",
         "auto_end_when_empty": "Autoslut när tom",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "återställd via RCON",
         "connection_details": "Anslutningsdetaljer",
         "connect": "Anslut",
         "source_tv": "SourceTV",

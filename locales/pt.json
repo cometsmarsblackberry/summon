@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Esta reserva foi encerrada automaticamente porque o servidor parou de responder e não se recuperou.",
         "auto_end_when_empty": "Encerrar automaticamente quando vazio",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "reiniciado pelo RCON",
         "connection_details": "Detalhes de conexão",
         "connect": "Conectar",
         "source_tv": "SourceTV",

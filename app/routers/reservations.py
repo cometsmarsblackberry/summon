@@ -631,6 +631,11 @@ async def get_reservation_players(
         "player_count": data["player_count"] if data else 0,
         "updated_at": data["updated_at"] if data else None,
         "empty_since": reservation.empty_since.isoformat() if reservation.empty_since else None,
+        # Whether the empty timer counts from a command of the owner's RCON
+        # tools instead of from when the last player left.
+        "empty_timer_reset_by_rcon": bool(
+            reservation.empty_since and data and data.get("empty_timer_reset_by_rcon")
+        ),
         # Set while the game server has stopped responding: when it last reported.
         "unresponsive_since": stopped_at.isoformat() if stopped_at else None,
     }

@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "서버가 응답을 멈추고 복구되지 않아 이 예약이 자동으로 종료되었습니다.",
         "auto_end_when_empty": "비었을 때 자동 종료",
         "auto_end_default": "{minutes}분",
+        "auto_end_reset_by_rcon": "RCON으로 초기화됨",
         "connection_details": "연결 세부 정보",
         "connect": "연결",
         "source_tv": "SourceTV",

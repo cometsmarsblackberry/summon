@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "サーバーが応答しなくなり、回復しなかったため、この予約は自動的に終了しました。",
         "auto_end_when_empty": "空になったら自動終了",
         "auto_end_default": "{minutes}分",
+        "auto_end_reset_by_rcon": "RCONでリセット",
         "connection_details": "接続詳細",
         "connect": "接続",
         "source_tv": "SourceTV",

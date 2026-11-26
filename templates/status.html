@@ -38,6 +38,8 @@
         playersUpdatedAt: 0,
         playerSnapshotStaleSeconds: 25,
         emptySince: null,
+        // Whether the empty timer counts from the owner's last RCON command.
+        emptyTimerResetByRcon: false,
         // When the game server last reported, while the backend has it
         // marked as not responding.
         unresponsiveSince: null,
@@ -473,6 +475,7 @@
                     this.playerCount = data.player_count || 0;
                     this.playersUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : 0;
                     this.emptySince = data.empty_since || null;
+                    this.emptyTimerResetByRcon = !!data.empty_timer_reset_by_rcon;
                     this.unresponsiveSince = data.unresponsive_since || null;
                 }
             } catch (e) {
@@ -1240,7 +1243,7 @@
             <div class="flex justify-between text-sm">
                 <span class="text-slate-500">{{ _('status.auto_end_when_empty') }}</span>
                 <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default', minutes=reservation_settings.auto_end_minutes) }}</span>
-                <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800" x-text="formatAutoEnd(autoEndRemaining)"></span>
+                <span x-show="autoEndRemaining !== null" x-cloak class="text-right text-slate-800"><span class="whitespace-nowrap" x-text="formatAutoEnd(autoEndRemaining)"></span> <span x-show="emptyTimerResetByRcon" class="whitespace-nowrap text-slate-500">· {{ _('status.auto_end_reset_by_rcon') }}</span></span>
             </div>
             {% endif %}
         </div>
@@ -1455,7 +1458,7 @@
             <div class="flex items-center justify-between gap-4 text-sm text-slate-500">
                 <span>{{ _('status.auto_end_when_empty') }}</span>
                 <span x-show="autoEndRemaining === null" class="text-slate-800">{{ _('status.auto_end_default', minutes=reservation_settings.auto_end_minutes) }}</span>
-                <span x-show="autoEndRemaining !== null" x-cloak class="text-slate-800" x-text="formatAutoEnd(autoEndRemaining)"></span>
+                <span x-show="autoEndRemaining !== null" x-cloak class="text-right text-slate-800"><span class="whitespace-nowrap" x-text="formatAutoEnd(autoEndRemaining)"></span> <span x-show="emptyTimerResetByRcon" class="whitespace-nowrap text-slate-500">· {{ _('status.auto_end_reset_by_rcon') }}</span></span>
             </div>
         </div>
         {% endif %}

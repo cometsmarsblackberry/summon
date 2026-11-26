@@ -79,7 +79,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _aware(value: datetime | None) -> datetime | None:
+def aware(value: datetime | None) -> datetime | None:
     # SQLite returns naive datetimes; they are stored as UTC.
     if value is not None and value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -228,7 +228,7 @@ async def _apply_check(
                 if (
                     reservation is not None
                     and reservation.status == ReservationStatus.ACTIVE
-                    and _aware(reservation.empty_since) == marked_since
+                    and aware(reservation.empty_since) == marked_since
                 ):
                     reservation.empty_since = None
                     await db.commit()

@@ -123,6 +123,7 @@
         "end_reason_unresponsive": "Tämä varaus päättyi automaattisesti, koska sen palvelin lakkasi vastaamasta eikä toipunut.",
         "auto_end_when_empty": "Automaattinen lopetus tyhjänä",
         "auto_end_default": "{minutes} min",
+        "auto_end_reset_by_rcon": "nollattu RCONin kautta",
         "connection_details": "Yhteystiedot",
         "connect": "Yhdistä",
         "source_tv": "SourceTV",
