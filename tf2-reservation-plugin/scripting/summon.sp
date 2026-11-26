@@ -19,7 +19,7 @@
 #include <demostf>
 #define REQUIRE_PLUGIN
 
-#define PLUGIN_VERSION "1.6.16"
+#define PLUGIN_VERSION "1.6.17"
 #define PLUGIN_NAME "Summon"
 #define PLAYER_UPDATE_INTERVAL 10.0
 #define PLAYER_JOIN_REFRESH_DELAY 3.0
@@ -28,6 +28,19 @@
 #define OWNER_COMMAND_CONFIG "configs/summon_owner_commands.cfg"
 // Every log receiver gets a copy of each log line, so their number is capped.
 #define MAX_OWNER_LOG_ADDRESSES 4
+// Owners may name a log receiver by host name.
+// The engine would resolve the name on the game thread, and the address it
+// used could differ from the one the checks saw. So Summon resolves the name
+// in the background over DNS-over-HTTPS, checks the answer, and gives the
+// engine only that address. Each resolver is tried when the one before it
+// fails. A public resolver also cannot answer with names that only the host
+// or its network knows.
+#define MAX_LOG_HOST_LENGTH 253
+#define MAX_LOG_HOST_LABEL_LENGTH 63
+// Requests still running, including withdrawn ones, so that adding and
+// removing a name in a loop cannot start an unbounded number of them.
+#define MAX_LOG_HOST_LOOKUPS 8
+#define LOG_HOST_LOOKUP_TIMEOUT 5
 #define MAX_OWNER_JOIN_PASSWORD_LENGTH 64
 // The game log goes to every log receiver, so players' addresses are taken
 // out of it. The lines as the game wrote them are kept in this SourceMod log,
@@ -104,6 +117,37 @@ StringMap g_mOwnerCommandAllowlist;
 int g_iOwnerCommandCount = 0;
 // Log receivers added through owner commands, keyed by "ip:port".
 StringMap g_mOwnerLogAddresses;
+// Log receivers added by host name: "host:port" to the "ip:port" the engine
+// was given, so that logaddress_del with the name removes that address.
+StringMap g_mOwnerLogHosts;
+// Host names being resolved for logaddress_add. Each takes one of the
+// MAX_OWNER_LOG_ADDRESSES places until it has been answered. An answer whose
+// lookup is no longer listed was withdrawn and adds nothing.
+enum struct LogHostLookup
+{
+    int id;
+    int resolver;
+    int port;
+    // The owner in game who asked, or 0.
+    int userId;
+    bool viaRcon;
+    char host[MAX_LOG_HOST_LENGTH + 1];
+    char actor[32];
+}
+ArrayList g_aLogHostLookups;
+int g_iLastLogHostLookupId = 0;
+int g_iLogHostLookupsRunning = 0;
+// DNS-over-HTTPS JSON endpoints, in the order they are tried. Both take
+// ?name=<host>&type=A.
+char g_sLogHostResolvers[][] = {
+    "https://dns.google/resolve",
+    "https://cloudflare-dns.com/dns-query"
+};
+// Last labels of names that are never public. See IsSpecialUseLogHost.
+char g_sSpecialUseLogHosts[][] = {
+    "localhost", "local", "invalid", "test", "example",
+    "onion", "alt", "arpa", "internal"
+};
 // Commands whose values the owner-command log leaves out.
 char g_sOwnerSecretCommands[][] = {"sv_password", "sv_logsecret", "tv_password", "rcon_password"};
 char g_sPlayerAddressLogPath[PLATFORM_MAX_PATH];
@@ -211,6 +255,8 @@ public void OnPluginStart()
 
     LoadOwnerCommandAllowlist();
     g_mOwnerLogAddresses = new StringMap();
+    g_mOwnerLogHosts = new StringMap();
+    g_aLogHostLookups = new ArrayList(sizeof(LogHostLookup));
 
     BuildPath(Path_SM, g_sPlayerAddressLogPath, sizeof(g_sPlayerAddressLogPath), PLAYER_ADDRESS_LOG);
     AddGameLogHook(GameLog_MaskPlayerAddresses);
@@ -1103,18 +1149,12 @@ bool IsDecimalNumber(const char[] value, int maxDigits)
     return true;
 }
 
-// Parses "a.b.c.d:port" strictly and writes it back in canonical form. Host
-// names are refused: the engine would resolve them on the game thread.
-bool ParseLogAddress(const char[] value, char[] canonical, int canonicalSize, int octets[4])
+// Parses a dotted IPv4 address "a.b.c.d" strictly.
+bool ParseIPv4(const char[] value, int octets[4])
 {
-    char halves[2][32];
-    if (ExplodeString(value, ":", halves, sizeof(halves), sizeof(halves[])) != 2)
-        return false;
-
     char parts[4][8];
-    if (CharCount(value, ':') != 1
-        || CharCount(halves[0], '.') != 3
-        || ExplodeString(halves[0], ".", parts, sizeof(parts), sizeof(parts[])) != 4)
+    if (CharCount(value, '.') != 3
+        || ExplodeString(value, ".", parts, sizeof(parts), sizeof(parts[])) != 4)
     {
         return false;
     }
@@ -1127,18 +1167,104 @@ bool ParseLogAddress(const char[] value, char[] canonical, int canonicalSize, in
         if (octets[i] > 255)
             return false;
     }
+    return true;
+}
 
-    if (!IsDecimalNumber(halves[1], 5))
+bool ParseLogPort(const char[] value, int &port)
+{
+    if (!IsDecimalNumber(value, 5))
         return false;
-    int port = StringToInt(halves[1]);
-    if (port < 1 || port > 65535)
+    port = StringToInt(value);
+    return port >= 1 && port <= 65535;
+}
+
+// Parses "a.b.c.d:port" strictly and writes it back in canonical form. Host
+// names are not addresses here; see ParseLogHostAddress.
+bool ParseLogAddress(const char[] value, char[] canonical, int canonicalSize, int octets[4])
+{
+    char halves[2][32];
+    int port;
+    if (CharCount(value, ':') != 1
+        || ExplodeString(value, ":", halves, sizeof(halves), sizeof(halves[])) != 2
+        || !ParseIPv4(halves[0], octets)
+        || !ParseLogPort(halves[1], port))
+    {
         return false;
+    }
 
     Format(
         canonical, canonicalSize, "%d.%d.%d.%d:%d",
         octets[0], octets[1], octets[2], octets[3], port
     );
     return true;
+}
+
+// Parses "host.name:port" and writes the name in lowercase. A name is labels
+// of letters, digits, and inner hyphens, joined by dots, as DNS host names
+// are. Its last label must contain a letter, so that a mistyped IPv4 address
+// such as 203.0.113.256 is refused rather than looked up. One label alone,
+// such as localhost, parses, for IsSpecialUseLogHost to refuse.
+bool ParseLogHostAddress(const char[] value, char[] host, int hostSize, int &port)
+{
+    int colon = FindCharInString(value, ':');
+    if (colon <= 0
+        || colon > MAX_LOG_HOST_LENGTH
+        || colon >= hostSize
+        || CharCount(value, ':') != 1
+        || !ParseLogPort(value[colon + 1], port))
+    {
+        return false;
+    }
+
+    int labelLength = 0;
+    bool labelHasLetter = false;
+    for (int i = 0; i < colon; i++)
+    {
+        int character = value[i];
+        if (character == '.')
+        {
+            if (labelLength == 0 || value[i - 1] == '-')
+                return false;
+            labelLength = 0;
+            labelHasLetter = false;
+            continue;
+        }
+
+        bool isLetter = (character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z');
+        bool isDigit = character >= '0' && character <= '9';
+        if (!isLetter && !isDigit && character != '-')
+            return false;
+        if (character == '-' && labelLength == 0)
+            return false;
+        if (++labelLength > MAX_LOG_HOST_LABEL_LENGTH)
+            return false;
+        if (isLetter)
+            labelHasLetter = true;
+    }
+
+    if (labelLength == 0 || value[colon - 1] == '-' || !labelHasLetter)
+        return false;
+
+    strcopy(host, colon + 1, value);
+    for (int i = 0; host[i] != '\0'; i++)
+        host[i] = CharToLower(host[i]);
+    return true;
+}
+
+// Names that are never public: the special-use names DNS reserves (RFC 6761
+// and later), and private-use .internal. A public resolver should not answer
+// for them, but refusing them here gives a clear reason.
+bool IsSpecialUseLogHost(const char[] host)
+{
+    int lastDot = FindCharInString(host, '.', true);
+    int start = lastDot == -1 ? 0 : lastDot + 1;
+    for (int i = 0; i < sizeof(g_sSpecialUseLogHosts); i++)
+    {
+        if (StrEqual(host[start], g_sSpecialUseLogHosts[i]))
+            return true;
+    }
+    return false;
 }
 
 int CharCount(const char[] value, int character)
@@ -1361,25 +1487,57 @@ bool AreOwnerCommandArgumentsAllowed(
         char rawAddress[MAX_OWNER_COMMAND_LINE];
         char address[32];
         int octets[4];
+        char host[MAX_LOG_HOST_LENGTH + 1];
+        int port;
         GetOwnerCommandRawValue(commandLine, rawAddress, sizeof(rawAddress));
+        bool isHost = false;
         if (!ParseLogAddress(rawAddress, address, sizeof(address), octets))
         {
-            Format(message, messageSize, "%s takes one IPv4 address and port, such as 203.0.113.5:27100.", operation);
-            return false;
+            if (ParseLogHostAddress(rawAddress, host, sizeof(host), port))
+            {
+                if (isLogAdd && IsSpecialUseLogHost(host))
+                {
+                    strcopy(message, messageSize, "That host name is for local or special use. Logs can only be sent to a public IPv4 address.");
+                    return false;
+                }
+                isHost = FindCharInString(host, '.') != -1;
+            }
+
+            if (!isHost)
+            {
+                Format(
+                    message, messageSize,
+                    "%s takes one IPv4 address or host name and a port from 1 to 65535, such as 203.0.113.5:27100 or logs.example.com:27100.",
+                    operation
+                );
+                return false;
+            }
         }
 
         if (!isLogAdd)
             return true;
 
-        if (!IsPublicIPv4(octets))
+        if (isHost)
+        {
+            // The command reports a name that is already added or resolving.
+            if (FindOwnerLogHost(host, port, address, sizeof(address))
+                || FindLogHostLookup(host, port) != -1)
+                return true;
+
+            if (g_iLogHostLookupsRunning >= MAX_LOG_HOST_LOOKUPS)
+            {
+                strcopy(message, messageSize, "Too many host names are being looked up. Try again in a few seconds.");
+                return false;
+            }
+        }
+        else if (!IsPublicIPv4(octets))
         {
             strcopy(message, messageSize, "Logs can only be sent to a public IPv4 address.");
             return false;
         }
 
-        int unused;
-        if (!g_mOwnerLogAddresses.GetValue(address, unused)
-            && g_mOwnerLogAddresses.Size >= MAX_OWNER_LOG_ADDRESSES)
+        if ((isHost || !g_mOwnerLogAddresses.ContainsKey(address))
+            && CountOwnerLogReceivers() >= MAX_OWNER_LOG_ADDRESSES)
         {
             Format(
                 message, messageSize,
@@ -1395,12 +1553,16 @@ bool AreOwnerCommandArgumentsAllowed(
 }
 
 // Keeps g_mOwnerLogAddresses in step with the engine's list once a log
-// receiver command has passed its checks and is about to run.
+// receiver command given as an IPv4 address, or logaddress_delall, has passed
+// its checks and is about to run.
 void TrackOwnerLogAddress(const char[] operation, const char[] commandLine)
 {
     if (StrEqual(operation, "logaddress_delall"))
     {
         g_mOwnerLogAddresses.Clear();
+        g_mOwnerLogHosts.Clear();
+        // A lookup answered after this would add its receiver back.
+        g_aLogHostLookups.Clear();
         return;
     }
 
@@ -1418,7 +1580,377 @@ void TrackOwnerLogAddress(const char[] operation, const char[] commandLine)
     if (isLogAdd)
         g_mOwnerLogAddresses.SetValue(address, 1);
     else
-        g_mOwnerLogAddresses.Remove(address);
+        ForgetOwnerLogAddress(address);
+}
+
+// Receivers that are added, and host names still resolving, which will be.
+int CountOwnerLogReceivers()
+{
+    return g_mOwnerLogAddresses.Size + g_aLogHostLookups.Length;
+}
+
+// The engine keeps one entry per address, so removing an address also
+// removes every host name that was added as it.
+void ForgetOwnerLogAddress(const char[] address)
+{
+    g_mOwnerLogAddresses.Remove(address);
+
+    StringMapSnapshot hosts = g_mOwnerLogHosts.Snapshot();
+    char key[MAX_LOG_HOST_LENGTH + 8];
+    char hostAddress[32];
+    for (int i = 0; i < hosts.Length; i++)
+    {
+        hosts.GetKey(i, key, sizeof(key));
+        if (g_mOwnerLogHosts.GetString(key, hostAddress, sizeof(hostAddress))
+            && StrEqual(hostAddress, address))
+        {
+            g_mOwnerLogHosts.Remove(key);
+        }
+    }
+    delete hosts;
+}
+
+bool FindOwnerLogHost(const char[] host, int port, char[] address, int addressSize)
+{
+    char key[MAX_LOG_HOST_LENGTH + 8];
+    Format(key, sizeof(key), "%s:%d", host, port);
+    return g_mOwnerLogHosts.GetString(key, address, addressSize);
+}
+
+int FindLogHostLookup(const char[] host, int port)
+{
+    LogHostLookup lookup;
+    for (int i = 0; i < g_aLogHostLookups.Length; i++)
+    {
+        g_aLogHostLookups.GetArray(i, lookup);
+        if (lookup.port == port && StrEqual(lookup.host, host))
+            return i;
+    }
+    return -1;
+}
+
+int FindLogHostLookupById(int id)
+{
+    LogHostLookup lookup;
+    for (int i = 0; i < g_aLogHostLookups.Length; i++)
+    {
+        g_aLogHostLookups.GetArray(i, lookup);
+        if (lookup.id == id)
+            return i;
+    }
+    return -1;
+}
+
+// Returns true when commandLine is logaddress_add or logaddress_del with a
+// host name, which RunOwnerLogHostCommand handles instead of the engine.
+bool GetOwnerLogHostCommand(
+    const char[] operation,
+    const char[] commandLine,
+    char[] host,
+    int hostSize,
+    int &port
+)
+{
+    if (!StrEqual(operation, "logaddress_add") && !StrEqual(operation, "logaddress_del"))
+        return false;
+
+    char rawAddress[MAX_OWNER_COMMAND_LINE];
+    char address[32];
+    int octets[4];
+    GetOwnerCommandRawValue(commandLine, rawAddress, sizeof(rawAddress));
+    return !ParseLogAddress(rawAddress, address, sizeof(address), octets)
+        && ParseLogHostAddress(rawAddress, host, hostSize, port);
+}
+
+// Runs logaddress_add or logaddress_del for a host name that has passed the
+// argument checks. The engine never sees the name: an add starts a lookup
+// and returns, and a delete removes the address the add gave the engine.
+void RunOwnerLogHostCommand(
+    int client,
+    const char[] actorSteamID,
+    bool viaRcon,
+    const char[] operation,
+    const char[] host,
+    int port,
+    char[] response,
+    int responseSize,
+    char[] outcome,
+    int outcomeSize
+)
+{
+    strcopy(outcome, outcomeSize, "ok");
+    char address[32];
+    int pending = FindLogHostLookup(host, port);
+
+    if (StrEqual(operation, "logaddress_del"))
+    {
+        if (pending != -1)
+        {
+            g_aLogHostLookups.Erase(pending);
+            Format(response, responseSize, "Stopped looking up %s; no log receiver was added.", host);
+        }
+        else if (FindOwnerLogHost(host, port, address, sizeof(address)))
+        {
+            ForgetOwnerLogAddress(address);
+            char output[256];
+            ServerCommandEx(output, sizeof(output), "logaddress_del %s", address);
+            Format(response, responseSize, "Removed log receiver %s:%d (%s).", host, port, address);
+        }
+        else
+        {
+            Format(response, responseSize, "%s:%d is not a log receiver.", host, port);
+        }
+        return;
+    }
+
+    if (FindOwnerLogHost(host, port, address, sizeof(address)))
+    {
+        Format(response, responseSize, "%s:%d is already a log receiver, as %s.", host, port, address);
+        return;
+    }
+    if (pending != -1)
+    {
+        Format(response, responseSize, "%s is already being looked up.", host);
+        return;
+    }
+
+    LogHostLookup lookup;
+    lookup.id = ++g_iLastLogHostLookupId;
+    lookup.resolver = 0;
+    lookup.port = port;
+    lookup.userId = client > 0 ? GetClientUserId(client) : 0;
+    lookup.viaRcon = viaRcon;
+    strcopy(lookup.host, sizeof(lookup.host), host);
+    strcopy(lookup.actor, sizeof(lookup.actor), actorSteamID);
+    g_aLogHostLookups.PushArray(lookup);
+    RequestLogHostLookup(lookup);
+
+    strcopy(outcome, outcomeSize, "resolving");
+    Format(
+        response, responseSize,
+        "Looking up %s. It becomes a log receiver if it has a public IPv4 address; logaddress_list shows the receivers.",
+        host
+    );
+}
+
+void RequestLogHostLookup(const LogHostLookup lookup)
+{
+    HTTPRequest request = new HTTPRequest(g_sLogHostResolvers[lookup.resolver]);
+    request.AppendQueryParam("name", "%s", lookup.host);
+    request.AppendQueryParam("type", "A");
+    request.SetHeader("Accept", "application/dns-json");
+    request.ConnectTimeout = LOG_HOST_LOOKUP_TIMEOUT;
+    request.Timeout = LOG_HOST_LOOKUP_TIMEOUT;
+    request.Get(OnLogHostLookupResponse, lookup.id);
+    g_iLogHostLookupsRunning++;
+}
+
+enum LogHostAnswer
+{
+    LogHostAnswer_Found,
+    LogHostAnswer_NotPublic,
+    LogHostAnswer_NoAddress,
+    LogHostAnswer_NotFound,
+    LogHostAnswer_Failed
+}
+
+public void OnLogHostLookupResponse(HTTPResponse response, any data, const char[] error)
+{
+    g_iLogHostLookupsRunning--;
+
+    int index = FindLogHostLookupById(data);
+    if (index == -1)
+        return;
+
+    // Taken off the list first, so that a response the code below cannot read
+    // does not hold a receiver's place.
+    LogHostLookup lookup;
+    g_aLogHostLookups.GetArray(index, lookup);
+    g_aLogHostLookups.Erase(index);
+
+    int octets[4];
+    LogHostAnswer answer = ReadLogHostAnswer(response, error, lookup.host, octets);
+    if (answer == LogHostAnswer_Failed && lookup.resolver + 1 < sizeof(g_sLogHostResolvers))
+    {
+        lookup.resolver++;
+        g_aLogHostLookups.PushArray(lookup);
+        RequestLogHostLookup(lookup);
+        return;
+    }
+
+    FinishLogHostLookup(lookup, answer, octets);
+}
+
+void CopyIPv4(const int source[4], int destination[4])
+{
+    for (int i = 0; i < 4; i++)
+        destination[i] = source[i];
+}
+
+// Reads a DNS-over-HTTPS JSON answer. Found and NotPublic set octets to the
+// address used, which is the first; any address that is not public makes the
+// name NotPublic.
+LogHostAnswer ReadLogHostAnswer(
+    HTTPResponse response,
+    const char[] error,
+    const char[] host,
+    int octets[4]
+)
+{
+    if (error[0] != '\0')
+    {
+        LogError("[summon] Could not look up log receiver %s: %s", host, error);
+        return LogHostAnswer_Failed;
+    }
+    if (response.Status != HTTPStatus_OK)
+    {
+        LogError("[summon] Resolver returned HTTP %d for log receiver %s", response.Status, host);
+        return LogHostAnswer_Failed;
+    }
+
+    // The response frees its JSON; values taken from it must be freed here.
+    JSONObject reply = view_as<JSONObject>(response.Data);
+    if (reply == null || !reply.HasKey("Status"))
+        return LogHostAnswer_Failed;
+
+    // NXDOMAIN. Any other error, such as SERVFAIL, may pass.
+    int status = reply.GetInt("Status");
+    if (status == 3)
+        return LogHostAnswer_NotFound;
+    if (status != 0)
+        return LogHostAnswer_Failed;
+    if (!reply.HasKey("Answer"))
+        return LogHostAnswer_NoAddress;
+
+    // The answer lists the CNAME records the resolver followed, then the A
+    // records of the name they lead to.
+    JSONArray records = view_as<JSONArray>(reply.Get("Answer"));
+    LogHostAnswer answer = LogHostAnswer_NoAddress;
+    char data[64];
+    int recordOctets[4];
+    for (int i = 0; i < records.Length; i++)
+    {
+        JSONObject record = view_as<JSONObject>(records.Get(i));
+        bool isAddress = record.HasKey("type") && record.GetInt("type") == 1;
+        bool readable = isAddress
+            && record.GetString("data", data, sizeof(data))
+            && ParseIPv4(data, recordOctets);
+        delete record;
+
+        if (!isAddress)
+            continue;
+        if (!readable)
+        {
+            answer = LogHostAnswer_Failed;
+            break;
+        }
+
+        if (answer == LogHostAnswer_NoAddress)
+        {
+            CopyIPv4(recordOctets, octets);
+            answer = LogHostAnswer_Found;
+        }
+        if (!IsPublicIPv4(recordOctets))
+        {
+            CopyIPv4(recordOctets, octets);
+            answer = LogHostAnswer_NotPublic;
+            break;
+        }
+    }
+    delete records;
+    return answer;
+}
+
+// Adds the receiver a lookup found, or says why not. The command was answered
+// when the lookup started, so the result goes to the owner command log, and
+// to the owner's chat when they asked in game.
+void FinishLogHostLookup(const LogHostLookup lookup, LogHostAnswer answer, const int octets[4])
+{
+    char address[32];
+    Format(
+        address, sizeof(address), "%d.%d.%d.%d:%d",
+        octets[0], octets[1], octets[2], octets[3], lookup.port
+    );
+
+    char message[256];
+    char outcome[64];
+    bool added = false;
+    if (!ReservationAllowsOwnerServerCommands())
+    {
+        strcopy(outcome, sizeof(outcome), "reservation_inactive");
+        strcopy(message, sizeof(message), "The reservation is not active.");
+    }
+    else if (!g_cvDirectConnect.BoolValue)
+    {
+        strcopy(outcome, sizeof(outcome), "invalid_arguments");
+        strcopy(message, sizeof(message), "Log receivers need a reservation with direct connections enabled.");
+    }
+    else if (answer == LogHostAnswer_Found)
+    {
+        if (!g_mOwnerLogAddresses.ContainsKey(address)
+            && CountOwnerLogReceivers() >= MAX_OWNER_LOG_ADDRESSES)
+        {
+            strcopy(outcome, sizeof(outcome), "invalid_arguments");
+            Format(
+                message, sizeof(message),
+                "%s was not added: at most %d log receivers can be added.",
+                lookup.host, MAX_OWNER_LOG_ADDRESSES
+            );
+        }
+        else
+        {
+            char output[256];
+            ServerCommandEx(output, sizeof(output), "logaddress_add %s", address);
+            g_mOwnerLogAddresses.SetValue(address, 1);
+            char key[MAX_LOG_HOST_LENGTH + 8];
+            Format(key, sizeof(key), "%s:%d", lookup.host, lookup.port);
+            g_mOwnerLogHosts.SetString(key, address);
+            added = true;
+            Format(outcome, sizeof(outcome), "ok address=%s", address);
+            Format(message, sizeof(message), "Added log receiver %s as %s.", key, address);
+        }
+    }
+    else if (answer == LogHostAnswer_NotPublic)
+    {
+        Format(outcome, sizeof(outcome), "invalid_arguments address=%s", address);
+        Format(
+            message, sizeof(message),
+            "%s has the address %d.%d.%d.%d. Logs can only be sent to a public IPv4 address.",
+            lookup.host, octets[0], octets[1], octets[2], octets[3]
+        );
+    }
+    else if (answer == LogHostAnswer_NoAddress)
+    {
+        strcopy(outcome, sizeof(outcome), "no_ipv4_address");
+        Format(message, sizeof(message), "%s has no IPv4 address.", lookup.host);
+    }
+    else if (answer == LogHostAnswer_NotFound)
+    {
+        strcopy(outcome, sizeof(outcome), "host_not_found");
+        Format(message, sizeof(message), "%s does not exist.", lookup.host);
+    }
+    else
+    {
+        strcopy(outcome, sizeof(outcome), "lookup_failed");
+        Format(
+            message, sizeof(message),
+            "%s could not be looked up. Try again, or give its IPv4 address.",
+            lookup.host
+        );
+    }
+
+    char commandLine[MAX_LOG_HOST_LENGTH + 32];
+    Format(commandLine, sizeof(commandLine), "logaddress_add %s:%d", lookup.host, lookup.port);
+    LogOwnerCommand(lookup.actor, commandLine, lookup.viaRcon, outcome);
+
+    int client = GetClientOfUserId(lookup.userId);
+    if (client > 0 && IsClientInGame(client))
+    {
+        PrintToChat(
+            client, "\x01[\x07FF6600Summon\x01] %s%s",
+            added ? "" : "\x07FF6666", message
+        );
+    }
 }
 
 bool TryConsumeOwnerCommandCooldown()
@@ -1765,6 +2297,7 @@ Action HandleOwnerServerCommand(int client, int args, const char[] trigger)
     char errorCode[64];
     char errorMessage[256];
     bool succeeded = ExecuteOwnerServerCommand(
+        client,
         actorSteamID,
         false,
         operation,
@@ -1865,8 +2398,10 @@ bool OwnerCommandFailure(
 
 // viaRcon marks a command the agent's RCON gateway forwarded. Every route
 // shares one allowlist and one set of argument rules; RCON only skips the
-// cooldown, which the gateway replaces with its own rate limit.
+// cooldown, which the gateway replaces with its own rate limit. client is the
+// owner who typed the command in game, or 0 for the web console and RCON.
 bool ExecuteOwnerServerCommand(
+    int client,
     const char[] actorSteamID,
     bool viaRcon,
     char[] operation,
@@ -1981,6 +2516,19 @@ bool ExecuteOwnerServerCommand(
         return true;
     }
 
+    char logHost[MAX_LOG_HOST_LENGTH + 1];
+    int logPort;
+    if (GetOwnerLogHostCommand(operation, commandLine, logHost, sizeof(logHost), logPort))
+    {
+        char outcome[32];
+        RunOwnerLogHostCommand(
+            client, actorSteamID, viaRcon, operation, logHost, logPort,
+            response, responseSize, outcome, sizeof(outcome)
+        );
+        LogOwnerCommand(actorSteamID, commandLine, viaRcon, outcome);
+        return true;
+    }
+
     TrackOwnerLogAddress(operation, commandLine);
 
     // Match stock sm_rcon's synchronous execution/output behavior. The fixed
@@ -2089,6 +2637,7 @@ Action RunServerOwnerCommand(int args, bool viaRcon)
     char errorCode[64];
     char errorMessage[256];
     bool succeeded = ExecuteOwnerServerCommand(
+        0,
         actorSteamID,
         viaRcon,
         operation,

@@ -265,10 +265,22 @@ Owner-command execution has the following safeguards:
 - `sv_password` can be read or set to 1 to 64 characters without quotes, but
   not cleared.
 - `log` only turns logging on.
-- `logaddress_add` takes one public IPv4 address and port. Host names and
-  private, loopback, and reserved addresses are refused, and at most four
+- `logaddress_add` takes one public IPv4 address or host name, and a port.
+  Private, loopback, and reserved addresses are refused, and at most four
   receivers can be added. The log includes chat and Steam IDs; remove the six
   logging entries to keep it on the server.
+- The plugin looks up host names in the background over DNS-over-HTTPS. It tries
+  Google first and falls back to Cloudflare if the lookup fails.
+  The engine would resolve the name on the game thread, and
+  could use an address the checks never saw, so it is given only the address
+  the lookup found, after the same checks. The command answers before the
+  lookup ends, so the result goes to the owner-command log, and to the
+  owner's chat when they typed the command in game; `logaddress_list` shows
+  the receiver once it is added. If any of the name's addresses is not
+  public, the name is refused. Names that are never public, such as
+  `localhost` or ones ending in `.internal`, are refused straight away.
+  `logaddress_del` with the same name removes the address that
+  `logaddress_add` added, or stops a lookup that has not finished.
 - `logaddress_add` is refused unless the reservation has direct connections.
   Log packets come from the server's own address, which stays hidden when
   players connect through Steam's relays.
@@ -417,6 +429,10 @@ sends authenticated JSON requests to:
 | `POST /internal/reservations/<number>/end` | Owner-confirmed early end. |
 | `POST /internal/reservations/<number>/uploads` | logs.tf or demos.tf upload metadata. |
 | `GET /internal/reservations/<number>/maps` | The maps the reservation form offers, for the owner's Change Map menu and `maps` command. Fetched in the background at every map start and retried every minute after a failure. A 404 from an older backend waits for the next map. |
+
+Besides the backend, the plugin sends a DNS-over-HTTPS query to
+`dns.google` (or `cloudflare-dns.com` when that fails) for each log receiver
+an owner names by host name. The query holds only that name.
 
 Upload reporting listens for the optional `LogUploaded` and `DemoUploaded`
 forwards. URLs beginning with `http://` are normalized to HTTPS before they are
