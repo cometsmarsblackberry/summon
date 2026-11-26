@@ -4,6 +4,8 @@
 {% block meta_description %}{{ _('home.description', count=locations|length) }}{% endblock %}
 
 {% set can_reserve = user and not beta_locked and not active_reservation and cloud_configured %}
+{# Anyone may open the dialog to see the options; only can_reserve may submit it. #}
+{% set can_preview = cloud_configured %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-8" x-data="{
@@ -424,6 +426,39 @@
         // Keep the list still now and start with it on the next visit.
         this.saveNearContinent(this.continentOf(this.bestPingCode));
     },
+    canReserve: {{ 'true' if can_reserve else 'false' }},
+    // Kept across the Steam sign-in so the dialog reopens with the same choices
+    saveDraft() {
+        if (!this.loc) return;
+        try {
+            localStorage.setItem('reservation_draft', JSON.stringify({
+                ts: Date.now(),
+                location: this.loc.code,
+                first_map: this.firstMap,
+                config_file: this.selectedConfig,
+                enable_direct_connect: this.enableDirectConnect,
+                enable_logs_tf_upload: this.enableLogsTFUpload,
+                enable_demos_tf_upload: this.enableDemosTFUpload,
+            }));
+        } catch {}
+    },
+    restoreDraft() {
+        let draft = null;
+        try {
+            draft = JSON.parse(localStorage.getItem('reservation_draft'));
+            localStorage.removeItem('reservation_draft');
+        } catch {}
+        if (!this.canReserve || !draft || !(Date.now() - draft.ts < 30 * 60 * 1000)) return;
+        const loc = this.status[draft.location];
+        if (!loc || !loc.enabled || !loc.reservable) return;
+        // openModal resets the fields before its first await, so set them after it
+        this.openModal(draft.location, loc);
+        if (this.homeMaps.some(map => map.name === draft.first_map)) this.firstMap = draft.first_map;
+        if (typeof draft.config_file === 'string') this.selectedConfig = draft.config_file;
+        this.enableDirectConnect = !!draft.enable_direct_connect;
+        this.enableLogsTFUpload = draft.enable_logs_tf_upload !== false;
+        this.enableDemosTFUpload = draft.enable_demos_tf_upload !== false;
+    },
     async openModal(code, loc) {
         if (!loc.enabled || !loc.reservable) return;
         this.loc = { code, ...loc };
@@ -442,6 +477,7 @@
         this.captchaWidgetId = null;
         this.modalOpen = true;
         this.loadConfigs();
+        if (!this.canReserve) return;
         try {
             const resp = await fetch('/api/captcha/check');
             if (resp.ok) {
@@ -530,6 +566,7 @@
     }
     status = typeof _initialStatus !== 'undefined' ? _initialStatus : {};
     initLocationList();
+    {% if user %}restoreDraft();{% endif %}
     $nextTick(() => {
         if (pingDone) return;
         if (document.readyState === 'complete') runPings();
@@ -577,13 +614,18 @@
         <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-medium text-slate-500 uppercase tracking-wide">{{ _('home.server_status') }}</h2>
             {% if not user %}
-            <a href="/login" class="hover:opacity-80 transition-opacity">
-                {% if login_image_wide_url %}
-                <img src="{{ login_image_wide_url }}" alt="{{ _('nav.login_alt') }}" class="h-7">
-                {% else %}
-                <span class="text-sm text-slate-500 hover:text-slate-900">{{ _('nav.login_alt') }}</span>
+            <div class="flex items-center gap-3">
+                {% if can_preview %}
+                <span class="hidden sm:inline text-xs text-slate-300">{{ _('home.click_to_preview') }}</span>
                 {% endif %}
-            </a>
+                <a href="/login" class="hover:opacity-80 transition-opacity">
+                    {% if login_image_wide_url %}
+                    <img src="{{ login_image_wide_url }}" alt="{{ _('nav.login_alt') }}" class="h-7">
+                    {% else %}
+                    <span class="text-sm text-slate-500 hover:text-slate-900">{{ _('nav.login_alt') }}</span>
+                    {% endif %}
+                </a>
+            </div>
             {% elif can_reserve %}
             <span class="text-xs text-slate-300">{{ _('home.click_to_reserve') }}</span>
             {% endif %}
@@ -610,7 +652,7 @@
                     </template>
                     <template x-if="item.type === 'row'">
                         <div class="flex items-center justify-between py-2 border-b border-slate-200 -mx-1 px-1 rounded transition-colors"
-                            {% if can_reserve %} @click="openModal(item.entry[0], item.entry[1])"
+                            {% if can_preview %} @click="openModal(item.entry[0], item.entry[1])"
                             :class="item.entry[1].enabled && item.entry[1].reservable ? 'cursor-pointer hover:bg-slate-100' : 'opacity-50'"
                             {% endif %}>
                             <div class="flex items-center gap-2">
@@ -696,7 +738,7 @@
     {% endif %}
 
     <!-- Reservation dialog -->
-    {% if can_reserve %}
+    {% if can_preview %}
     <div x-show="modalOpen" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
         @keydown.escape.window="modalOpen = false">
         <div class="absolute inset-0 bg-black/60" @click="!submitting && (modalOpen = false)"></div>
@@ -884,11 +926,33 @@
                 </div>
             </div>
 
+            {% if user and active_reservation %}
+            <p class="mt-4 text-xs text-slate-500">{{ _('home.active_reservation') }}</p>
+            {% elif user and beta_locked %}
+            <p class="mt-4 text-xs text-slate-500">{{ _('home.beta_notice') }}</p>
+            {% endif %}
+
             <div class="flex gap-2 mt-5">
                 <button @click="modalOpen = false" :disabled="submitting"
                     class="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors">
                     {{ _('home.cancel') }}
                 </button>
+                {% if not user %}
+                <a href="/login" @click="saveDraft()" @auxclick="saveDraft()"
+                    class="flex-1 flex items-center justify-center px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm font-medium text-center transition-colors">
+                    {{ _('home.sign_in_to_reserve') }}
+                </a>
+                {% elif active_reservation %}
+                <a href="/reservations/{{ active_reservation.id }}"
+                    class="flex-1 flex items-center justify-center px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm font-medium text-center transition-colors">
+                    {{ _('home.view') }}
+                </a>
+                {% elif not can_reserve %}
+                <button disabled
+                    class="flex-1 px-4 py-2 bg-slate-100 cursor-not-allowed rounded-lg text-sm font-medium">
+                    {{ _('home.reserve') }}
+                </button>
+                {% else %}
                 <button @click="submit()" :disabled="submitting || !firstMap"
                     class="flex-1 px-4 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-100 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors">
                     <span x-show="!submitting">{{ _('home.reserve') }}</span>
@@ -904,6 +968,7 @@
                         {{ _('home.creating') }}
                     </span>
                 </button>
+                {% endif %}
             </div>
         </div>
     </div>
